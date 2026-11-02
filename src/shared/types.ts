@@ -139,9 +139,7 @@ export interface RuntimeBindings {
   SYS_SECRET?: string;
   API_METHOD?: 'webhook' | 'websocket' | string;
   LOG_RECORD?: string;
-  LOG_CLEANUP_SECRET?: string;
   LOG_CLEANUP_KV?: KVNamespaceLike;
-  SETUP_TOKEN?: string;
   PLATFORM?: 'cloudflare' | 'edgeone' | 'esa' | string;
   QQ_BOTS?: string;
   DB?: D1DatabaseLike;

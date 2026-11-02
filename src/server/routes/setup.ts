@@ -25,9 +25,9 @@ export function registerSetupRoutes(api: Hono<{ Bindings: RuntimeBindings }>): v
   });
 
   api.post('/setup', async (context) => {
-    if (!context.env.SETUP_TOKEN) return context.json({ error: 'setup_unavailable' }, 503);
+    if (!context.env.SYS_SECRET) return context.json({ error: 'setup_unavailable' }, 503);
     if (!context.env.DB) return context.json({ error: 'database_unavailable' }, 503);
-    if (!(await constantTimePasswordMatches(bearerToken(context.req.header('Authorization')), context.env.SETUP_TOKEN))) {
+    if (!(await constantTimePasswordMatches(bearerToken(context.req.header('Authorization')), context.env.SYS_SECRET))) {
       return context.json({ error: 'unauthorized' }, 401);
     }
 

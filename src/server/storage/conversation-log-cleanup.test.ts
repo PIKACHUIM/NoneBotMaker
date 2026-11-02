@@ -48,7 +48,7 @@ describe('conversation log cleanup route', () => {
       PLATFORM: 'edgeone',
       EDGEONE_BLOB: blob,
       LOG_CLEANUP_KV: cleanupKV,
-      LOG_CLEANUP_SECRET: 'scheduled-cleanup-secret',
+      SYS_SECRET: 'scheduled-cleanup-secret',
     };
     const router = createApiRouter();
     const first = await router.request('/internal/logs/purge', {
@@ -72,7 +72,7 @@ describe('conversation log cleanup route', () => {
   it('does not allow unauthenticated cleanup requests', async () => {
     const response = await createApiRouter().request('/internal/logs/purge', { method: 'POST' }, {
       PLATFORM: 'edgeone',
-      LOG_CLEANUP_SECRET: 'configured-secret',
+      SYS_SECRET: 'configured-secret',
     });
     expect(response.status).toBe(403);
   });

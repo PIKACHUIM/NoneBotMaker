@@ -45,12 +45,12 @@ describe('online setup routes', () => {
     });
   });
 
-  it.skipIf(!DatabaseSyncConstructor)('requires the setup token and initializes D1 idempotently', async () => {
+  it.skipIf(!DatabaseSyncConstructor)('requires SYS_SECRET and initializes D1 idempotently', async () => {
     const database = new DatabaseSyncConstructor!(':memory:');
     try {
       const bindings = {
         DB: d1Adapter(database),
-        SETUP_TOKEN: 'setup-token',
+        SYS_SECRET: 'setup-token',
       } as RuntimeBindings;
       const router = createApiRouter();
 

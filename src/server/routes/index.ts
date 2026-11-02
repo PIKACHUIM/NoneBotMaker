@@ -37,8 +37,8 @@ export function createApiRouter() {
     const isQQWebhook = QQ_WEBHOOK_PATH.test(path);
     const authorization = context.req.header('Authorization');
     const cleanupToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
-    const cleanupBearerAuthorized = isCleanupEndpoint && Boolean(context.env.LOG_CLEANUP_SECRET) &&
-      await constantTimePasswordMatches(cleanupToken, context.env.LOG_CLEANUP_SECRET ?? '');
+    const cleanupBearerAuthorized = isCleanupEndpoint && Boolean(context.env.SYS_SECRET) &&
+      await constantTimePasswordMatches(cleanupToken, context.env.SYS_SECRET ?? '');
 
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && isAdminEndpoint && !isQQWebhook && !cleanupBearerAuthorized && !isSameOrigin(context.req.raw)) {
       return context.json({ error: 'origin_check_failed' }, 403);

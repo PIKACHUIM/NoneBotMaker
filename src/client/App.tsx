@@ -299,7 +299,7 @@ function SetupPage() {
           <p>首次部署需要把基础表结构与迁移记录写入 D1。初始化脚本可重复执行，不会清空已有配置或对话数据。</p>
           <div className="setup-facts">
             <div><span>STORAGE</span><strong>D1 / SQLITE</strong></div>
-            <div><span>TOKEN</span><strong>SETUP_TOKEN</strong></div>
+            <div><span>TOKEN</span><strong>SYS_SECRET</strong></div>
             <div><span>EXECUTION</span><strong>IDEMPOTENT</strong></div>
           </div>
         </section>
@@ -334,10 +334,10 @@ function SetupPage() {
             <Form form={form} layout="vertical" requiredMark={false} onFinish={submit}>
               <Form.Item
                 name="token"
-                label="初始化令牌"
-                rules={[{ required: true, message: '请输入 SETUP_TOKEN' }]}
+                label="SYS_SECRET"
+                rules={[{ required: true, message: '请输入 SYS_SECRET' }]}
               >
-                <Input.Password size="large" autoComplete="off" placeholder="输入部署时配置的 SETUP_TOKEN" disabled={!connected} />
+                <Input.Password size="large" autoComplete="off" placeholder="输入部署时配置的 SYS_SECRET" disabled={!connected} />
               </Form.Item>
               <Button block type="primary" size="large" htmlType="submit" loading={busy} disabled={!connected} icon={<DatabaseOutlined />}>执行初始化</Button>
             </Form>

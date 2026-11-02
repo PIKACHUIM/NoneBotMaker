@@ -8,11 +8,11 @@ The Worker exposes a `scheduled` handler. Add a Cloudflare Cron Trigger for 03:0
 
 ## EdgeOne
 
-The official `edgeone.json` schedule schema supports `name`, `cron`, `path`, `method`, `payload`, and `timezone`, but does not document request headers or secret/environment interpolation. Do not put `LOG_CLEANUP_SECRET` in a checked-in schedule payload or URL, and do not add an unauthenticated cleanup path. Configure an external/console scheduler that can keep the secret out of source control and send `POST /api/internal/logs/purge` with `Authorization: Bearer <LOG_CLEANUP_SECRET>`. This route requires the dedicated secret and a cleanup KV namespace (`LOG_CLEANUP_KV`, `EDGEONE_KV`, or `KV`). The endpoint is throttled to one sweep per 24 hours per cleanup KV namespace.
+The official `edgeone.json` schedule schema supports `name`, `cron`, `path`, `method`, `payload`, and `timezone`, but does not document request headers or secret/environment interpolation. Do not put `SYS_SECRET` in a checked-in schedule payload or URL, and do not add an unauthenticated cleanup path. Configure an external/console scheduler that can keep the secret out of source control and send `POST /api/internal/logs/purge` with `Authorization: Bearer <SYS_SECRET>`. This route requires `SYS_SECRET` and a cleanup KV namespace (`LOG_CLEANUP_KV`, `EDGEONE_KV`, or `KV`). The endpoint is throttled to one sweep per 24 hours per cleanup KV namespace.
 
 ## ESA and local deployments
 
-ESA has no in-repository scheduled runtime handler configured. Use an external scheduler capable of secret-managed Authorization headers to call the same authenticated endpoint, and configure `LOG_CLEANUP_KV` (or the platform's KV binding) plus `LOG_CLEANUP_SECRET`. Local deployments can invoke the endpoint with the same Bearer secret or an authenticated same-origin admin session. Keep the cleanup secret independent from `SYS_PASSWD` and `SYS_SECRET`.
+ESA has no in-repository scheduled runtime handler configured. Use an external scheduler capable of secret-managed Authorization headers to call the same authenticated endpoint, and configure `LOG_CLEANUP_KV` (or the platform's KV binding) plus `SYS_SECRET`. Local deployments can invoke the endpoint with the same Bearer secret or an authenticated same-origin admin session. `SYS_SECRET` is shared with session signing and credential encryption, so the scheduler must protect it accordingly.
 
 The endpoint returns only `{ "deleted": number, "skipped": boolean }`; it never returns log contents. On a failed sweep, the throttle marker is removed so the next scheduled invocation can retry. EdgeOne Blob logs are physically deleted by the sweep; KV-backed logs additionally expire through their storage TTL.
 

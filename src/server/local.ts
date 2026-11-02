@@ -5,7 +5,6 @@ import type { RuntimeBindings } from '../shared/types';
 const bindings: RuntimeBindings = {
   SYS_PASSWD: process.env.SYS_PASSWD,
   SYS_SECRET: process.env.SYS_SECRET,
-  SETUP_TOKEN: process.env.SETUP_TOKEN,
   LOG_RECORD: process.env.LOG_RECORD ?? 'false',
   API_METHOD: process.env.API_METHOD ?? 'webhook',
   PLATFORM: 'local',

@@ -73,22 +73,15 @@ npx wrangler deploy --dry-run --config wrangler.jsonc --outdir .wrangler-build
 npx wrangler deploy --config wrangler.jsonc
 ```
 
-配置管理员密码、会话/加密共享密钥和初始化令牌。下面命令会逐项提示输入值；生成器可分别运行，为每个 secret 生成独立高熵值：
+配置管理员密码和系统密钥。下面命令会逐项提示输入值；生成器可分别运行，为两个 secret 生成独立高熵值：
 
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 npx wrangler secret put SYS_PASSWD --config wrangler.jsonc
 npx wrangler secret put SYS_SECRET --config wrangler.jsonc
-npx wrangler secret put SETUP_TOKEN --config wrangler.jsonc
 ```
 
-若需要调用手动日志清理 endpoint，再设置独立的 bearer secret：
-
-```sh
-npx wrangler secret put LOG_CLEANUP_SECRET --config wrangler.jsonc
-```
-
-`SYS_PASSWD` 用于管理台登录，`SYS_SECRET` 同时用于 session 签名和账号/provider 凭据加密，`SETUP_TOKEN` 只用于在线初始化数据库。`LOG_CLEANUP_SECRET` 仅用于手动清理接口，需与上述密钥保持独立。若从旧版本升级且数据库中已有加密凭据，将 `SYS_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
+`SYS_PASSWD` 用于管理台登录；`SYS_SECRET` 同时用于 session 签名、账号/provider 凭据加密、在线数据库初始化授权和手动日志清理授权。因为 `SYS_SECRET` 权限较高，外部调度器必须安全保存它。若从旧版本升级且数据库中已有加密凭据，将 `SYS_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
 
 ### 在线数据库初始化
 
@@ -98,7 +91,7 @@ npx wrangler secret put LOG_CLEANUP_SECRET --config wrangler.jsonc
 https://<your-worker-domain>/setup
 ```
 
-输入 `SETUP_TOKEN` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0003` 的 D1 migration 标记。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。初始化完成后即可登录管理台。
+输入 `SYS_SECRET` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0003` 的 D1 migration 标记。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。初始化完成后即可登录管理台。
 
 也可以在部署前使用 CLI 应用迁移：
 
@@ -106,11 +99,7 @@ https://<your-worker-domain>/setup
 npx wrangler d1 migrations apply your-d1-database-name --remote --config wrangler.jsonc
 ```
 
-两种方式二选一即可；在线初始化会记录迁移标记，之后 CLI 不会重复执行已应用的迁移。完成初始化后可通过以下命令移除一次性初始化令牌：
-
-```sh
-npx wrangler secret delete SETUP_TOKEN --config wrangler.jsonc
-```
+两种方式二选一即可；在线初始化会记录迁移标记，之后 CLI 不会重复执行已应用的迁移。
 
 ### WebSocket Gateway（仅 Cloudflare）
 
@@ -134,7 +123,7 @@ ESA 构建产物为 `dist/edge-routine/index.js`：
 npm run build:esa
 ```
 
-在 ESA 运行时绑定 `ESA_KV` 或 `KV`。两个平台均需在运行时环境/密钥设置中配置 `SYS_PASSWD` 和 `SYS_SECRET`；需要手动清理日志时再配置独立的 `LOG_CLEANUP_SECRET`。
+在 ESA 运行时绑定 `ESA_KV` 或 `KV`。两个平台均需在运行时环境/密钥设置中配置 `SYS_PASSWD` 和 `SYS_SECRET`；需要手动清理日志时复用 `SYS_SECRET` 授权。
 
 EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服务返回 `503 websocket_unsupported`。聊天上下文和成本按与记录仓库相同的 adapter 持久化；缺少对应持久化 binding 时会报部署配置错误，不会退化为跨请求内存状态。
 
@@ -148,11 +137,11 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 
 `LOG_RECORD` 默认关闭。启用后记录入站消息和机器人回复，保留 30 天；日志不包含 bot/client secret 或 HTTP headers。
 
-Cloudflare Worker 保留 `scheduled` handler，可在控制台为 Worker 添加每日 `03:00 UTC` 的 Cron Trigger；若账户的 Cron 配额已满，可不配置 Cron，改用外部调度器调用下方受保护接口。`wrangler.example.jsonc` 默认不声明 Cron，避免免费账户触发配额导致部署失败。其他平台或手动触发时，配置 `LOG_CLEANUP_SECRET` 及清理节流所需 KV，然后调用：
+Cloudflare Worker 保留 `scheduled` handler，可在控制台为 Worker 添加每日 `03:00 UTC` 的 Cron Trigger；若账户的 Cron 配额已满，可不配置 Cron，改用外部调度器调用下方受保护接口。`wrangler.example.jsonc` 默认不声明 Cron，避免免费账户触发配额导致部署失败。其他平台或手动触发时，配置清理节流所需 KV，然后使用 `SYS_SECRET` 调用：
 
 ```sh
 curl -X POST "$SERVICE_URL/api/internal/logs/purge" \
-  -H "Authorization: Bearer $LOG_CLEANUP_SECRET"
+  -H "Authorization: Bearer $SYS_SECRET"
 ```
 
 手动 endpoint 每 24 小时最多实际清理一次；Cloudflare 的 scheduled cleanup 不经过该节流 endpoint。
