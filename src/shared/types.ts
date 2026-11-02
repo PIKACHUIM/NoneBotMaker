@@ -136,7 +136,7 @@ export interface KVNamespaceLike {
 
 export interface RuntimeBindings {
   SYS_PASSWD?: string;
-  DB_SECRET?: string;
+  SYS_SECRET?: string;
   API_METHOD?: 'webhook' | 'websocket' | string;
   LOG_RECORD?: string;
   LOG_CLEANUP_SECRET?: string;

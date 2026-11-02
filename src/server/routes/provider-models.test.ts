@@ -48,7 +48,7 @@ describe('provider model discovery', () => {
     };
     const bindings: RuntimeBindings = {
       SYS_PASSWD: 'admin-password',
-      DB_SECRET: 'test-db-secret',
+      SYS_SECRET: 'test-db-secret',
       PLATFORM: 'local',
       KV: kv,
     };

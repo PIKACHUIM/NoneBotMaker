@@ -8,7 +8,7 @@ export function readBoolean(value: string | undefined, fallback = false): boolea
 export function validateRuntime(bindings: RuntimeBindings): string[] {
   const errors: string[] = [];
   if (!bindings.SYS_PASSWD) errors.push('SYS_PASSWD must be configured.');
-  if (!bindings.DB_SECRET) errors.push('DB_SECRET must be configured.');
+  if (!bindings.SYS_SECRET) errors.push('SYS_SECRET must be configured.');
   const method = bindings.API_METHOD ?? 'webhook';
   if (method !== 'webhook' && method !== 'websocket') {
     errors.push('API_METHOD must be webhook or websocket.');

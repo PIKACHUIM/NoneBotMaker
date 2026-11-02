@@ -78,7 +78,7 @@ npx wrangler deploy --config wrangler.jsonc
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 npx wrangler secret put SYS_PASSWD --config wrangler.jsonc
-npx wrangler secret put DB_SECRET --config wrangler.jsonc
+npx wrangler secret put SYS_SECRET --config wrangler.jsonc
 npx wrangler secret put SETUP_TOKEN --config wrangler.jsonc
 ```
 
@@ -88,7 +88,7 @@ npx wrangler secret put SETUP_TOKEN --config wrangler.jsonc
 npx wrangler secret put LOG_CLEANUP_SECRET --config wrangler.jsonc
 ```
 
-`SYS_PASSWD` 用于管理台登录，`DB_SECRET` 同时用于 session 签名和账号/provider 凭据加密，`SETUP_TOKEN` 只用于在线初始化数据库。`LOG_CLEANUP_SECRET` 仅用于手动清理接口，需与上述密钥保持独立。若从旧版本升级且数据库中已有加密凭据，将 `DB_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
+`SYS_PASSWD` 用于管理台登录，`SYS_SECRET` 同时用于 session 签名和账号/provider 凭据加密，`SETUP_TOKEN` 只用于在线初始化数据库。`LOG_CLEANUP_SECRET` 仅用于手动清理接口，需与上述密钥保持独立。若从旧版本升级且数据库中已有加密凭据，将 `SYS_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
 
 ### 在线数据库初始化
 
@@ -134,7 +134,7 @@ ESA 构建产物为 `dist/edge-routine/index.js`：
 npm run build:esa
 ```
 
-在 ESA 运行时绑定 `ESA_KV` 或 `KV`。两个平台均需在运行时环境/密钥设置中配置 `SYS_PASSWD` 和 `DB_SECRET`；需要手动清理日志时再配置独立的 `LOG_CLEANUP_SECRET`。
+在 ESA 运行时绑定 `ESA_KV` 或 `KV`。两个平台均需在运行时环境/密钥设置中配置 `SYS_PASSWD` 和 `SYS_SECRET`；需要手动清理日志时再配置独立的 `LOG_CLEANUP_SECRET`。
 
 EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服务返回 `503 websocket_unsupported`。聊天上下文和成本按与记录仓库相同的 adapter 持久化；缺少对应持久化 binding 时会报部署配置错误，不会退化为跨请求内存状态。
 

@@ -1,5 +1,5 @@
 SYS_PASSWD=replace-with-a-long-random-password
-DB_SECRET=replace-with-an-independent-32-byte-base64-secret
+SYS_SECRET=replace-with-an-independent-32-byte-base64-secret
 SETUP_TOKEN=replace-with-a-separate-one-time-setup-token
 API_METHOD=webhook
 LOG_RECORD=false

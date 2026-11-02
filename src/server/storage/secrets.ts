@@ -17,8 +17,8 @@ function isCredentialsMask(value: unknown): boolean {
 }
 
 async function encryptionKey(bindings: RuntimeBindings): Promise<CryptoKey> {
-  if (!bindings.DB_SECRET) throw new Error('DB_SECRET is not configured.');
-  const material = new TextEncoder().encode(bindings.DB_SECRET);
+  if (!bindings.SYS_SECRET) throw new Error('SYS_SECRET is not configured.');
+  const material = new TextEncoder().encode(bindings.SYS_SECRET);
   const digest = await crypto.subtle.digest('SHA-256', material);
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }

@@ -22,8 +22,8 @@ function base64UrlDecode(value: string): Uint8Array {
 }
 
 async function hmacKey(bindings: RuntimeBindings): Promise<CryptoKey> {
-  const secret = bindings.DB_SECRET;
-  if (!secret) throw new Error('DB_SECRET must be configured.');
+  const secret = bindings.SYS_SECRET;
+  if (!secret) throw new Error('SYS_SECRET must be configured.');
   const material = await crypto.subtle.digest('SHA-256', encoder.encode(`nonebotmaker/session/v1:${secret}`));
   return crypto.subtle.importKey('raw', material, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }

@@ -12,7 +12,7 @@ The official `edgeone.json` schedule schema supports `name`, `cron`, `path`, `me
 
 ## ESA and local deployments
 
-ESA has no in-repository scheduled runtime handler configured. Use an external scheduler capable of secret-managed Authorization headers to call the same authenticated endpoint, and configure `LOG_CLEANUP_KV` (or the platform's KV binding) plus `LOG_CLEANUP_SECRET`. Local deployments can invoke the endpoint with the same Bearer secret or an authenticated same-origin admin session. Keep the cleanup secret independent from `SYS_PASSWD` and `DB_SECRET`.
+ESA has no in-repository scheduled runtime handler configured. Use an external scheduler capable of secret-managed Authorization headers to call the same authenticated endpoint, and configure `LOG_CLEANUP_KV` (or the platform's KV binding) plus `LOG_CLEANUP_SECRET`. Local deployments can invoke the endpoint with the same Bearer secret or an authenticated same-origin admin session. Keep the cleanup secret independent from `SYS_PASSWD` and `SYS_SECRET`.
 
 The endpoint returns only `{ "deleted": number, "skipped": boolean }`; it never returns log contents. On a failed sweep, the throttle marker is removed so the next scheduled invocation can retry. EdgeOne Blob logs are physically deleted by the sweep; KV-backed logs additionally expire through their storage TTL.
 

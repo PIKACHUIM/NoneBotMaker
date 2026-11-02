@@ -40,7 +40,7 @@ describe('conversation log filtering', () => {
     ];
     const bindings: RuntimeBindings = {
       SYS_PASSWD: 'admin-password',
-      DB_SECRET: 'test-db-secret',
+      SYS_SECRET: 'test-db-secret',
       LOG_RECORD: 'true',
       PLATFORM: 'local',
       KV: createKV(logs),

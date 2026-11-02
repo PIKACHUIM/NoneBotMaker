@@ -22,8 +22,8 @@ describe('admin route protections', () => {
 
   it('requires an authenticated session for logs and provider discovery', async () => {
     const router = createApiRouter();
-    const logs = await router.request('/logs', {}, { DB_SECRET: 'test-secret' });
-    const models = await router.request('/providers/provider-1/models', { method: 'POST' }, { DB_SECRET: 'test-secret' });
+    const logs = await router.request('/logs', {}, { SYS_SECRET: 'test-secret' });
+    const models = await router.request('/providers/provider-1/models', { method: 'POST' }, { SYS_SECRET: 'test-secret' });
 
     expect(logs.status).toBe(401);
     expect(models.status).toBe(403);
