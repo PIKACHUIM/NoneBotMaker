@@ -6,6 +6,7 @@ import {
   type ProviderChatRequest,
   type ProviderRecord,
 } from '../../../shared/types';
+import { CONTEXT_MESSAGE_LIMIT_DEFAULT, CONTEXT_MESSAGE_LIMIT_MAX } from '../../../shared/plugin-catalog';
 import { readBoolean } from '../../env';
 import type { ConversationLogRepository } from '../../storage/conversation-log-repository';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
@@ -27,8 +28,6 @@ export interface ChatbotHandlerDependencies {
 }
 
 export type ChatbotMessageHandler = (account: QQAccountContext, message: QQGroupMessage) => Promise<void>;
-
-const CONTEXT_MESSAGE_LIMIT = 20;
 
 export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): ChatbotMessageHandler {
   const random = dependencies.random ?? Math.random;
@@ -55,11 +54,23 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     const provider = await dependencies.findProvider(group.providerId);
     if (!provider?.enabled) return;
 
-    const context = await dependencies.getRecentContext(group.id, CONTEXT_MESSAGE_LIMIT);
+    const pluginConfig = account.pluginConfig ?? {};
+    const configuredLimit = Number(pluginConfig.contextMessageLimit);
+    const contextLimit = Number.isFinite(configuredLimit)
+      ? Math.min(CONTEXT_MESSAGE_LIMIT_MAX, Math.max(0, Math.trunc(configuredLimit)))
+      : CONTEXT_MESSAGE_LIMIT_DEFAULT;
+    const includeHistory = pluginConfig.includeHistory !== false;
+    const context = includeHistory && contextLimit > 0
+      ? await dependencies.getRecentContext(group.id, contextLimit)
+      : [];
+    const configuredPrompt = typeof pluginConfig.defaultSystemPrompt === 'string'
+      ? pluginConfig.defaultSystemPrompt.trim()
+      : '';
+    const systemPrompt = group.systemPrompt.trim() || configuredPrompt;
     const request: ProviderChatRequest = {
       model: group.model,
       messages: [
-        ...(group.systemPrompt.trim() ? [{ role: 'system' as const, content: group.systemPrompt }] : []),
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
         ...context,
         { role: 'user', content: message.text },
       ],

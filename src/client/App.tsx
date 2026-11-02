@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   App as AntApp,
@@ -15,6 +15,7 @@ import {
   Menu,
   Pagination,
   Popconfirm,
+  Segmented,
   Select,
   Skeleton,
   Space,
@@ -45,6 +46,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MessageOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -64,11 +66,20 @@ import type {
   DatabaseSetupStatus,
   GroupRecord,
   JsonObject,
+  Language,
   LibraryKind,
   LibraryRecord,
+  PluginFieldDefinition,
   PluginRecord,
   ProviderRecord,
 } from '../shared/types';
+import {
+  defaultFieldValues,
+  normalizeFieldValues,
+  pluginDefinition,
+  pluginDefinitions,
+} from '../shared/plugin-catalog';
+import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
 
 const { Title, Text, Paragraph } = Typography;
@@ -82,10 +93,10 @@ type LogFilters = { q?: string; accountId?: string; groupId?: string; from?: str
 const libraryNames: Record<LibraryKind, string> = { skills: 'Skills', mcps: 'MCP', rules: 'Rules' };
 const pageTitles: Record<AdminPage, { title: string; eyebrow: string; description: string }> = {
   overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '查看 Bot 实例、群聊与扩展能力的当前配置。' },
-  plugins: { title: '插件', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
-  accounts: { title: '机器人账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
+  plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
+  accounts: { title: '账号管理', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '逐群设置模型、回复策略、白名单与扩展能力。' },
-  integrations: { title: '接口与能力', eyebrow: 'CONNECTORS / 05', description: '配置 OpenAI 兼容模型供应商，以及 Skills、MCP 和 Rules。' },
+  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 OpenAI 兼容模型供应商，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
 
@@ -125,15 +136,9 @@ function parseTimestamp(value?: string) {
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
-function parseJson(value: string | undefined, label: string): JsonObject {
-  if (!value?.trim()) return {};
-  const result: unknown = JSON.parse(value);
-  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error(`${label}必须是 JSON 对象`);
-  return result as JsonObject;
-}
-
 function StatusTag({ enabled }: { enabled: boolean }) {
-  return <Tag className={`status-tag ${enabled ? 'status-on' : 'status-off'}`} bordered={false}>{enabled ? '运行中' : '已停用'}</Tag>;
+  const { tr } = useI18n();
+  return <Tag className={`status-tag ${enabled ? 'status-on' : 'status-off'}`} bordered={false}>{enabled ? tr('运行中') : tr('已停用')}</Tag>;
 }
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
@@ -352,6 +357,7 @@ function SetupPage() {
 
 function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => void }) {
   const { message } = AntApp.useApp();
+  const { language, setLanguage, tr } = useI18n();
   const [mobileNav, setMobileNav] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -445,12 +451,12 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   }, [page, refreshKey, logPage, logFilters]);
 
   const navItems = [
-    { key: 'overview', icon: <BookOutlined />, label: '运行总览' },
-    { key: 'plugins', icon: <CodeOutlined />, label: '插件' },
-    { key: 'accounts', icon: <RobotOutlined />, label: '机器人账号' },
-    { key: 'groups', icon: <TeamOutlined />, label: '群聊策略' },
-    { key: 'integrations', icon: <ApiOutlined />, label: '接口与能力' },
-    { key: 'logs', icon: <MessageOutlined />, label: '对话日志' },
+    { key: 'overview', icon: <BookOutlined />, label: tr('运行总览') },
+    { key: 'plugins', icon: <CodeOutlined />, label: tr('插件') },
+    { key: 'accounts', icon: <RobotOutlined />, label: tr('机器人账号') },
+    { key: 'groups', icon: <TeamOutlined />, label: tr('群聊策略') },
+    { key: 'integrations', icon: <ApiOutlined />, label: tr('接口与能力') },
+    { key: 'logs', icon: <MessageOutlined />, label: tr('对话日志') },
   ];
   const title = pageTitles[page];
   const setPage = (key: string) => {
@@ -473,31 +479,43 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
 
   return (
     <Layout className="admin-layout">
-      <Sider className={`admin-sider${mobileNav ? ' admin-sider-open' : ''}`} width={252} theme="dark" aria-label="管理台导航">
+      <Sider className={`admin-sider${mobileNav ? ' admin-sider-open' : ''}`} width={252} theme="dark" aria-label={tr('管理台导航')}>
         <a className="sider-brand" href="#/admin/overview"><BrandMark /></a>
         <div className="workspace-label"><span className="workspace-dot" /> LOCAL CONTROL PLANE</div>
         <Menu mode="inline" selectedKeys={[page]} items={navItems} onClick={({ key }) => setPage(key)} className="admin-menu" />
         <div className="sider-bottom">
-          <div className="sider-status"><span className="online-dot" /><span>管理会话已验证</span><span className="sider-status-meta">SECURE</span></div>
-          <button type="button" className="logout-button" onClick={() => void logout()}><LogoutOutlined /> 退出管理台</button>
+          <div className="sider-status"><span className="online-dot" /><span>{tr('管理会话已验证')}</span><span className="sider-status-meta">SECURE</span></div>
+          <button type="button" className="logout-button" onClick={() => void logout()}><LogoutOutlined /> {tr('退出管理台')}</button>
           <div className="sider-version"><span>NONEBOTMAKER</span><span>CONSOLE / 0.2</span></div>
         </div>
       </Sider>
-      {mobileNav && <button type="button" aria-label="关闭导航" className="nav-backdrop" onClick={() => setMobileNav(false)} />}
+      {mobileNav && <button type="button" aria-label={tr('关闭导航')} className="nav-backdrop" onClick={() => setMobileNav(false)} />}
       <Layout className="admin-main-layout">
         <header className="admin-topbar">
-          <button type="button" aria-label="打开导航菜单" className="mobile-menu-button" onClick={() => setMobileNav(true)}><MenuFoldOutlined /></button>
-          <div className="breadcrumbs"><span>CONTROL PLANE</span><span>/</span><strong>{title.title}</strong></div>
-          <div className="topbar-right"><span className="topbar-health"><i /> API SESSION ACTIVE</span><Tooltip title="刷新当前数据"><Button type="text" aria-label="刷新当前数据" icon={<ReloadOutlined />} onClick={refresh} /></Tooltip><a href="#/" className="topbar-home">公开首页 <ArrowRightOutlined /></a></div>
+          <button type="button" aria-label={tr('打开导航菜单')} className="mobile-menu-button" onClick={() => setMobileNav(true)}><MenuFoldOutlined /></button>
+          <div className="breadcrumbs"><span>CONTROL PLANE</span><span>/</span><strong>{tr(title.title)}</strong></div>
+          <div className="topbar-right">
+            <Segmented
+              className="language-switch"
+              size="small"
+              value={language}
+              onChange={(value) => setLanguage(value as Language)}
+              options={[{ label: '中', value: 'zh' }, { label: 'EN', value: 'en' }]}
+              aria-label={tr('选择语言')}
+            />
+            <span className="topbar-health"><i /> API SESSION ACTIVE</span>
+            <Tooltip title={tr('刷新当前数据')}><Button type="text" aria-label={tr('刷新当前数据')} icon={<ReloadOutlined />} onClick={refresh} /></Tooltip>
+            <a href="#/" className="topbar-home">{tr('公开首页')} <ArrowRightOutlined /></a>
+          </div>
         </header>
         <Content className="admin-content">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line" /> {title.eyebrow}</div><Title level={1}>{title.title}</Title><Paragraph>{title.description}</Paragraph></div>
+            <div><div className="eyebrow"><span className="eyebrow-line" /> {title.eyebrow}</div><Title level={1}>{tr(title.title)}</Title><Paragraph>{tr(title.description)}</Paragraph></div>
             <div className="page-heading-actions"><span className="sync-stamp">LAST REQUEST<br /><b>LIVE API DATA</b></span></div>
           </div>
           {actionError && <Alert className="action-alert" type="error" showIcon closable onClose={() => setActionError('')} message={actionError} />}
-          {loading ? <div className="page-loading" role="status" aria-label="正在读取服务端配置"><span>正在读取服务端配置…</span><div className="page-skeleton"><Skeleton active title paragraph={{ rows: 3 }} /><Skeleton active title paragraph={{ rows: 2 }} /></div></div> : loadError ? (
-            <div className="page-error"><Alert type="error" showIcon message="无法读取此页面数据" description={loadError} action={<Button size="small" icon={<ReloadOutlined />} onClick={refresh}>重试</Button>} /></div>
+          {loading ? <div className="page-loading" role="status" aria-label={tr('正在读取服务端配置…')}><span>{tr('正在读取服务端配置…')}</span><div className="page-skeleton"><Skeleton active title paragraph={{ rows: 3 }} /><Skeleton active title paragraph={{ rows: 2 }} /></div></div> : loadError ? (
+            <div className="page-error"><Alert type="error" showIcon message={tr('无法读取此页面数据')} description={loadError} action={<Button size="small" icon={<ReloadOutlined />} onClick={refresh}>{tr('重试')}</Button>} /></div>
           ) : (
             <>
               {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} onNavigate={setPage} />}
@@ -518,39 +536,41 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
 function OverviewPage({ plugins, accounts, groups, providers, onNavigate }: {
   plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; providers: ProviderRecord[]; onNavigate: (page: string) => void;
 }) {
+  const { tr } = useI18n();
   const activeAccounts = accounts.filter((item) => item.enabled).length;
   const activeGroups = groups.filter((item) => item.enabled).length;
   const activePlugins = plugins.filter((item) => item.enabled).length;
   return (
     <div className="overview-page">
       <section className="overview-banner">
-        <div><span className="banner-label"><span className="online-dot" /> CONFIGURATION PLANE / ONLINE</span><h2>一眼掌握运行边界。</h2><p>数据直接读取当前管理 API；新增和修改配置后将以服务端结果为准。</p></div>
+        <div><span className="banner-label"><span className="online-dot" /> CONFIGURATION PLANE / ONLINE</span><h2>{tr('一眼掌握运行边界。')}</h2><p>{tr('数据直接读取当前管理 API；新增和修改配置后将以服务端结果为准。')}</p></div>
         <div className="banner-code"><span>ENVIRONMENT</span><strong>EDGE / SERVERLESS</strong><span>CONTROL MODEL</span><strong>PLUGIN → ACCOUNT → GROUP</strong></div>
       </section>
       <div className="metric-grid">
-        <MetricTile index="01" label="启用插件" value={activePlugins} total={plugins.length} icon={<CodeOutlined />} onClick={() => onNavigate('plugins')} />
-        <MetricTile index="02" label="运行账号" value={activeAccounts} total={accounts.length} icon={<RobotOutlined />} onClick={() => onNavigate('accounts')} />
-        <MetricTile index="03" label="启用群聊" value={activeGroups} total={groups.length} icon={<TeamOutlined />} onClick={() => onNavigate('groups')} />
-        <MetricTile index="04" label="模型供应商" value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('integrations')} />
+        <MetricTile index="01" label={tr('启用插件')} value={activePlugins} total={plugins.length} icon={<CodeOutlined />} onClick={() => onNavigate('plugins')} />
+        <MetricTile index="02" label={tr('运行账号')} value={activeAccounts} total={accounts.length} icon={<RobotOutlined />} onClick={() => onNavigate('accounts')} />
+        <MetricTile index="03" label={tr('启用群聊')} value={activeGroups} total={groups.length} icon={<TeamOutlined />} onClick={() => onNavigate('groups')} />
+        <MetricTile index="04" label={tr('模型供应商')} value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('integrations')} />
       </div>
       <div className="overview-columns">
-        <Card className="section-card overview-flow" title={<SectionTitle index="A" title="配置拓扑" subtitle="CONFIGURATION GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>管理群聊 <ArrowRightOutlined /></Button>}>
-          <div className="flow-row"><span className="flow-icon"><CodeOutlined /></span><div><strong>插件</strong><small>逻辑与接入协议</small></div><b>{plugins.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><RobotOutlined /></span><div><strong>账号</strong><small>平台机器人实例</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>群聊</strong><small>按群独立策略</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
+        <Card className="section-card overview-flow" title={<SectionTitle index="A" title={tr('配置拓扑')} subtitle="CONFIGURATION GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>{tr('管理群聊')} <ArrowRightOutlined /></Button>}>
+          <div className="flow-row"><span className="flow-icon"><CodeOutlined /></span><div><strong>{tr('插件')}</strong><small>{tr('逻辑与接入协议')}</small></div><b>{plugins.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><RobotOutlined /></span><div><strong>{tr('账号')}</strong><small>{tr('平台机器人实例')}</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>{tr('群聊')}</strong><small>{tr('按群独立策略')}</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
           <div className="flow-caption"><span>PLUGIN</span><i /><span>MULTI-ACCOUNT</span><i /><span>GROUP POLICY</span></div>
         </Card>
-        <Card className="section-card overview-quick" title={<SectionTitle index="B" title="快捷操作" subtitle="CONTROL SHORTCUTS" />}>
-          <button className="quick-row" onClick={() => onNavigate('plugins')}><span><CodeOutlined /></span><div><strong>检查插件运行状态</strong><small>查看已注册插件与启停配置</small></div><ArrowRightOutlined /></button>
-          <button className="quick-row" onClick={() => onNavigate('accounts')}><span><PlusOutlined /></span><div><strong>添加机器人实例</strong><small>创建账号并关联现有插件</small></div><ArrowRightOutlined /></button>
-          <button className="quick-row" onClick={() => onNavigate('integrations')}><span><SettingOutlined /></span><div><strong>配置模型与工具</strong><small>供应商、Skills、MCP、Rules</small></div><ArrowRightOutlined /></button>
+        <Card className="section-card overview-quick" title={<SectionTitle index="B" title={tr('快捷操作')} subtitle="CONTROL SHORTCUTS" />}>
+          <button className="quick-row" onClick={() => onNavigate('plugins')}><span><CodeOutlined /></span><div><strong>{tr('检查插件运行状态')}</strong><small>{tr('查看已注册插件与启停配置')}</small></div><ArrowRightOutlined /></button>
+          <button className="quick-row" onClick={() => onNavigate('accounts')}><span><PlusOutlined /></span><div><strong>{tr('添加机器人实例')}</strong><small>{tr('创建账号并关联现有插件')}</small></div><ArrowRightOutlined /></button>
+          <button className="quick-row" onClick={() => onNavigate('integrations')}><span><SettingOutlined /></span><div><strong>{tr('配置模型与工具')}</strong><small>{tr('供应商、Skills、MCP、Rules')}</small></div><ArrowRightOutlined /></button>
         </Card>
       </div>
-      <div className="overview-bottom"><span><CheckCircleOutlined /> SERVICE DATA</span><strong>配置来源为管理 REST API，不提供演示数据回退。</strong><span>LOG RETENTION / 30 DAYS</span></div>
+      <div className="overview-bottom"><span><CheckCircleOutlined /> SERVICE DATA</span><strong>{tr('配置来源为管理 REST API，不提供演示数据回退。')}</strong><span>LOG RETENTION / 30 DAYS</span></div>
     </div>
   );
 }
 
 function MetricTile({ index, label, value, total, icon, onClick }: { index: string; label: string; value: number; total: number; icon: React.ReactNode; onClick: () => void }) {
-  return <button className="metric-tile" onClick={onClick}><div className="metric-top"><span>{index} / {label}</span><span className="metric-icon">{icon}</span></div><div className="metric-value">{String(value).padStart(2, '0')}<small> / {String(total).padStart(2, '0')}</small></div><div className="metric-bottom"><span>已启用 / 总数</span><ArrowRightOutlined /></div></button>;
+  const { tr } = useI18n();
+  return <button className="metric-tile" onClick={onClick}><div className="metric-top"><span>{index} / {label}</span><span className="metric-icon">{icon}</span></div><div className="metric-value">{String(value).padStart(2, '0')}<small> / {String(total).padStart(2, '0')}</small></div><div className="metric-bottom"><span>{tr('已启用 / 总数')}</span><ArrowRightOutlined /></div></button>;
 }
 
 function SectionTitle({ index, title, subtitle }: { index: string; title: string; subtitle: string }) {
@@ -562,7 +582,8 @@ function PageToolbar({ count, noun, action, onCreate }: { count: number; noun: s
 }
 
 function EmptyTable({ title, description, onCreate, action }: { title: string; description: string; onCreate?: () => void; action?: string }) {
-  return <div className="empty-state"><div className="empty-index">NO RECORD / 000</div><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span><b>{title}</b><br />{description}</span>} />{onCreate && <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>{action ?? '创建第一条'}</Button>}</div>;
+  const { tr } = useI18n();
+  return <div className="empty-state"><div className="empty-index">NO RECORD / 000</div><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span><b>{title}</b><br />{description}</span>} />{onCreate && <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>{action ?? tr('创建第一条')}</Button>}</div>;
 }
 
 function useDrawer() {
@@ -573,118 +594,185 @@ function useDrawer() {
   return { open, editingId, edit, close };
 }
 
+function PluginFieldInput({ field, editing = false, id, value, checked, onChange }: {
+  field: PluginFieldDefinition;
+  editing?: boolean;
+  id?: string;
+  value?: string | number;
+  checked?: boolean;
+  onChange?: (...args: unknown[]) => void;
+}) {
+  const { tr, localized } = useI18n();
+  const placeholder = field.placeholder ? localized(field.placeholder) : undefined;
+  if (field.type === 'boolean') {
+    return <Switch id={id} checked={checked} onChange={onChange} checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} />;
+  }
+  if (field.type === 'number') {
+    return <InputNumber id={id} value={value as number | undefined} onChange={onChange} className="full-width" min={field.min} max={field.max} step={field.step} placeholder={placeholder} />;
+  }
+  if (field.secret) {
+    return <Input.Password id={id} value={value as string | undefined} onChange={onChange} autoComplete="new-password" placeholder={editing ? tr('留空保持现有值') : placeholder} />;
+  }
+  if (field.multiline) {
+    return <Input.TextArea id={id} value={value as string | undefined} onChange={onChange} rows={3} placeholder={placeholder} />;
+  }
+  return <Input id={id} value={value as string | undefined} onChange={onChange} placeholder={placeholder} />;
+}
+
+function PluginField({ field, path, editing = false }: { field: PluginFieldDefinition; path: Array<string | number>; editing?: boolean }) {
+  const { tr, localized } = useI18n();
+  return (
+    <Form.Item
+      name={path}
+      label={localized(field.label)}
+      extra={localized(field.description)}
+      valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
+      rules={field.required && !editing ? [{ required: true, message: tr('此字段为必填项') }] : undefined}
+    >
+      <PluginFieldInput field={field} editing={editing} />
+    </Form.Item>
+  );
+}
+
 function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr, localized } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
+  const selectedType = (Form.useWatch('type', form) as string | undefined) ?? editing?.type ?? CHATBOT_PLUGIN_TYPE;
+  const definition = pluginDefinition(selectedType);
+  const configFields = definition?.configFields ?? [];
+  const typeOptions = pluginDefinitions().map((item) => ({ value: item.type, label: `${localized(item.name)} · ${item.type}` }));
+  if (selectedType && !definition) typeOptions.push({ value: selectedType, label: selectedType });
+
+  const initialConfig = useMemo(() => ({
+    ...defaultFieldValues(pluginDefinition(editing?.type)?.configFields ?? []),
+    ...(editing?.config ?? {}),
+  }), [editing?.type, editing?.config]);
+
   useEffect(() => {
     if (!drawer.open) return;
-    form.setFieldsValue({ name: editing?.name ?? '', type: editing?.type ?? CHATBOT_PLUGIN_TYPE, description: editing?.description ?? '', enabled: editing?.enabled ?? true, configJson: JSON.stringify(editing?.config ?? {}, null, 2) });
-  }, [drawer.open, editing, form]);
+    const timer = window.setTimeout(() => {
+      form.setFieldsValue({
+        name: editing?.name ?? '',
+        type: editing?.type ?? CHATBOT_PLUGIN_TYPE,
+        description: editing?.description ?? '',
+        enabled: editing?.enabled ?? true,
+        config: initialConfig,
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [drawer.open, editing, form, initialConfig]);
 
-  const save = async (values: { name: string; type: string; description?: string; enabled: boolean; configJson?: string }) => {
+  const save = async (values: { name: string; type: string; description?: string; enabled: boolean; config?: JsonObject }) => {
     setSaving(true);
     try {
-      await api.savePlugin({ name: values.name, type: values.type, description: values.description ?? '', enabled: values.enabled, config: parseJson(values.configJson, '插件配置') }, editing?.id);
+      const currentDefinition = pluginDefinition(values.type);
+      const config = currentDefinition
+        ? normalizeFieldValues(currentDefinition.configFields, values.config)
+        : values.config ?? {};
+      await api.savePlugin({ name: values.name, type: values.type, description: values.description ?? '', enabled: values.enabled, config }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
     finally { setSaving(false); }
   };
   const columns: TableColumnsType<PluginRecord> = [
-    { title: '插件', dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><CodeOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
-    { title: '类型', dataIndex: 'type', key: 'type', render: (value: string) => <code className="type-code">{value}</code> },
-    { title: '实例', key: 'accounts', render: (_, row) => <span className="table-mono">{(row as PluginRecord & { accountCount?: number }).accountCount ?? '—'}</span> },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: '更新于', dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title="编辑"><Button aria-label={`编辑 ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name}启用状态`} onChange={(enabled) => void api.savePlugin({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`删除插件“${row.name}”？`} description="关联实例可能无法继续运行。" okText="删除" cancelText="取消" onConfirm={() => void api.deletePlugin(row.id).then(onRefresh).catch(onError)}><Button aria-label={`删除 ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('插件'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><CodeOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
+    { title: tr('类型'), dataIndex: 'type', key: 'type', render: (value: string) => <code className="type-code">{value}</code> },
+    { title: tr('实例'), key: 'accounts', render: (_, row) => <span className="table-mono">{(row as PluginRecord & { accountCount?: number }).accountCount ?? '—'}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.savePlugin({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除插件')}“${row.name}”？`} description={tr('关联实例可能无法继续运行。')} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePlugin(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  return <section className="data-page"><PageToolbar count={data.length} noun="PLUGINS" action="新增插件" onCreate={() => drawer.edit()} />
-    {data.length ? <Table<PluginRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title="还没有插件" description="创建插件记录，再配置平台账号与群聊。" onCreate={() => drawer.edit()} action="创建插件" />}
-    <Drawer title={<DrawerTitle label="PLUGIN RECORD" title={editing ? '编辑插件' : '新增插件'} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>取消</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>保存插件</Button></div>}>
-      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <Form.Item name="name" label="插件名称" rules={[{ required: true, message: '请输入插件名称' }]}><Input placeholder="例如：群聊助手" /></Form.Item>
-        <Form.Item name="type" label="插件类型" rules={[{ required: true, message: '请输入插件类型' }]}><Input placeholder={CHATBOT_PLUGIN_TYPE} /></Form.Item>
-        <Form.Item name="description" label="说明"><Input.TextArea rows={3} placeholder="描述插件用途" /></Form.Item>
-        <Form.Item name="configJson" label="插件配置（JSON）" extra="插件配置可以携带账号 schema；必须是 JSON 对象。"><Input.TextArea rows={8} className="json-input" /></Form.Item>
-        <Form.Item name="enabled" label="启用状态" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+  return <section className="data-page"><PageToolbar count={data.length} noun="PLUGINS" action={tr('新增插件')} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<PluginRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有插件')} description={tr('创建插件记录，再配置平台账号与群聊。')} onCreate={() => drawer.edit()} action={tr('创建插件')} />}
+    <Drawer title={<DrawerTitle label="PLUGIN RECORD" title={editing ? tr('编辑插件') : tr('新增插件')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存插件')}</Button></div>}>
+      <Form
+        key={editing?.id ?? 'new-plugin'}
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        onFinish={save}
+        initialValues={{
+          name: editing?.name ?? '',
+          type: editing?.type ?? CHATBOT_PLUGIN_TYPE,
+          description: editing?.description ?? '',
+          enabled: editing?.enabled ?? true,
+          config: initialConfig,
+        }}
+      >
+        <Form.Item name="name" label={tr('插件名称')} rules={[{ required: true, message: tr('请输入插件名称') }]}><Input placeholder={tr('例如：群聊助手')} /></Form.Item>
+        <Form.Item name="type" label={tr('插件类型')} rules={[{ required: true, message: tr('请输入插件类型') }]}><Select options={typeOptions} placeholder={CHATBOT_PLUGIN_TYPE} /></Form.Item>
+        <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={3} placeholder={tr('描述插件用途')} /></Form.Item>
+        {configFields.length ? <div className="schema-fields">
+          <div className="form-section-heading"><span>{tr('插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>
+          {configFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} />)}
+        </div> : <Alert type="info" showIcon message={tr('该插件类型没有声明可配置项。')} />}
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </section>;
 }
 
-interface SchemaField { key: string; label: string; description?: string; type?: string; enum?: unknown[]; required?: boolean; format?: string; group?: string }
-function pluginSchema(plugin?: PluginRecord): SchemaField[] {
-  if (!plugin) return [];
-  const config = plugin.config as Record<string, unknown>;
-  const schema = (config.accountSchema ?? config.schema) as { properties?: Record<string, Record<string, unknown>>; fields?: Record<string, Record<string, unknown>> } | undefined;
-  const fields = schema?.properties ?? schema?.fields;
-  if (!fields || typeof fields !== 'object') return [];
-  return Object.entries(fields).map(([key, definition]) => ({
-    key,
-    label: typeof definition.title === 'string' ? definition.title : key,
-    description: typeof definition.description === 'string' ? definition.description : undefined,
-    type: typeof definition.type === 'string' ? definition.type : undefined,
-    enum: Array.isArray(definition.enum) ? definition.enum : undefined,
-    required: Array.isArray((schema as { required?: unknown[] }).required) && ((schema as { required: unknown[] }).required.includes(key)),
-    format: typeof definition.format === 'string' ? definition.format : undefined,
-    group: typeof definition.group === 'string' ? definition.group : undefined,
-  }));
-}
-
-function SchemaInput({ field }: { field: SchemaField }) {
-  if (field.enum) return <Select options={field.enum.map((value) => ({ label: String(value), value }))} />;
-  if (field.type === 'boolean') return <Switch />;
-  if (field.type === 'number' || field.type === 'integer') return <InputNumber className="full-width" />;
-  return field.format === 'password' || /token|secret|password|key/i.test(field.key) ? <Input.Password /> : <Input />;
-}
-
 function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRecord[]; data: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
   const selectedPluginId = Form.useWatch('pluginId', form) as string | undefined;
   const selectedPlugin = plugins.find((item) => item.id === selectedPluginId);
-  const fields = pluginSchema(selectedPlugin);
+  const definition = pluginDefinition(selectedPlugin?.type);
+  const credentialFields = definition?.credentialFields ?? [];
   useEffect(() => {
     if (!drawer.open) return;
-    form.setFieldsValue({ pluginId: editing?.pluginId, protocol: editing?.protocol ?? '', name: editing?.name ?? '', enabled: editing?.enabled ?? true, credentialsJson: JSON.stringify(editing?.credentials ?? {}, null, 2), configJson: JSON.stringify(editing?.config ?? {}, null, 2), credentials: editing?.credentials ?? {}, config: editing?.config ?? {} });
+    form.setFieldsValue({
+      pluginId: editing?.pluginId,
+      protocol: editing?.protocol ?? '',
+      name: editing?.name ?? '',
+      enabled: editing?.enabled ?? true,
+      credentials: {},
+    });
   }, [drawer.open, editing, form]);
   const save = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
-      const credentials = fields.length ? values.credentials as JsonObject ?? {} : parseJson(values.credentialsJson as string | undefined, '账号凭据');
-      const config = fields.length ? values.config as JsonObject ?? {} : parseJson(values.configJson as string | undefined, '账号配置');
-      await api.saveAccount({ pluginId: values.pluginId as string, protocol: String(values.protocol ?? ''), name: String(values.name), enabled: Boolean(values.enabled), credentials, config }, editing?.id);
+      const credentials = values.credentials as JsonObject ?? {};
+      await api.saveAccount({
+        pluginId: values.pluginId as string,
+        protocol: String(values.protocol ?? ''),
+        name: String(values.name),
+        enabled: Boolean(values.enabled),
+        credentials,
+        config: editing?.config ?? {},
+      }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
     finally { setSaving(false); }
   };
   const columns: TableColumnsType<BotAccountRecord> = [
-    { title: '机器人账号', dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><RobotOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
-    { title: '插件', dataIndex: 'pluginId', key: 'pluginId', render: (id: string) => plugins.find((item) => item.id === id)?.name ?? id },
-    { title: '协议', dataIndex: 'protocol', key: 'protocol', render: (value: string) => value || '—' },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: '群聊', key: 'groups', render: (_, row) => <span className="table-mono">{row.config.groupCount as number ?? '—'}</span> },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title="编辑"><Button aria-label={`编辑 ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name}启用状态`} onChange={(enabled) => void api.saveAccount({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`删除账号“${row.name}”？`} okText="删除" cancelText="取消" onConfirm={() => void api.deleteAccount(row.id).then(onRefresh).catch(onError)}><Button aria-label={`删除 ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('机器人账号'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><RobotOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
+    { title: tr('插件'), dataIndex: 'pluginId', key: 'pluginId', render: (id: string) => plugins.find((item) => item.id === id)?.name ?? id },
+    { title: tr('平台协议'), dataIndex: 'protocol', key: 'protocol', render: (value: string) => value || '—' },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('群聊'), key: 'groups', render: (_, row) => <span className="table-mono">{row.config.groupCount as number ?? '—'}</span> },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveAccount({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除账号')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteAccount(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  return <section className="data-page"><PageToolbar count={data.length} noun="BOT ACCOUNTS" action="新增账号" onCreate={() => drawer.edit()} />
-    {data.length ? <Table<BotAccountRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title="还没有机器人账号" description="选择插件并创建账号实例，可为每个平台分别保存凭据。" onCreate={() => drawer.edit()} action="新增机器人账号" />}
-    <Drawer title={<DrawerTitle label="BOT INSTANCE" title={editing ? '编辑机器人账号' : '新增机器人账号'} />} width={600} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>取消</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>保存账号</Button></div>}>
+  return <section className="data-page"><PageToolbar count={data.length} noun="BOT ACCOUNTS" action={tr('新增账号')} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<BotAccountRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有机器人账号')} description={tr('选择插件并创建账号实例，可为每个平台分别保存凭据。')} onCreate={() => drawer.edit()} action={tr('新增机器人账号')} />}
+    <Drawer title={<DrawerTitle label="BOT INSTANCE" title={editing ? tr('编辑机器人账号') : tr('新增机器人账号')} />} width={600} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存账号')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <Form.Item name="name" label="实例名称" rules={[{ required: true, message: '请输入实例名称' }]}><Input placeholder="例如：主群机器人" /></Form.Item>
-        <Form.Item name="pluginId" label="关联插件" rules={[{ required: true, message: '请选择插件' }]}><Select placeholder="选择插件" options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-        {!plugins.length && <Alert type="warning" showIcon message="当前没有插件记录，请先创建插件。" />}
-        <Form.Item name="protocol" label="平台协议"><Input placeholder="例如：qq / discord" /></Form.Item>
-        {fields.length ? <div className="schema-fields"><div className="form-section-heading"><span>PLUGIN SCHEMA</span><small>{selectedPlugin?.name} / {fields.length} FIELDS</small></div>{fields.map((field) => {
-          const group = field.group === 'config' ? 'config' : 'credentials';
-          return <Form.Item key={`${group}-${field.key}`} name={[group, field.key]} label={field.label} valuePropName={field.type === 'boolean' ? 'checked' : 'value'} rules={field.required ? [{ required: true, message: `请填写${field.label}` }] : undefined} extra={field.description}><SchemaInput field={field} /></Form.Item>;
-        })}<Form.Item name="configJson" label="附加配置（JSON）" extra="仅用于插件 schema 之外的其他配置。"><Input.TextArea rows={5} className="json-input" /></Form.Item></div> : <>
-          <Form.Item name="credentialsJson" label="账号凭据（JSON）" extra="密钥只写入服务端；编辑时读取当前接口返回内容。"><Input.TextArea rows={5} className="json-input" /></Form.Item>
-          <Form.Item name="configJson" label="实例配置（JSON）"><Input.TextArea rows={5} className="json-input" /></Form.Item>
-        </>}
-        <Form.Item name="enabled" label="启用状态" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+        <Form.Item name="name" label={tr('实例名称')} rules={[{ required: true, message: tr('请输入实例名称') }]}><Input placeholder={tr('例如：主群机器人')} /></Form.Item>
+        <Form.Item name="pluginId" label={tr('关联插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+        {!plugins.length && <Alert type="warning" showIcon message={tr('当前没有插件记录，请先创建插件。')} />}
+        <Form.Item name="protocol" label={tr('平台协议')}><Input placeholder={tr('例如：qq / discord')} /></Form.Item>
+        {credentialFields.length ? <div className="schema-fields">
+          <div className="form-section-heading"><span>{tr('账号字段')}</span><small>{definition?.type} / {credentialFields.length} FIELDS</small></div>
+          {credentialFields.map((field) => <PluginField key={field.key} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
+          {editing && <p className="form-note">{tr('敏感字段留空会保留现有值。')}</p>}
+        </div> : <Alert type="info" showIcon message={tr('该插件类型没有声明账号字段。')} />}
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </section>;
@@ -693,6 +781,7 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
 function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError }: {
   groups: GroupRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
+  const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -715,69 +804,71 @@ function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError
     finally { setSaving(false); }
   };
   const columns: TableColumnsType<GroupRecord> = [
-    { title: '群聊', dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><TeamOutlined /></span><span><strong>{name || row.externalId}</strong><small>{row.externalId} / {row.id}</small></span></div> },
-    { title: '账号', dataIndex: 'accountId', key: 'accountId', render: (id: string) => accounts.find((item) => item.id === id)?.name ?? id },
-    { title: '模型', dataIndex: 'model', key: 'model', render: (model: string, row) => <span className="model-cell">{model || '未配置'}<small>{providers.find((item) => item.id === row.providerId)?.name ?? ''}</small></span> },
-    { title: '非 @ 回复率', dataIndex: 'nonMentionReplyRate', key: 'nonMentionReplyRate', render: (value: number) => <span className="table-mono">{((value ?? DEFAULT_NON_MENTION_REPLY_RATE) * 100).toFixed(0)}%</span> },
-    { title: '白名单', dataIndex: 'whitelistEnabled', key: 'whitelistEnabled', render: (enabled: boolean, row) => <span>{enabled ? `启用 / ${row.whitelistUserIds.length} 人` : '未启用'}</span> },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title="编辑"><Button aria-label={`编辑 ${row.name || row.externalId}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name}启用状态`} onChange={(enabled) => void api.saveGroup({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`删除群聊“${row.name || row.externalId}”？`} okText="删除" cancelText="取消" onConfirm={() => void api.deleteGroup(row.id).then(onRefresh).catch(onError)}><Button aria-label="删除群聊" danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('群聊'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><TeamOutlined /></span><span><strong>{name || row.externalId}</strong><small>{row.externalId} / {row.id}</small></span></div> },
+    { title: tr('账号'), dataIndex: 'accountId', key: 'accountId', render: (id: string) => accounts.find((item) => item.id === id)?.name ?? id },
+    { title: tr('模型'), dataIndex: 'model', key: 'model', render: (model: string, row) => <span className="model-cell">{model || tr('未配置')}<small>{providers.find((item) => item.id === row.providerId)?.name ?? ''}</small></span> },
+    { title: tr('非 @ 回复率'), dataIndex: 'nonMentionReplyRate', key: 'nonMentionReplyRate', render: (value: number) => <span className="table-mono">{((value ?? DEFAULT_NON_MENTION_REPLY_RATE) * 100).toFixed(0)}%</span> },
+    { title: tr('白名单'), dataIndex: 'whitelistEnabled', key: 'whitelistEnabled', render: (enabled: boolean, row) => <span>{enabled ? `${tr('启用')} / ${row.whitelistUserIds.length}` : tr('未启用')}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name || row.externalId}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveGroup({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name || row.externalId}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteGroup(row.id).then(onRefresh).catch(onError)}><Button aria-label={tr('删除')} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   const choices = (kind: LibraryKind) => libraries[kind].filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }));
-  return <section className="data-page"><PageToolbar count={groups.length} noun="GROUP POLICIES" action="新增群聊策略" onCreate={() => drawer.edit()} />
-    {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title="还没有群聊策略" description="新增群聊并为其绑定 AI 模型、回复策略和工具。" onCreate={() => drawer.edit()} action="新增群聊策略" />}
-    <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? '编辑群聊策略' : '新增群聊策略'} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>取消</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>保存策略</Button></div>}>
+  return <section className="data-page"><PageToolbar count={groups.length} noun="GROUP POLICIES" action={tr('新增群聊策略')} onCreate={() => drawer.edit()} />
+    {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有群聊策略')} description={tr('新增群聊并为其绑定 AI 模型、回复策略和工具。')} onCreate={() => drawer.edit()} action={tr('新增群聊策略')} />}
+    <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? tr('编辑群聊策略') : tr('新增群聊策略')} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <div className="form-grid two-cols">
-          <Form.Item name="accountId" label="机器人账号" rules={[{ required: true, message: '请选择机器人账号' }]}><Select placeholder="选择账号" options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-          <Form.Item name="externalId" label="平台群聊 ID" rules={[{ required: true, message: '请输入群聊 ID' }]}><Input placeholder="例如：123456789" /></Form.Item>
+          <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+          <Form.Item name="externalId" label={tr('平台群聊 ID')} rules={[{ required: true, message: tr('请输入群聊 ID') }]}><Input placeholder="123456789" /></Form.Item>
         </div>
-        <Form.Item name="name" label="群聊名称"><Input placeholder="可选的群聊备注名称" /></Form.Item>
+        <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
         <div className="form-section-heading"><span>AI MODEL</span><small>PER-GROUP ROUTING</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="providerId" label="模型供应商" rules={[{ required: true, message: '请选择模型供应商' }]}><Select placeholder="选择供应商" options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-          <Form.Item name="model" label="模型"><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder="选择或输入模型 ID" filterOption /></Form.Item>
+          <Form.Item name="providerId" label={tr('模型供应商')} rules={[{ required: true, message: tr('请选择模型供应商') }]}><Select placeholder={tr('选择供应商')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+          <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
         </div>
-        <Form.Item name="systemPrompt" label="系统提示词"><Input.TextArea rows={5} placeholder="描述该群聊中 AI 的角色、边界与回复风格" /></Form.Item>
+        <Form.Item name="systemPrompt" label={tr('系统提示词')}><Input.TextArea rows={5} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
         <div className="form-grid two-cols">
-          <Form.Item name="reasoningEffort" label="思考强度"><Select options={[{ label: '低 / low', value: 'low' }, { label: '中 / medium', value: 'medium' }, { label: '高 / high', value: 'high' }]} /></Form.Item>
-          <Form.Item name="nonMentionReplyRate" label="未 @ 回复概率"><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
+          <Form.Item name="reasoningEffort" label={tr('思考强度')}><Select options={[{ label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
+          <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
         </div>
-        <div className="form-note">默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。</div>
+        <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>TOKEN PRICING</span><small>USD / 1M TOKENS</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="inputCostPerMillion" label="输入成本"><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
-          <Form.Item name="outputCostPerMillion" label="输出成本"><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
+          <Form.Item name="inputCostPerMillion" label={tr('输入成本')}><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
+          <Form.Item name="outputCostPerMillion" label={tr('输出成本')}><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
         </div>
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="dailyCostLimit" label="每日限额"><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
-          <Form.Item name="monthlyCostLimit" label="每月限额"><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
-          <Form.Item name="totalCostLimit" label="总限额"><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
+          <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
+          <Form.Item name="monthlyCostLimit" label={tr('每月限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
+          <Form.Item name="totalCostLimit" label={tr('总限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
         </div>
-        <div className="form-note">限额使用 USD 计价；数值 0 表示不设限。任一预算到达限额后，运行时将根据策略停止额外模型请求。</div>
+        <div className="form-note">{tr('限额使用 USD 计价；数值 0 表示不设限。任一预算到达限额后，运行时将根据策略停止额外模型请求。')}</div>
         <div className="form-section-heading"><span>ACCESS CONTROL</span><small>OPTIONAL WHITELIST</small></div>
-        <Form.Item name="whitelistEnabled" label="启用用户白名单" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
-        <Form.Item name="whitelistText" label="允许的用户 ID" extra="使用空格或逗号分隔。白名单关闭时此列表不会生效。"><Input.TextArea rows={3} placeholder="user-id-1, user-id-2" /></Form.Item>
+        <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+        <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('使用空格或逗号分隔。白名单关闭时此列表不会生效。')}><Input.TextArea rows={3} placeholder="user-id-1, user-id-2" /></Form.Item>
         <div className="form-section-heading"><span>EXTENSIONS</span><small>SKILLS / MCP / RULES</small></div>
-        <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder="选择可用 Skills" options={choices('skills')} /></Form.Item>
-        <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder="选择 MCP 服务" options={choices('mcps')} /></Form.Item>
-        <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder="选择规则集" options={choices('rules')} /></Form.Item>
-        <Form.Item name="enabled" label="启用此群聊策略" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+        <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
+        <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
+        <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
+        <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </section>;
 }
 
 function IntegrationsPage({ providers, libraries, onRefresh, onError }: { providers: ProviderRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr } = useI18n();
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
-    { key: 'providers', label: <span><ApiOutlined /> 模型供应商 <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
 }
 
 function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -802,7 +893,7 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
     try {
       const foundModels = await api.discoverModels(editing.id);
       form.setFieldValue('models', [...new Set([...(models ?? []), ...foundModels])]);
-      if (foundModels.length === 0) onError(new Error('供应商未返回可用模型'));
+      if (foundModels.length === 0) onError(new Error(tr('供应商未返回可用模型')));
     } catch (reason) {
       onError(reason);
     } finally {
@@ -810,59 +901,128 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
     }
   };
   const columns: TableColumnsType<ProviderRecord> = [
-    { title: '供应商', dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ApiOutlined /></span><span><strong>{name}</strong><small>{row.baseUrl}</small></span></div> },
-    { title: '模型', dataIndex: 'models', key: 'models', render: (values: string[]) => <div className="model-tags">{values.length ? values.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>) : <span className="muted">尚未登记</span>}{values.length > 3 && <span>+{values.length - 3}</span>}</div> },
-    { title: '密钥', dataIndex: 'apiKey', key: 'apiKey', render: (value: string) => value ? <span className="secret-mask">••••••••</span> : <span className="muted">未配置</span> },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title="编辑供应商"><Button aria-label={`编辑 ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name}启用状态`} onChange={(enabled) => void api.saveProvider({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`删除供应商“${row.name}”？`} okText="删除" cancelText="取消" onConfirm={() => void api.deleteProvider(row.id).then(onRefresh).catch(onError)}><Button aria-label={`删除 ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('供应商'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ApiOutlined /></span><span><strong>{name}</strong><small>{row.baseUrl}</small></span></div> },
+    { title: tr('模型'), dataIndex: 'models', key: 'models', render: (values: string[]) => <div className="model-tags">{values.length ? values.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>) : <span className="muted">{tr('尚未登记')}</span>}{values.length > 3 && <span>+{values.length - 3}</span>}</div> },
+    { title: tr('密钥'), dataIndex: 'apiKey', key: 'apiKey', render: (value: string) => value ? <span className="secret-mask">••••••••</span> : <span className="muted">{tr('未配置')}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑供应商')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveProvider({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除供应商')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteProvider(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  return <div className="tab-panel"><PageToolbar count={data.length} noun="OPENAI-COMPATIBLE PROVIDERS" action="新增供应商" onCreate={() => drawer.edit()} />
-    {data.length ? <Table<ProviderRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title="还没有模型供应商" description="添加 OpenAI 兼容 API，并登记可用的模型 ID。" onCreate={() => drawer.edit()} action="添加供应商" />}
-    <Drawer title={<DrawerTitle label="MODEL PROVIDER" title={editing ? '编辑供应商' : '新增供应商'} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>取消</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>保存供应商</Button></div>}>
+  return <div className="tab-panel"><PageToolbar count={data.length} noun="OPENAI-COMPATIBLE PROVIDERS" action={tr('新增供应商')} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<ProviderRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={tr('还没有模型供应商')} description={tr('添加 OpenAI 兼容 API，并登记可用的模型 ID。')} onCreate={() => drawer.edit()} action={tr('添加供应商')} />}
+    <Drawer title={<DrawerTitle label="MODEL PROVIDER" title={editing ? tr('编辑供应商') : tr('新增供应商')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存供应商')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <Form.Item name="name" label="供应商名称" rules={[{ required: true, message: '请输入供应商名称' }]}><Input placeholder="例如：团队模型网关" /></Form.Item>
-        <Form.Item name="baseUrl" label="API Base URL" rules={[{ required: true, message: '请输入 Base URL' }, { type: 'url', message: '请输入有效 URL' }]}><Input placeholder="https://api.example.com/v1" /></Form.Item>
-        <Form.Item name="apiKey" label="API Key" extra={editing ? '为安全起见密钥不会回显；留空表示保持现有密钥。' : '密钥由服务端保存，请勿分享控制台截图。'}><Input.Password autoComplete="new-password" placeholder={editing ? '留空以保持现有密钥' : '输入 API Key'} /></Form.Item>
-        <Form.Item name="models" label="可用模型" extra="输入模型 ID 后按 Enter 添加。"><Select mode="tags" tokenSeparators={[',', '，', ' ']} placeholder="例如：gpt-4o-mini" /></Form.Item>
-        <div className="discover-row"><Button icon={<ReloadOutlined />} loading={discovering} disabled={!editing} onClick={() => void discoverModels()}>自动获取模型</Button><span>{editing ? '通过服务端安全请求供应商 /models' : '请先保存供应商，再获取模型列表'}</span></div>
-        <Form.Item name="enabled" label="启用状态" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+        <Form.Item name="name" label={tr('供应商名称')} rules={[{ required: true, message: tr('请输入供应商名称') }]}><Input placeholder={tr('例如：团队模型网关')} /></Form.Item>
+        <Form.Item name="baseUrl" label="API Base URL" rules={[{ required: true, message: tr('请输入 Base URL') }, { type: 'url', message: tr('请输入有效 URL') }]}><Input placeholder="https://api.example.com/v1" /></Form.Item>
+        <Form.Item name="apiKey" label="API Key" extra={editing ? tr('为安全起见密钥不会回显；留空表示保持现有密钥。') : tr('密钥由服务端保存，请勿分享控制台截图。')}><Input.Password autoComplete="new-password" placeholder={editing ? tr('留空以保持现有密钥') : tr('输入 API Key')} /></Form.Item>
+        <Form.Item name="models" label={tr('可用模型')} extra={tr('输入模型 ID 后按 Enter 添加。')}><Select mode="tags" tokenSeparators={[',', '，', ' ']} placeholder="gpt-4o-mini" /></Form.Item>
+        <div className="discover-row"><Button icon={<ReloadOutlined />} loading={discovering} disabled={!editing} onClick={() => void discoverModels()}>{tr('自动获取模型')}</Button><span>{editing ? tr('通过服务端安全请求供应商 /models') : tr('请先保存供应商，再获取模型列表')}</span></div>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </div>;
 }
 
+type ConfigEntryType = 'text' | 'number' | 'boolean';
+interface ConfigEntry { key: string; type: ConfigEntryType; value: string | number | boolean }
+
+function configEntries(config: JsonObject): ConfigEntry[] {
+  const entries: ConfigEntry[] = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+      entries.push({ key, type: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text', value });
+    }
+  }
+  return entries;
+}
+
+function configFromEntries(entries: ConfigEntry[] | undefined, previous: JsonObject): JsonObject {
+  const next: JsonObject = {};
+  for (const [key, value] of Object.entries(previous)) {
+    if (value !== null && typeof value === 'object') next[key] = value;
+  }
+  for (const entry of entries ?? []) {
+    const key = entry.key.trim();
+    if (!key) continue;
+    if (entry.type === 'boolean') next[key] = entry.value === true || entry.value === 'true' || entry.value === 1;
+    else if (entry.type === 'number') {
+      const parsed = Number(entry.value);
+      if (Number.isFinite(parsed)) next[key] = parsed;
+    } else next[key] = String(entry.value ?? '');
+  }
+  return next;
+}
+
+function ConfigEntryRow({ field, onRemove }: { field: { name: number; key: number }, onRemove: () => void }) {
+  const { tr } = useI18n();
+  const form = Form.useFormInstance();
+  const type = Form.useWatch(['configEntries', field.name, 'type'], form) as ConfigEntryType | undefined;
+  return (
+    <div className="config-entry-row">
+      <Form.Item name={[field.name, 'key']} rules={[{ required: true, message: tr('请输入键名') }]}><Input placeholder={tr('键')} /></Form.Item>
+      <Form.Item name={[field.name, 'type']}><Select options={[
+        { value: 'text', label: tr('文本') },
+        { value: 'number', label: tr('数字') },
+        { value: 'boolean', label: tr('布尔') },
+      ]} /></Form.Item>
+      <Form.Item name={[field.name, 'value']} valuePropName={type === 'boolean' ? 'checked' : 'value'}>
+        {type === 'boolean' ? <Switch /> : type === 'number' ? <InputNumber className="full-width" /> : <Input placeholder={tr('值')} />}
+      </Form.Item>
+      <Button type="text" danger aria-label={tr('删除配置项')} icon={<MinusCircleOutlined />} onClick={onRemove} />
+    </div>
+  );
+}
+
 function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; data: LibraryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
   useEffect(() => {
     if (!drawer.open) return;
-    form.setFieldsValue({ name: editing?.name ?? '', description: editing?.description ?? '', enabled: editing?.enabled ?? true, configJson: JSON.stringify(editing?.config ?? {}, null, 2) });
+    form.setFieldsValue({
+      name: editing?.name ?? '',
+      description: editing?.description ?? '',
+      enabled: editing?.enabled ?? true,
+      configEntries: configEntries(editing?.config ?? {}),
+    });
   }, [drawer.open, editing, form]);
-  const save = async (values: { name: string; description?: string; enabled: boolean; configJson?: string }) => {
+  const save = async (values: { name: string; description?: string; enabled: boolean; configEntries?: ConfigEntry[] }) => {
     setSaving(true);
     try {
-      await api.saveLibrary(kind, { name: values.name, description: values.description ?? '', enabled: values.enabled, config: parseJson(values.configJson, `${libraryNames[kind]} 配置`) }, editing?.id);
+      await api.saveLibrary(kind, {
+        name: values.name,
+        description: values.description ?? '',
+        enabled: values.enabled,
+        config: configFromEntries(values.configEntries, editing?.config ?? {}),
+      }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
     finally { setSaving(false); }
   };
   const columns: TableColumnsType<LibraryRecord> = [
-    { title: '能力', dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ToolOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
-    { title: '说明', dataIndex: 'description', key: 'description', render: (value: string) => value || '—' },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: '更新于', dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title="编辑"><Button aria-label={`编辑 ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name}启用状态`} onChange={(enabled) => void api.saveLibrary(kind, { ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`删除“${row.name}”？`} okText="删除" cancelText="取消" onConfirm={() => void api.deleteLibrary(kind, row.id).then(onRefresh).catch(onError)}><Button aria-label={`删除 ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('能力字段'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ToolOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
+    { title: tr('说明'), dataIndex: 'description', key: 'description', render: (value: string) => value || '—' },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveLibrary(kind, { ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteLibrary(kind, row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  return <div className="tab-panel"><PageToolbar count={data.length} noun={libraryNames[kind].toUpperCase()} action={`新增${libraryNames[kind]}`} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<LibraryRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={`还没有 ${libraryNames[kind]}`} description={`添加 ${libraryNames[kind]}，再按群聊策略选择启用范围。`} onCreate={() => drawer.edit()} action={`新增${libraryNames[kind]}`} />}
-    <Drawer title={<DrawerTitle label={`${kind.toUpperCase()} / LIBRARY`} title={editing ? `编辑${libraryNames[kind]}` : `新增${libraryNames[kind]}`} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>取消</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>保存</Button></div>}>
+  return <div className="tab-panel"><PageToolbar count={data.length} noun={libraryNames[kind].toUpperCase()} action={`${tr('新增')} ${libraryNames[kind]}`} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<LibraryRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={`${tr('还没有')} ${libraryNames[kind]}`} description={`${tr('添加')} ${libraryNames[kind]}${tr('，再按群聊策略选择启用范围。')}`} onCreate={() => drawer.edit()} action={`${tr('新增')} ${libraryNames[kind]}`} />}
+    <Drawer title={<DrawerTitle label={`${kind.toUpperCase()} / LIBRARY`} title={editing ? `${tr('编辑')} ${libraryNames[kind]}` : `${tr('新增')} ${libraryNames[kind]}`} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}><Input /></Form.Item>
-        <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="configJson" label="配置（JSON）" extra="此对象将与能力记录一同保存。"><Input.TextArea rows={8} className="json-input" /></Form.Item>
-        <Form.Item name="enabled" label="启用状态" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
+        <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
+        <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={3} /></Form.Item>
+        <div className="schema-fields">
+          <div className="form-section-heading"><span>{tr('配置项')}</span><small>KEY / TYPE / VALUE</small></div>
+          <Form.List name="configEntries">
+            {(fields, { add, remove }) => <>
+              {fields.map((field) => <ConfigEntryRow key={field.key} field={field} onRemove={() => remove(field.name)} />)}
+              <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ key: '', type: 'text', value: '' })}>{tr('添加配置项')}</Button>
+            </>}
+          </Form.List>
+        </div>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </div>;
@@ -871,25 +1031,26 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
 function LogsPage({ data, total, enabled, accounts, groups, page, onPage, form, onFilter }: {
   data: ConversationLog[]; total: number; enabled: boolean | null; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void;
 }) {
+  const { language, tr } = useI18n();
   const columns: TableColumnsType<ConversationLog> = [
-    { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value) },
-    { title: '方向', dataIndex: 'direction', key: 'direction', width: 110, render: (value: string) => <Tag className={`direction-tag direction-${value}`} icon={value === 'in' ? <ArrowDownOutlined /> : <ArrowUpOutlined />}>{value === 'in' ? '收到' : '发出'}</Tag> },
-    { title: '群聊', dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: string, row) => groups.find((item) => item.id === row.groupId)?.name || value },
-    { title: '用户 ID', dataIndex: 'userId', key: 'userId', width: 180, render: (value: string) => <code className="table-code">{value}</code> },
-    { title: '消息', dataIndex: 'content', key: 'content', render: (value: string) => <span className="log-content">{value}</span> },
+    { title: tr('时间'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value) },
+    { title: tr('方向'), dataIndex: 'direction', key: 'direction', width: 110, render: (value: string) => <Tag className={`direction-tag direction-${value}`} icon={value === 'in' ? <ArrowDownOutlined /> : <ArrowUpOutlined />}>{value === 'in' ? tr('收到') : tr('发出')}</Tag> },
+    { title: tr('群聊'), dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: string, row) => groups.find((item) => item.id === row.groupId)?.name || value },
+    { title: tr('用户 ID'), dataIndex: 'userId', key: 'userId', width: 180, render: (value: string) => <code className="table-code">{value}</code> },
+    { title: tr('消息'), dataIndex: 'content', key: 'content', render: (value: string) => <span className="log-content">{value}</span> },
   ];
-  if (enabled === false) return <section className="logs-disabled"><div className="disabled-icon"><MessageOutlined /></div><div className="eyebrow"><span className="eyebrow-line" /> OBSERVABILITY / DISABLED</div><Title level={2}>对话日志已关闭</Title><Paragraph>服务端未启用 <code>LOG_RECORD</code>。如需记录对话，请在部署环境启用该配置；现有日志保留策略为 30 天。</Paragraph><div className="disabled-meta"><span>LOG_RECORD</span><b>OFF</b><span>RETENTION</span><b>30 DAYS</b></div></section>;
+  if (enabled === false) return <section className="logs-disabled"><div className="disabled-icon"><MessageOutlined /></div><div className="eyebrow"><span className="eyebrow-line" /> OBSERVABILITY / DISABLED</div><Title level={2}>{tr('对话日志已关闭')}</Title><Paragraph>{tr('服务端未启用 LOG_RECORD。如需记录对话，请在部署环境启用该配置；现有日志保留策略为 30 天。')}</Paragraph><div className="disabled-meta"><span>LOG_RECORD</span><b>OFF</b><span>RETENTION</span><b>30 DAYS</b></div></section>;
   return <section className="data-page logs-page">
     <div className="log-toolbar"><Form form={form} layout="inline" onFinish={onFilter} className="log-filter-form">
-      <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder="搜索消息内容或用户 ID" /></Form.Item>
-      <Form.Item name="from"><Input type="datetime-local" aria-label="开始时间" /></Form.Item>
-      <Form.Item name="to"><Input type="datetime-local" aria-label="结束时间" /></Form.Item>
-      <Form.Item name="accountId"><Select allowClear placeholder="全部账号" options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-      <Form.Item name="groupId"><Select allowClear placeholder="全部群聊" options={groups.map((item) => ({ label: item.name || item.externalId, value: item.id }))} /></Form.Item>
-      <Form.Item><Button type="primary" htmlType="submit">应用筛选</Button></Form.Item>
-      <Form.Item><Button onClick={() => { form.resetFields(); onFilter({}); }}>重置</Button></Form.Item>
+      <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder={tr('搜索消息内容或用户 ID')} /></Form.Item>
+      <Form.Item name="from"><Input type="datetime-local" aria-label={tr('开始时间')} /></Form.Item>
+      <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
+      <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+      <Form.Item name="groupId"><Select allowClear placeholder={tr('全部群聊')} options={groups.map((item) => ({ label: item.name || item.externalId, value: item.id }))} /></Form.Item>
+      <Form.Item><Button type="primary" htmlType="submit">{tr('应用筛选')}</Button></Form.Item>
+      <Form.Item><Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button></Form.Item>
     </Form><div className="log-count"><span className="online-dot" /> {total} RECORDS / 30D</div></div>
-    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 950 }} className="data-table logs-table" /><div className="logs-pagination"><span>第 {page} 页 / 共 {Math.max(1, Math.ceil(total / 20))} 页</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title="没有匹配的对话记录" description="尝试调整筛选条件，或确认服务端日志记录已启用。" />}
+    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 950 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
   </section>;
 }
 
@@ -941,5 +1102,5 @@ function RoutedApp() {
 }
 
 export default function App() {
-  return <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#78cfc3', colorInfo: '#78cfc3', colorSuccess: '#78cfc3', colorBgBase: '#101619', colorBgContainer: '#171f22', colorBgElevated: '#202a2d', colorText: '#e6ecea', colorTextSecondary: '#a1b0ae', colorBorder: '#303d40', borderRadius: 3, fontFamily: '"IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif', controlHeight: 38 } }}><AntApp><RoutedApp /></AntApp></ConfigProvider>;
+  return <LanguageProvider><ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#78cfc3', colorInfo: '#78cfc3', colorSuccess: '#78cfc3', colorBgBase: '#101619', colorBgContainer: '#171f22', colorBgElevated: '#202a2d', colorText: '#e6ecea', colorTextSecondary: '#a1b0ae', colorBorder: '#303d40', borderRadius: 3, fontFamily: '"IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif', controlHeight: 38 } }}><AntApp><RoutedApp /></AntApp></ConfigProvider></LanguageProvider>;
 }

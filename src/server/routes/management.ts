@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
-import type { JsonObject, RecordKind, RuntimeBindings } from '../../shared/types';
+import type { BotAccountRecord, JsonObject, RecordKind, RuntimeBindings } from '../../shared/types';
+import { missingRequiredField, normalizeFieldValues, pluginDefinition } from '../../shared/plugin-catalog';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
-import { encryptSecrets, redactSecrets } from '../storage/secrets';
+import { decryptSecrets, encryptSecrets, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
 const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'skills', 'mcps', 'rules'];
@@ -63,15 +64,19 @@ function numberField(source: JsonObject, key: string, fallback: number, min?: nu
 function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, createdAt: string, updatedAt: string): StoredRecord {
   const common = { id, createdAt, updatedAt };
   switch (kind) {
-    case 'plugins':
+    case 'plugins': {
+      const type = stringField(data, 'type', CHATBOT_PLUGIN_TYPE);
+      const definition = pluginDefinition(type);
+      if (!definition) throw new ApiError(400, 'unsupported_plugin_type');
       return {
         ...common,
-        type: stringField(data, 'type', CHATBOT_PLUGIN_TYPE),
+        type,
         name: stringField(data, 'name'),
         description: stringField(data, 'description', ''),
         enabled: booleanField(data, 'enabled', true),
-        config: objectField(data, 'config'),
+        config: normalizeFieldValues(definition.configFields, objectField(data, 'config')),
       };
+    }
     case 'accounts':
       return {
         ...common,
@@ -152,6 +157,32 @@ function assertKind(kind: string): asserts kind is RecordKind {
   if (!isRecordKind(kind)) throw new ApiError(404, 'not_found');
 }
 
+async function normalizeAccountCredentials(
+  repository: RecordRepository,
+  record: StoredRecord,
+  previous: StoredRecord | undefined,
+  bindings: RuntimeBindings,
+): Promise<void> {
+  const plugin = await repository.get('plugins', record.pluginId as string);
+  const definition = pluginDefinition(typeof plugin?.type === 'string' ? plugin.type : undefined);
+  if (!definition) return;
+
+  let credentials = record.credentials as JsonObject;
+  if (previous) {
+    const oldAccount = await decryptSecrets(previous as JsonObject, bindings) as unknown as BotAccountRecord;
+    const oldCredentials = oldAccount.credentials ?? {};
+    credentials = {
+      ...oldCredentials,
+      ...Object.fromEntries(Object.entries(credentials).filter(([, value]) => value !== '' && value !== undefined && value !== null)),
+    };
+  }
+
+  const normalized = normalizeFieldValues(definition.credentialFields, credentials);
+  const missing = missingRequiredField(definition.credentialFields, normalized);
+  if (missing) throw new ApiError(400, `missing_${missing.key}`);
+  record.credentials = normalized;
+}
+
 async function assertReferences(repository: RecordRepository, kind: RecordKind, record: StoredRecord): Promise<void> {
   const requireRecord = async (relatedKind: RecordKind, id: string) => {
     if (!id || !(await repository.get(relatedKind, id))) throw new ApiError(400, `invalid_${relatedKind}_reference`);
@@ -228,6 +259,7 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     if (await repository.get(kind, id)) throw new ApiError(409, 'record_exists');
     const record = normalizedRecord(kind, data, id, now, now);
     await assertReferences(repository, kind, record);
+    if (kind === 'accounts') await normalizeAccountCredentials(repository, record, undefined, context.env);
     const encrypted = await encryptSecrets(record, undefined, context.env);
     await repository.put(kind, encrypted);
     context.header('X-Storage-Consistency', repository.consistency);
@@ -258,6 +290,7 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     const merged = { ...visiblePrevious, ...data, id } as JsonObject;
     const record = normalizedRecord(kind, merged, id, previous.createdAt, now);
     await assertReferences(repository, kind, record);
+    if (kind === 'accounts') await normalizeAccountCredentials(repository, record, previous, context.env);
     const encrypted = await encryptSecrets(record, previous, context.env);
     await repository.put(kind, encrypted);
     context.header('X-Storage-Consistency', repository.consistency);

@@ -183,6 +183,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .breadcrumbs { display: flex; align-items: center; gap: 12px; color: #758581; font: 9px var(--mono); letter-spacing: .08em; }
 .breadcrumbs strong { color: #d3ddda; font: 500 11px "IBM Plex Sans", "Noto Sans SC", sans-serif; letter-spacing: 0; }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
+.language-switch.ant-segmented { padding: 2px; background: #182124; border: 1px solid var(--line); }
+.language-switch .ant-segmented-item-label { min-height: 22px; padding: 0 8px; font: 8px var(--mono); letter-spacing: .04em; }
 .topbar-health { display: flex; align-items: center; gap: 8px; color: #80918d; font: 8px var(--mono); letter-spacing: .05em; }
 .topbar-health i, .content-footer i { width: 5px; height: 5px; display: inline-block; border-radius: 50%; background: var(--accent); }
 .topbar-home { color: #94a5a1; font-size: 10px; }
@@ -293,6 +295,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .schema-fields { padding-top: 6px; }
 .form-section-heading { display: flex; justify-content: space-between; align-items: center; padding: 13px 0 10px; margin: 8px 0 11px; border-top: 1px solid var(--line); color: var(--accent); font: 8px var(--mono); letter-spacing: .09em; }
 .form-section-heading small { color: #71817e; font: 8px var(--mono); }
+.config-entry-row { display: grid; grid-template-columns: minmax(0, 1.2fr) 105px minmax(0, 1fr) 32px; gap: 8px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.config-entry-row .ant-form-item { margin-bottom: 0; }
+.config-entry-row > .ant-btn { margin-top: 3px; }
 .form-grid { display: grid; gap: 0 14px; }
 .two-cols { grid-template-columns: 1fr 1fr; }
 .form-note { padding: 9px 11px; margin: -3px 0 15px; border-left: 2px solid #567a73; color: #92a29e; background: #172220; font-size: 10px; }
@@ -414,6 +419,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .login-context > p { font-size: 12px; }
   .login-panel { padding: 21px; }
   .setup-facts { grid-template-columns: 1fr; gap: 12px; }
+  .config-entry-row { grid-template-columns: 1fr; gap: 4px; }
+  .config-entry-row > .ant-btn { justify-self: end; margin-top: 0; }
   .login-footer { font-size: 7px; }
   .admin-topbar { height: 52px; padding: 0 15px; gap: 9px; }
   .breadcrumbs { gap: 7px; font-size: 7px; }

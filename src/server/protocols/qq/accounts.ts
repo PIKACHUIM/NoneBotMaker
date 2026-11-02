@@ -51,5 +51,6 @@ function toQQAccountContext(
     botSecret,
     clientSecret,
     pluginEnabled: plugin.enabled === true,
+    pluginConfig: plugin.config as JsonObject | undefined,
   };
 }

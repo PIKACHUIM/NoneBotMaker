@@ -5,6 +5,37 @@ export const LOG_RETENTION_DAYS = 30;
 export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'skills' | 'mcps' | 'rules';
 export type JsonObject = Record<string, unknown>;
 
+export type Language = 'zh' | 'en';
+export interface LocalizedText {
+  zh: string;
+  en: string;
+}
+
+export type PluginFieldType = 'boolean' | 'text' | 'number';
+
+export interface PluginFieldDefinition {
+  key: string;
+  type: PluginFieldType;
+  label: LocalizedText;
+  description: LocalizedText;
+  placeholder?: LocalizedText;
+  required?: boolean;
+  secret?: boolean;
+  multiline?: boolean;
+  default?: string | number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface PluginDefinition {
+  type: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  configFields: PluginFieldDefinition[];
+  credentialFields: PluginFieldDefinition[];
+}
+
 export interface PluginRecord {
   id: string;
   type: string;

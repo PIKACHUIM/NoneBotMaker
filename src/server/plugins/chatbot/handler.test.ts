@@ -119,6 +119,31 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.00002, 1_000);
   });
 
+  it('applies declared plugin config for history and system prompt defaults', async () => {
+    const { deps, fetch } = dependencies({
+      findGroup: vi.fn(async () => ({ ...group, systemPrompt: '' })),
+    });
+    const configured = {
+      ...account,
+      pluginConfig: {
+        contextMessageLimit: 5,
+        includeHistory: false,
+        defaultSystemPrompt: 'Plugin level prompt.',
+      },
+    };
+
+    await createChatbotHandler(deps)(configured, message());
+
+    expect(deps.getRecentContext).not.toHaveBeenCalled();
+    const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(request.messages).toEqual([
+      { role: 'system', content: 'Plugin level prompt.' },
+      { role: 'user', content: 'hello' },
+    ]);
+  });
+
   it('allows a whitelisted non-mention when the injected probability sample passes', async () => {
     const { deps, sentReplies } = dependencies({ random: () => 0.049 });
     await createChatbotHandler(deps)(account, message({ mentionsBot: false, eventType: 'GROUP_MESSAGE_CREATE' }));

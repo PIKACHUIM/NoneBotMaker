@@ -1,4 +1,4 @@
-import type { BotAccountRecord } from '../../../shared/types';
+import type { BotAccountRecord, JsonObject } from '../../../shared/types';
 
 export interface QQAccountContext {
   account: BotAccountRecord;
@@ -6,6 +6,7 @@ export interface QQAccountContext {
   botSecret: string;
   clientSecret: string;
   pluginEnabled: boolean;
+  pluginConfig?: JsonObject;
 }
 
 export interface QQGroupMessage {

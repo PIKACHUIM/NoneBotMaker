@@ -127,6 +127,19 @@ npm run build:esa
 
 EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服务返回 `503 websocket_unsupported`。聊天上下文和成本按与记录仓库相同的 adapter 持久化；缺少对应持久化 binding 时会报部署配置错误，不会退化为跨请求内存状态。
 
+## 插件配置与管理端语言
+
+插件在 `src/shared/plugin-catalog.ts` 中声明字段，而不是让管理员填写 JSON。每个字段必须声明：
+
+- `key`：保存到配置对象中的键名
+- `type`：`boolean`、`text` 或 `number`
+- `label` / `description`：`{ zh, en }` 双语标签与说明
+- 可选：`required`、`secret`、`multiline`、`default`、`placeholder`、`min`、`max`、`step`
+
+管理台会按声明生成开关、文本框、数字框或密码框；服务端会按声明做类型归一化、默认值和必填校验。账号字段使用同一套声明机制，密钥字段留空时保留原值。插件配置与账号凭据不再提供 JSON 输入框。
+
+管理台右上角提供「中 / EN」切换，导航、页面标题、表格、表单和插件字段标签/说明会跟随语言切换。语言选择保存在浏览器本地。
+
 ## 群聊预算与一致性
 
 群配置的 `dailyCostLimit`、`monthlyCostLimit`、`totalCostLimit` 单位为 USD，默认 `0` 表示不限制。支出按 `inputCostPerMillion`、`outputCostPerMillion` 与模型返回的 usage 估算。日限额按 UTC 日期重置，月限额按 UTC 月份重置，总额不重置；达到任一适用限额后，会在模型调用前停止处理。
