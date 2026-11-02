@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { RuntimeBindings } from '../shared/types';
-import { replyToQQGroup } from './protocols/qq/api';
+import { replyToQQMessage, sendQQMedia } from './protocols/qq/api';
 import { resolveQQAccountByAppId } from './protocols/qq/accounts';
 import { createQQWebhookRouter } from './protocols/qq/webhook';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from './plugins/chatbot/runtime';
@@ -25,7 +25,8 @@ export function createApp() {
     handleMessage: async (account, message, bindings) => {
       const handler = createStoredChatbotHandler(bindings, {
         ...createPersistentChatbotStores(bindings),
-        sendReply: replyToQQGroup,
+        sendReply: replyToQQMessage,
+        sendMedia: sendQQMedia,
       });
       await handler(account, message);
     },

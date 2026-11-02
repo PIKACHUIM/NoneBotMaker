@@ -39,7 +39,7 @@ describe('online D1 initialization', () => {
       const before = await inspectD1Setup(db);
       expect(before.databaseConfigured).toBe(true);
       expect(before.schemaReady).toBe(false);
-      expect(before.pendingMigrations).toBe(3);
+      expect(before.pendingMigrations).toBe(4);
 
       const initialized = await initializeD1Setup(db);
       expect(initialized.schemaReady).toBe(true);
@@ -61,6 +61,7 @@ describe('online D1 initialization', () => {
         '0001_initial.sql',
         '0002_conversation_group_external_id.sql',
         '0003_chatbot_runtime_state.sql',
+        '0004_plugin_conversation_logs.sql',
       ]);
 
       const repeated = await initializeD1Setup(db);

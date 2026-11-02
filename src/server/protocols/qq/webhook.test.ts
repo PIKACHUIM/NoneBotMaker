@@ -48,6 +48,12 @@ describe('QQ webhook', () => {
     });
   });
 
+  it('does not expose the challenge signer as an arbitrary JSON signing oracle', async () => {
+    const router = createQQWebhookRouter({ resolveAccount: async () => account, handleMessage: vi.fn(async () => undefined) });
+    const response = await router.request('/webhook/qq', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Bot-Appid': account.appId }, body: JSON.stringify({ op: 13, d: { event_ts: '1725442341', plain_token: '{"op":0,"d":{}}' } }) });
+    expect(response.status).toBe(400);
+  });
+
   it('rejects websocket mode on non-Cloudflare platforms', async () => {
     const resolveAccount = vi.fn(async () => account);
     const router = createQQWebhookRouter({
@@ -67,7 +73,7 @@ describe('QQ webhook', () => {
 
   it('requires a valid Ed25519 signature before dispatching an event', async () => {
     const handleMessage = vi.fn(async (_account: QQAccountContext, _message: QQGroupMessage) => undefined);
-    const router = createQQWebhookRouter({ resolveAccount: async () => account, handleMessage });
+    const router = createQQWebhookRouter({ resolveAccount: async () => account, handleMessage, now: () => 1725442341000 });
     const body = JSON.stringify({
       op: 0,
       id: 'event-1',
@@ -80,7 +86,7 @@ describe('QQ webhook', () => {
       },
     });
     const timestamp = '1725442341';
-    const signature = await signWebhookChallenge(account.botSecret, timestamp, body);
+    const signature = await signWebhookChallenge(account.botSecret!, timestamp, body);
     const headers = {
       'content-type': 'application/json',
       'X-Bot-Appid': account.appId,
@@ -100,5 +106,26 @@ describe('QQ webhook', () => {
     const rejected = await router.request('/webhook/qq', { method: 'POST', headers, body: `${body} ` });
     expect(rejected.status).toBe(401);
     expect(handleMessage).toHaveBeenCalledOnce();
+    const duplicate = await router.request('/webhook/qq', { method: 'POST', headers, body });
+    expect(duplicate.status).toBe(200);
+    expect(handleMessage).toHaveBeenCalledOnce();
+  });
+
+  it('rejects stale signed callbacks and fails closed when durable enqueue fails', async () => {
+    const appSecret = 'canonical-secret';
+    const handleMessage = vi.fn(async () => undefined);
+    const router = createQQWebhookRouter({ resolveAccount: async () => ({ ...account, appSecret }), handleMessage, now: () => 2_000_000 });
+    const body = JSON.stringify({ op: 0, t: 'C2C_MESSAGE_CREATE', id: 'e', d: { id: 'm', author: { user_openid: 'user' }, content: 'hello' } });
+    const makeHeaders = async (timestamp: string) => ({ 'content-type': 'application/json', 'X-Bot-Appid': account.appId, 'X-Signature-Timestamp': timestamp, 'X-Signature-Ed25519': await signWebhookChallenge(appSecret, timestamp, body) });
+    expect((await router.request('/webhook/qq', { method: 'POST', headers: await makeHeaders('1000'), body })).status).toBe(401);
+    const fetch = vi.fn(async () => new Response(null, { status: 503 }));
+    const bindings = { PLATFORM: 'cloudflare', QQ_GATEWAY_SESSIONS: { idFromName: (name: string) => name, get: () => ({ fetch }) } };
+    expect((await router.request('/webhook/qq', { method: 'POST', headers: await makeHeaders('2000'), body }, bindings)).status).toBe(503);
+    expect(handleMessage).not.toHaveBeenCalled();
+    fetch.mockImplementation(async () => Response.json({ queued: true }, { status: 202 }));
+    const response = await router.request('/webhook/qq', { method: 'POST', headers: await makeHeaders('2000'), body }, bindings);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ op: 12 });
+    expect(handleMessage).not.toHaveBeenCalled();
   });
 });

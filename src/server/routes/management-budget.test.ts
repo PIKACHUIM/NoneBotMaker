@@ -34,6 +34,10 @@ function setup() {
     get: async (key) => values.get(key) ?? null,
     put: async (key, value) => { values.set(key, value); },
     delete: async (key) => { values.delete(key); },
+    list: async ({ prefix = '' } = {}) => ({
+      keys: [...values.keys()].filter((name) => name.startsWith(prefix)).map((name) => ({ name })),
+      list_complete: true,
+    }),
   };
   const app = new Hono<{ Bindings: RuntimeBindings }>();
   app.onError((error, context) => {

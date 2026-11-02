@@ -4,7 +4,13 @@ const MIGRATION_NAMES = [
   '0001_initial.sql',
   '0002_conversation_group_external_id.sql',
   '0003_chatbot_runtime_state.sql',
+  '0004_plugin_conversation_logs.sql',
 ] as const;
+
+const LOG_COLUMNS = {
+  group_external_id: "TEXT NOT NULL DEFAULT ''",
+  plugin_id: 'TEXT', plugin_type: 'TEXT', event_id: 'TEXT', status: 'TEXT', details: 'TEXT',
+} as const;
 
 const REQUIRED_TABLES = [
   'd1_migrations',
@@ -79,11 +85,10 @@ export async function inspectD1Setup(db: D1DatabaseLike): Promise<DatabaseSetupS
   const tables = await tableNames(db);
   const missing: string[] = REQUIRED_TABLES.filter((table) => !tables.has(table));
 
-  let hasGroupExternalId = false;
   if (tables.has('conversation_logs')) {
-    hasGroupExternalId = (await columnNames(db, 'conversation_logs')).has('group_external_id');
+    const columns = await columnNames(db, 'conversation_logs');
+    for (const name of Object.keys(LOG_COLUMNS)) if (!columns.has(name)) missing.push(`conversation_logs.${name}`);
   }
-  if (tables.has('conversation_logs') && !hasGroupExternalId) missing.push('conversation_logs.group_external_id');
 
   const applied = await appliedMigrations(db, tables.has('d1_migrations'));
   const pendingMigrations = Math.max(0, MIGRATION_NAMES.length - applied);
@@ -102,14 +107,16 @@ export async function initializeD1Setup(db: D1DatabaseLike): Promise<DatabaseSet
 
   const tables = await tableNames(db);
   const columns = await columnNames(db, 'conversation_logs');
-  if (!columns.has('group_external_id')) {
+  for (const [name, definition] of Object.entries(LOG_COLUMNS)) {
+    if (columns.has(name)) continue;
     try {
-      await db.prepare("ALTER TABLE conversation_logs ADD COLUMN group_external_id TEXT NOT NULL DEFAULT ''").run();
+      await db.prepare(`ALTER TABLE conversation_logs ADD COLUMN ${name} ${definition}`).run();
     } catch (error) {
       const currentColumns = await columnNames(db, 'conversation_logs');
-      if (!currentColumns.has('group_external_id')) throw error;
+      if (!currentColumns.has(name)) throw error;
     }
   }
+  await db.prepare('CREATE INDEX IF NOT EXISTS conversation_logs_by_plugin_time ON conversation_logs (plugin_id, created_at DESC)').run();
 
   if (!tables.has('d1_migrations')) {
     throw new Error('The D1 migration ledger could not be created.');

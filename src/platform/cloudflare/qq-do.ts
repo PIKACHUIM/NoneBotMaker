@@ -1,7 +1,11 @@
-import type { GroupRecord, RuntimeBindings } from '../../shared/types';
+import type { ChatMessage, GroupRecord, JsonObject, RuntimeBindings } from '../../shared/types';
+import { configNumber, effectiveGroupConfig } from '../../shared/plugin-catalog';
+import { readBoolean } from '../../server/env';
+import { completeRecentTurns } from '../../server/plugins/chatbot/tools';
+import { createConversationLogRepository } from '../../server/storage/conversation-log-repository';
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
 import { createRepository } from '../../server/storage/repository';
-import { getQQAccessToken, replyToQQGroup } from '../../server/protocols/qq/api';
+import { getQQAccessToken, replyToQQGroup, sendQQMedia } from '../../server/protocols/qq/api';
 import { resolveQQAccountById } from '../../server/protocols/qq/accounts';
 import { normalizeQQGroupMessage } from '../../server/protocols/qq/message';
 import type { QQAccountContext, QQGroupMessage } from '../../server/protocols/qq/types';
@@ -10,14 +14,25 @@ const GATEWAY_ENDPOINT = 'https://api.bot.qq.com/gateway/bot';
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;
 const MAINTENANCE_INTERVAL_MS = 5 * 60_000;
-const MAX_CONTEXT_ENTRIES = 40;
-const MAX_RECENT_MESSAGE_IDS = 2_000;
+const MAX_CONTEXT_ENTRIES = 1000;
+const MAX_RECENT_MESSAGE_IDS = 512;
+const DEDUPE_RETENTION_MS = 10 * 60_000;
 const GROUP_AND_C2C_INTENT = 1 << 25;
 
-interface DurableObjectStorageLike {
+interface DurableStorageData {
   get<T = unknown>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<boolean>;
+}
+
+interface ChunkManifest {
+  format: 'qq-json-chunks-v1';
+  version: string;
+  count: number;
+}
+
+interface DurableObjectStorageLike extends DurableStorageData {
+  transaction?<T>(callback: (transaction: DurableStorageData) => Promise<T>): Promise<T>;
   setAlarm(when: number | Date): Promise<void>;
   deleteAlarm(): Promise<void>;
 }
@@ -44,9 +59,10 @@ interface QQGatewaySession {
   sequence: number | null;
 }
 
-interface GroupContextMessage {
-  role: 'user' | 'assistant';
-  content: string;
+interface PendingMessage {
+  message: QQGroupMessage;
+  dueAt: number;
+  attempts: number;
 }
 
 export interface QQGatewayDurableObjectOptions {
@@ -113,6 +129,10 @@ export class QQGatewayDurableObject {
   private accountId?: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private messageQueue: Promise<void> = Promise.resolve();
+  private processingQueue: Promise<void> = Promise.resolve();
+  private queueMutations: Promise<void> = Promise.resolve();
+  private completedHandlers = new Set<string>();
+  private approvalClaims: Promise<void> = Promise.resolve();
   private reconnectAttempt = 0;
   private awaitingHeartbeatAck = false;
   private heartbeatInterval = 45_000;
@@ -128,6 +148,7 @@ export class QQGatewayDurableObject {
     private readonly env: RuntimeBindings,
     options: QQGatewayDurableObjectOptions = {},
   ) {
+    this.env = { ...env, PLATFORM: env.PLATFORM ?? 'cloudflare' };
     this.fetchImpl = options.fetch ?? fetch;
     this.createWebSocket = options.createWebSocket ?? ((url) => new WebSocket(url));
     this.resolveAccount = options.resolveAccount ?? ((accountId, bindings) => resolveQQAccountById(accountId, bindings));
@@ -142,6 +163,20 @@ export class QQGatewayDurableObject {
     }
 
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/enqueue') {
+      let body: { accountId?: unknown; message?: QQGroupMessage };
+      try { body = await request.json() as typeof body; }
+      catch { return Response.json({ error: 'invalid_request' }, { status: 400 }); }
+      if (typeof body.accountId !== 'string' || !body.message?.id || body.message.accountId !== body.accountId) {
+        return Response.json({ error: 'invalid_request' }, { status: 400 });
+      }
+      const account = await this.resolveAccount(body.accountId, this.env);
+      if (!account) return Response.json({ error: 'account_unavailable' }, { status: 503 });
+      this.messageQueue = this.messageQueue.catch(() => undefined).then(() => this.enqueueMessage(account, body.message!));
+      try { await this.messageQueue; }
+      catch { return Response.json({ error: 'queue_unavailable' }, { status: 503 }); }
+      return Response.json({ queued: true }, { status: 202 });
+    }
     if (request.method === 'POST' && url.pathname === '/disconnect') {
       await this.disconnect();
       return Response.json({ connected: false });
@@ -179,17 +214,17 @@ export class QQGatewayDurableObject {
   }
 
   async alarm(): Promise<void> {
-    if ((this.env.API_METHOD ?? 'webhook') !== 'websocket') {
-      await this.disconnect();
-      return;
+    // 重连优先于可能较长的消息处理，避免provider请求阻塞gateway恢复。
+    if ((this.env.API_METHOD ?? 'webhook') !== 'websocket') await this.disconnect();
+    else {
+      const accountId = await this.state.storage.get<string>('accountId');
+      if (accountId) {
+        try { await this.connectAccount(accountId); }
+        catch { await this.scheduleReconnect(); }
+      }
     }
-    const accountId = await this.state.storage.get<string>('accountId');
-    if (!accountId) return;
-    try {
-      await this.connectAccount(accountId);
-    } catch {
-      await this.scheduleReconnect();
-    }
+    this.processingQueue = this.processingQueue.catch(() => undefined).then(() => this.drainPendingMessages());
+    await this.processingQueue;
   }
 
   private async connectAccount(accountId: string): Promise<void> {
@@ -212,13 +247,14 @@ export class QQGatewayDurableObject {
     this.lastSequence = await this.state.storage.get<number>('sequence');
 
     if (this.socket && this.socket.readyState <= WebSocket.OPEN) {
-      await this.state.storage.setAlarm(this.now() + MAINTENANCE_INTERVAL_MS);
+      await this.setGatewayAlarm(this.now() + MAINTENANCE_INTERVAL_MS);
       return;
     }
 
     const accessToken = await this.getAccessToken(account);
     const gatewayResponse = await this.fetchImpl(GATEWAY_ENDPOINT, {
       headers: { authorization: `QQBot ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!gatewayResponse.ok) throw new Error('QQ gateway lookup failed.');
     const gateway = await gatewayResponse.json() as { url?: unknown };
@@ -250,7 +286,7 @@ export class QQGatewayDurableObject {
       this.state.waitUntil(this.scheduleReconnect());
     });
     socket.addEventListener('error', () => socket.close());
-    await this.state.storage.setAlarm(this.now() + MAINTENANCE_INTERVAL_MS);
+    await this.setGatewayAlarm(this.now() + MAINTENANCE_INTERVAL_MS);
   }
 
   private async handleFrame(data: string | ArrayBuffer | Blob): Promise<void> {
@@ -304,7 +340,7 @@ export class QQGatewayDurableObject {
     } else if (packet.t === 'RESUMED') {
       this.reconnectAttempt = 0;
       this.startHeartbeat();
-    } else if (packet.t === 'GROUP_AT_MESSAGE_CREATE' || packet.t === 'GROUP_MESSAGE_CREATE') {
+    } else if (packet.t === 'GROUP_AT_MESSAGE_CREATE' || packet.t === 'GROUP_MESSAGE_CREATE' || packet.t === 'C2C_MESSAGE_CREATE') {
       await this.handleGroupMessage(packet);
     }
 
@@ -353,31 +389,310 @@ export class QQGatewayDurableObject {
 
     if (this.injectedMessageHandler) {
       await this.injectedMessageHandler(account, message);
+      await this.markMessageProcessed(message.id);
     } else {
-      const handler = createStoredChatbotHandler(this.env, {
-        conversationStore: this.conversationStore(),
-        costStore: this.costStore(),
-        sendReply: (bot, groupOpenId, messageId, content) =>
-          replyToQQGroup(bot, groupOpenId, messageId, content, this.fetchImpl),
-        fetch: this.fetchImpl,
-        now: this.now,
-      });
-      await handler(account, message);
+      await this.enqueueMessage(account, message);
     }
-    await this.markMessageProcessed(message.id);
   }
 
-  private conversationStore(): GroupConversationStore {
+  private async enqueueMessage(account: QQAccountContext, message: QQGroupMessage): Promise<void> {
+    if (await this.wasEventProcessed(message)) return;
+    const group = this.injectedMessageHandler ? undefined : await createRepository(this.env).list('groups').then((groups) => groups.find((entry) =>
+      entry.accountId === account.account.id && entry.externalId === message.groupId &&
+      (entry.conversationType ?? 'group') === (message.conversationType ?? 'group')));
+    const config = group ? effectiveGroupConfig(account.pluginConfig, group.config as JsonObject | undefined) : account.pluginConfig ?? {};
+    const window = message.isWake || message.conversationType === 'private' ? 0 : configNumber(config, 'bridge_group_batch_seconds', 1, 0, 10) * 1000;
+    await this.state.storage.put('queueAccountId', account.account.id);
+    await this.updatePending(async (pending) => {
+      if (pending.some((entry) => (entry.message.eventId ?? entry.message.id) === (message.eventId ?? message.id)) || await this.wasEventProcessed(message)) return pending;
+      const hash = await this.messageHash(message.eventId ?? message.id);
+      const processed = await this.state.storage.get<Array<{ id: string; at: number }>>(`processedMessages:${hash.slice(0, 2)}`) ?? [];
+      if (processed.filter((entry) => this.now() - entry.at < DEDUPE_RETENTION_MS).length + pending.length >= MAX_RECENT_MESSAGE_IDS) throw new Error('QQ deduplication capacity reached.');
+      const previous = pending.find((entry) => !entry.message.isWake && !message.isWake && this.messageScope(entry.message) === this.messageScope(message));
+      const dueAt = previous?.dueAt ?? this.now() + Math.max(1, window);
+      return [...pending, { message, dueAt, attempts: 0 }];
+    });
+  }
+
+  private async drainPendingMessages(): Promise<void> {
+    const accountId = await this.state.storage.get<string>('queueAccountId');
+    if (!accountId) return;
+    const account = await this.resolveAccount(accountId, this.env);
+    if (!account) {
+      await this.updatePending((waiting) => waiting.map((entry) => ({ ...entry, dueAt: Math.max(entry.dueAt, this.now() + 60_000) })));
+      await this.schedulePendingAlarm();
+      return;
+    }
+    const pending = await this.state.storage.get<PendingMessage[]>('pendingMessages') ?? [];
+    const due: PendingMessage[] = [];
+    for (const entry of pending.filter((item) => item.dueAt <= this.now()).slice(0, 100)) {
+      const id = entry.message.eventId ?? entry.message.id;
+      if (this.completedHandlers.has(id) || await this.wasEventProcessed(entry.message)) {
+        try {
+          await this.markMessageProcessed(id);
+          await this.updatePending((current) => current.filter((item) => (item.message.eventId ?? item.message.id) !== id));
+          this.completedHandlers.delete(id);
+        } catch {
+          await this.updatePending((current) => current.map((item) => (item.message.eventId ?? item.message.id) === id ? { ...item, dueAt: this.now() + 2000 } : item));
+        }
+      } else due.push(entry);
+    }
+    const processed = new Set<string>();
+    for (const entry of due) {
+      if (processed.has(entry.message.eventId ?? entry.message.id)) continue;
+      const batch = entry.message.isWake ? [entry] : due.filter((item) => !processed.has(item.message.eventId ?? item.message.id) && !item.message.isWake && this.messageScope(item.message) === this.messageScope(entry.message));
+      const latest = batch[batch.length - 1].message;
+      const combined: QQGroupMessage = batch.length > 1 ? {
+        ...latest, text: batch.map((item) => item.message.text).join('\n'),
+        mentionsBot: batch.some((item) => item.message.mentionsBot),
+        attachments: batch.flatMap((item) => item.message.attachments ?? []),
+        batchMessages: batch.map((item) => item.message),
+      } : latest;
+      try {
+        if (!(await this.wasMessageProcessed(entry.message.eventId ?? entry.message.id))) {
+          if (this.injectedMessageHandler) await this.injectedMessageHandler(account, combined);
+          else {
+            const handler = createStoredChatbotHandler(this.env, {
+              conversationStore: this.conversationStore(), costStore: this.costStore(),
+              sendReply: async (bot, targetId, messageId, content, options) => {
+                const seq = await this.allocateReplySequence(targetId, messageId, options?.seq ?? 1, options?.conversationType ?? 'group');
+                await replyToQQGroup(bot, targetId, messageId, content, this.fetchImpl, seq, options?.conversationType, combined.isWake === true);
+                for (const item of batch) this.completedHandlers.add(item.message.eventId ?? item.message.id);
+              },
+              sendMedia: async (bot, targetId, messageId, media, options) => {
+                const seq = await this.allocateReplySequence(targetId, messageId, options.seq, options.conversationType);
+                await sendQQMedia(bot, targetId, messageId, media, { ...options, seq }, this.fetchImpl, combined.isWake === true);
+                for (const item of batch) this.completedHandlers.add(item.message.eventId ?? item.message.id);
+              },
+              reserveOutbound: async (key, count, at, limit) => this.reserveOutbound(key, count, at, limit),
+              scheduleWake: async (bot, message, delay, reason) => this.scheduleWake(bot, message, delay, reason),
+              listWakes: async (bot, message) => this.listWakes(bot, message),
+              cancelWake: async (bot, message, id) => this.cancelWake(bot, message, id),
+              fetch: this.fetchImpl, now: this.now,
+            });
+            await handler(account, combined);
+          }
+          for (const item of batch) this.completedHandlers.add(item.message.eventId ?? item.message.id);
+          for (const item of batch) await this.markMessageProcessed(item.message.eventId ?? item.message.id);
+        }
+        await this.updatePending((current) => current.filter((item) => !batch.some((done) => (done.message.eventId ?? done.message.id) === (item.message.eventId ?? item.message.id))));
+        for (const item of batch) this.completedHandlers.delete(item.message.eventId ?? item.message.id);
+      } catch (error) {
+        if (batch.every((item) => this.completedHandlers.has(item.message.eventId ?? item.message.id))) {
+          // handler已成功（可能已有外部发送），只重试完成状态持久化，不重新执行发送。
+          await this.updatePending((current) => current.map((item) => batch.some((done) => (done.message.eventId ?? done.message.id) === (item.message.eventId ?? item.message.id)) ? { ...item, dueAt: this.now() + 2000 } : item));
+          for (const item of batch) processed.add(item.message.eventId ?? item.message.id);
+          continue;
+        }
+        const failed = new Set<string>();
+        for (const item of batch) {
+          if (item.attempts + 1 >= 5) {
+            await this.recordQueueFailure(account, item.message, error);
+            await this.markMessageProcessed(item.message.eventId ?? item.message.id);
+            failed.add(item.message.eventId ?? item.message.id);
+          }
+        }
+        await this.updatePending((current) => current.flatMap((item) => {
+          const id = item.message.eventId ?? item.message.id;
+          if (failed.has(id)) return [];
+          if (!batch.some((entry) => (entry.message.eventId ?? entry.message.id) === id)) return [item];
+          const attempts = item.attempts + 1;
+          return [{ ...item, attempts, dueAt: this.now() + Math.min(60_000, 1000 * 2 ** Math.min(attempts, 6)) }];
+        }));
+      }
+      for (const item of batch) processed.add(item.message.eventId ?? item.message.id);
+    }
+    await this.schedulePendingAlarm();
+  }
+
+  private messageScope(message: QQGroupMessage): string {
+    return JSON.stringify([message.accountId, message.conversationType ?? 'group', message.groupId]);
+  }
+
+  private async allocateReplySequence(targetId: string, messageId: string, expected: number, conversationType: 'group' | 'private'): Promise<number> {
+    const legacyKey = JSON.stringify([conversationType, targetId, messageId]);
+    const key = await this.messageHash(legacyKey);
+    const storageKey = `replySequences:${key.slice(0, 2)}`;
+    const sequences = await this.state.storage.get<Record<string, { seq: number; at: number }>>(storageKey) ?? {};
+    for (const [id, state] of Object.entries(sequences)) if (this.now() - state.at > 15 * 60_000) delete sequences[id];
+    if (!sequences[key] && Object.keys(sequences).length >= 512) throw new Error('QQ reply sequence capacity reached.');
+    const legacy = await this.state.storage.get<Record<string, { seq: number; at: number }>>('replySequences');
+    const legacySequence = legacy?.[legacyKey];
+    const previous = Math.max(sequences[key]?.seq ?? 0, legacySequence && this.now() - legacySequence.at < 15 * 60_000 ? legacySequence.seq : 0);
+    const seq = Math.max(previous + 1, expected);
+    sequences[key] = { seq, at: this.now() };
+    await this.state.storage.put(storageKey, sequences);
+    return seq;
+  }
+
+  private async reserveOutbound(key: string, count: number, at: number, limit: number): Promise<boolean> {
+    const storageKey = `outbound:${key}`;
+    const recent = (await this.state.storage.get<number[]>(storageKey) ?? []).filter((stamp) => at - stamp < 60_000);
+    if (count < 1 || recent.length + count > limit) return false;
+    await this.state.storage.put(storageKey, [...recent, ...Array.from({ length: count }, () => at)]);
+    return true;
+  }
+
+  private async scheduleWake(account: QQAccountContext, source: QQGroupMessage, seconds: number, reason: string): Promise<void> {
+    const eventId = `wake:${crypto.randomUUID()}`;
+    const message: QQGroupMessage = {
+      ...source, eventId, text: reason.slice(0, 1000), attachments: [], batchMessages: undefined,
+      isWake: true, wakeReason: reason.slice(0, 1000), mentionsBot: true, receivedAt: this.now(),
+    };
+    // 保留原始消息用于上下文；唤醒发送走主动消息，不复用过期的被动msg_id。
+    const dueAt = this.now() + Math.max(1, Math.min(86_400, seconds)) * 1000;
+    await this.state.storage.put('queueAccountId', account.account.id);
+    await this.updatePending((pending) => [...pending, { message, dueAt, attempts: 0 }]);
+  }
+
+  private async listWakes(account: QQAccountContext, source: QQGroupMessage): Promise<Array<{ id: string; dueAt: number; reason: string }>> {
+    if (source.accountId !== account.account.id) throw new Error('Wake target does not belong to this account.');
+    const pending = await this.state.storage.get<PendingMessage[]>('pendingMessages') ?? [];
+    return pending.filter((entry) => entry.message.isWake && this.messageScope(entry.message) === this.messageScope(source))
+      .map((entry) => ({ id: entry.message.eventId ?? entry.message.id, dueAt: entry.dueAt, reason: entry.message.wakeReason ?? '' }));
+  }
+
+  private async cancelWake(account: QQAccountContext, source: QQGroupMessage, id: string): Promise<boolean> {
+    if (source.accountId !== account.account.id) throw new Error('Wake target does not belong to this account.');
+    let removed = false;
+    await this.updatePending((pending) => pending.filter((entry) => {
+      const matches = entry.message.isWake && this.messageScope(entry.message) === this.messageScope(source) && (entry.message.eventId ?? entry.message.id) === id;
+      removed ||= Boolean(matches);
+      return !matches;
+    }));
+    await this.schedulePendingAlarm();
+    return removed;
+  }
+
+  private async recordQueueFailure(account: QQAccountContext, message: QQGroupMessage, error: unknown): Promise<void> {
+    if (!readBoolean(this.env.LOG_RECORD)) return;
+    const group = (await createRepository(this.env).list('groups')).find((entry) =>
+      entry.accountId === account.account.id && entry.externalId === message.groupId &&
+      (entry.conversationType ?? 'group') === (message.conversationType ?? 'group'));
+    await createConversationLogRepository(this.env).append([{
+      id: `queue-failure:${message.eventId ?? message.id}`, accountId: account.account.id,
+      pluginId: account.account.pluginId, pluginType: 'elysia-best/plugin-chatbot',
+      groupId: group?.id ?? this.messageScope(message), groupExternalId: message.groupId, userId: message.userId,
+      direction: 'in', content: 'QQ message processing failed after retries.', status: 'failed',
+      eventId: message.eventId ?? message.id, details: { error: error instanceof Error ? error.message : 'Unknown error' },
+      createdAt: this.now(), expiresAt: this.now() + 30 * 24 * 60 * 60_000,
+    }]);
+  }
+
+  private updatePending(update: (pending: PendingMessage[]) => PendingMessage[] | Promise<PendingMessage[]>): Promise<void> {
+    const mutation = this.queueMutations.catch(() => undefined).then(async () => {
+      const current = await this.state.storage.get<PendingMessage[]>('pendingMessages') ?? [];
+      const next = await update(current);
+      if (next.length > 500 || new TextEncoder().encode(JSON.stringify(next)).length > 100_000) throw new Error('QQ queue capacity reached.');
+      // 短锁只包住持久状态修改，不包住provider网络调用；先设置alarm再落队列。
+      if (next.length) await this.setQueueAlarm(Math.min(...next.map((entry) => entry.dueAt)));
+      await this.state.storage.put('pendingMessages', next);
+    });
+    this.queueMutations = mutation;
+    return mutation;
+  }
+
+  private async schedulePendingAlarm(): Promise<void> {
+    const pending = await this.state.storage.get<PendingMessage[]>('pendingMessages') ?? [];
+    if (pending.length) await this.setQueueAlarm(Math.max(this.now() + 1, Math.min(...pending.map((entry) => entry.dueAt))));
+  }
+
+  private async setQueueAlarm(when: number): Promise<void> {
+    const gatewayAt = await this.state.storage.get<number>('gatewayAlarmAt');
+    await this.state.storage.setAlarm(Math.max(this.now() + 1, Math.min(when, gatewayAt ?? Infinity)));
+  }
+
+  private async setGatewayAlarm(when: number): Promise<void> {
+    await this.state.storage.put('gatewayAlarmAt', when);
+    const pending = await this.state.storage.get<PendingMessage[]>('pendingMessages') ?? [];
+    await this.state.storage.setAlarm(Math.max(this.now() + 1, Math.min(when, ...pending.map((entry) => entry.dueAt))));
+  }
+
+  private async readJson<T>(key: string, data?: DurableStorageData): Promise<T | undefined> {
+    if (!data && this.state.storage.transaction) return this.state.storage.transaction((transaction) => this.readJson<T>(key, transaction));
+    data ??= this.state.storage;
+    const root = await data.get<T | ChunkManifest>(key);
+    if (!root || typeof root !== 'object' || !('format' in root) || root.format !== 'qq-json-chunks-v1') return root as T | undefined;
+    const manifest = root as ChunkManifest;
+    if (!Number.isInteger(manifest.count) || manifest.count < 1 || manifest.count > 128) throw new Error('QQ state chunk manifest is invalid.');
+    const parts = await Promise.all(Array.from({ length: manifest.count }, (_, index) => data.get<string>(`${key}:${manifest.version}:${index}`)));
+    if (parts.some((part) => typeof part !== 'string')) throw new Error('QQ state chunks are incomplete.');
+    return JSON.parse(parts.join('')) as T;
+  }
+
+  private async writeJson(key: string, value: unknown, maxBytes: number): Promise<void> {
+    const text = JSON.stringify(value);
+    if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error('QQ persistent state exceeds its byte limit.');
+    const parts: string[] = [];
+    for (let start = 0; start < text.length;) {
+      let end = Math.min(text.length, start + 20_000);
+      if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
+      parts.push(text.slice(start, end)); start = end;
+    }
+    const version = crypto.randomUUID();
+    const write = async (data: DurableStorageData) => {
+      const previous = await data.get<ChunkManifest>(key);
+      for (let index = 0; index < parts.length; index++) await data.put(`${key}:${version}:${index}`, parts[index]);
+      // root最后切换；真实DO事务使整轮分片及root原子提交，不会暴露半份知识/上下文。
+      await data.put(key, { format: 'qq-json-chunks-v1', version, count: parts.length } satisfies ChunkManifest);
+      if (this.state.storage.transaction && previous?.format === 'qq-json-chunks-v1') {
+        for (let index = 0; index < previous.count; index++) await data.delete(`${key}:${previous.version}:${index}`);
+      }
+    };
+    if (this.state.storage.transaction) await this.state.storage.transaction(write);
+    else await write(this.state.storage);
+  }
+
+  private async legacyGroupId(scope: string): Promise<string | undefined> {
+    let identity: unknown;
+    try { identity = JSON.parse(scope); } catch { return undefined; }
+    if (!Array.isArray(identity) || identity.length !== 3 || identity[1] !== 'group' || identity.some((part) => typeof part !== 'string')) return undefined;
+    const accountId = this.accountId ?? await this.state.storage.get<string>('queueAccountId') ?? await this.state.storage.get<string>('accountId');
+    if (identity[0] !== accountId) return undefined;
+    const group = (await createRepository(this.env).list('groups')).find((entry) =>
+      entry.accountId === accountId && entry.externalId === identity[2] && (entry.conversationType ?? 'group') === 'group');
+    return group?.id;
+  }
+
+  private async loadContext(scope: string): Promise<ChatMessage[]> {
+    const key = `context:${encodeURIComponent(scope)}`;
+    const current = await this.readJson<ChatMessage[]>(key);
+    if (current !== undefined) return current;
+    const legacyId = await this.legacyGroupId(scope);
+    if (!legacyId) return [];
+    const legacy = await this.readJson<ChatMessage[]>(`context:${encodeURIComponent(legacyId)}`);
+    if (!legacy) return [];
+    const retained = completeRecentTurns(legacy, MAX_CONTEXT_ENTRIES);
+    await this.writeJson(key, retained, 2 * 1024 * 1024);
+    return retained;
+  }
+
+  private async claimApproval(scopeKey: string, approvalId: string): Promise<boolean> {
+    const key = `approvalClaim:${await this.messageHash(JSON.stringify([scopeKey, approvalId]))}`;
+    const claim = async (data: DurableStorageData): Promise<boolean> => {
+      if (await data.get<boolean>(key)) return false;
+      await data.put(key, true);
+      return true;
+    };
+    const operation = this.approvalClaims.catch(() => undefined).then(() =>
+      this.state.storage.transaction ? this.state.storage.transaction(claim) : claim(this.state.storage));
+    this.approvalClaims = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private conversationStore(): GroupConversationStore & { approvalAuthority: 'serialized' } {
     return {
-      getRecent: async (groupId, limit) => {
-        const entries = await this.state.storage.get<GroupContextMessage[]>(`context:${encodeURIComponent(groupId)}`) ?? [];
-        return entries.slice(-limit);
-      },
+      approvalAuthority: 'serialized',
+      getRecent: async (groupId, limit) => completeRecentTurns(await this.loadContext(groupId), limit),
       append: async (groupId, entries) => {
-        const key = `context:${encodeURIComponent(groupId)}`;
-        const current = await this.state.storage.get<GroupContextMessage[]>(key) ?? [];
-        await this.state.storage.put(key, [...current, ...entries].slice(-MAX_CONTEXT_ENTRIES));
+        const current = await this.loadContext(groupId);
+        await this.writeJson(`context:${encodeURIComponent(groupId)}`, completeRecentTurns([...current, ...entries], MAX_CONTEXT_ENTRIES), 2 * 1024 * 1024);
       },
+      replace: async (groupId, entries) => this.writeJson(`context:${encodeURIComponent(groupId)}`, completeRecentTurns(entries, MAX_CONTEXT_ENTRIES), 2 * 1024 * 1024),
+      clear: async (groupId) => this.writeJson(`context:${encodeURIComponent(groupId)}`, [], 2 * 1024 * 1024),
+      getState: async (groupId) => await this.readJson<JsonObject>(`chatState:${encodeURIComponent(groupId)}`) ?? {},
+      setState: async (groupId, value) => this.writeJson(`chatState:${encodeURIComponent(groupId)}`, value, 1024 * 1024),
+      claimApproval: (scopeKey, approvalId) => this.claimApproval(scopeKey, approvalId),
     };
   }
 
@@ -429,15 +744,31 @@ export class QQGatewayDurableObject {
     return `cost:${encodeURIComponent(groupId)}`;
   }
 
+  private async messageHash(messageId: string): Promise<string> {
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(messageId)));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  private async wasEventProcessed(message: QQGroupMessage): Promise<boolean> {
+    return await this.wasMessageProcessed(message.eventId ?? message.id) || (!message.isWake && await this.wasMessageProcessed(message.id));
+  }
+
   private async wasMessageProcessed(messageId: string): Promise<boolean> {
-    const ids = await this.state.storage.get<string[]>('recentMessageIds') ?? [];
-    return ids.includes(messageId);
+    const legacy = await this.state.storage.get<string[]>('recentMessageIds') ?? [];
+    if (legacy.includes(messageId)) return true;
+    const hash = await this.messageHash(messageId);
+    const entries = await this.state.storage.get<Array<{ id: string; at: number }>>(`processedMessages:${hash.slice(0, 2)}`) ?? [];
+    return entries.some((entry) => entry.id === hash && this.now() - entry.at < DEDUPE_RETENTION_MS);
   }
 
   private async markMessageProcessed(messageId: string): Promise<void> {
-    const ids = await this.state.storage.get<string[]>('recentMessageIds') ?? [];
-    if (ids.includes(messageId)) return;
-    await this.state.storage.put('recentMessageIds', [...ids, messageId].slice(-MAX_RECENT_MESSAGE_IDS));
+    const hash = await this.messageHash(messageId);
+    const key = `processedMessages:${hash.slice(0, 2)}`;
+    const entries = (await this.state.storage.get<Array<{ id: string; at: number }>>(key) ?? [])
+      .filter((entry) => this.now() - entry.at < DEDUPE_RETENTION_MS);
+    if (entries.some((entry) => entry.id === hash)) return;
+    if (entries.length >= MAX_RECENT_MESSAGE_IDS) throw new Error('QQ deduplication capacity reached.');
+    await this.state.storage.put(key, [...entries, { id: hash, at: this.now() }]);
   }
 
   private sendHeartbeat(): void {
@@ -483,7 +814,9 @@ export class QQGatewayDurableObject {
     this.accountId = undefined;
     await this.closeSocket();
     await this.state.storage.delete('accountId');
+    await this.state.storage.delete('gatewayAlarmAt');
     await this.state.storage.deleteAlarm();
+    await this.schedulePendingAlarm();
   }
 
   private async scheduleReconnect(): Promise<void> {
@@ -491,7 +824,7 @@ export class QQGatewayDurableObject {
     if (!this.accountId) return;
     const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(this.reconnectAttempt, 6));
     this.reconnectAttempt += 1;
-    await this.state.storage.setAlarm(this.now() + delay);
+    await this.setGatewayAlarm(this.now() + delay);
   }
 }
 

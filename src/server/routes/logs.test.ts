@@ -31,6 +31,8 @@ describe('conversation log filtering', () => {
       },
       {
         id: 'within', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1',
+        pluginId: 'plugin-custom', pluginType: 'arbitrary-plugin', eventId: 'event-custom', status: 'success',
+        details: { unknownField: { user_openid: 'visible-openid', clientSecret: 'must-not-return' } },
         direction: 'in', content: 'within range', createdAt: Date.parse('2025-01-11T12:00:00.000Z'), expiresAt: now + 60_000,
       },
       {
@@ -62,5 +64,17 @@ describe('conversation log filtering', () => {
     expect(response.status).toBe(200);
     expect(payload.items.map((log) => log.id)).toEqual(['within']);
     expect(payload.total).toBe(1);
+    const filtered = await router.request('/logs?q=visible-openid&pluginId=plugin-custom&pluginType=arbitrary-plugin', { headers: { Cookie: cookie } }, bindings);
+    const result = await filtered.json() as { items: ConversationLog[]; fields: Array<{ key: string }> };
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.userId).toBe('user-1');
+    expect(JSON.stringify(result)).not.toContain('must-not-return');
+    expect(result.fields.map((field) => field.key)).toContain('details.unknownField');
+    const absent = await router.request('/logs?pluginId=absent', { headers: { Cookie: cookie } }, bindings);
+    expect((await absent.json() as { total: number }).total).toBe(0);
+    const openidMatched = await router.request('/logs?openid=visible-openid&q=within', { headers: { Cookie: cookie } }, bindings);
+    expect((await openidMatched.json() as { total: number }).total).toBe(1);
+    const openidMissing = await router.request('/logs?openid=missing-openid', { headers: { Cookie: cookie } }, bindings);
+    expect((await openidMissing.json() as { total: number }).total).toBe(0);
   });
 });

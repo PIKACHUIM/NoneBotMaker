@@ -8,13 +8,15 @@ export async function resolveQQAccountByAppId(appId: string, bindings: RuntimeBi
   const repository = createRepository(bindings);
   const accounts = await repository.list('accounts');
   let resolved: QQAccountContext | null = null;
+  let matched = false;
   for (const stored of accounts) {
     if (stored.protocol !== 'qq') continue;
-    const credentials = stored.credentials as JsonObject | undefined;
-    if (credentials?.appId !== appId) continue;
     const account = await decryptSecrets(stored as JsonObject, bindings) as unknown as BotAccountRecord;
-    const plugin = await repository.get('plugins', account.pluginId);
-    if (resolved) return null;
+    if (account.credentials?.appId !== appId) continue;
+    if (matched) return null;
+    matched = true;
+    const storedPlugin = await repository.get('plugins', account.pluginId);
+    const plugin = storedPlugin ? await decryptSecrets(storedPlugin as JsonObject, bindings) : null;
     resolved = toQQAccountContext(account, plugin);
   }
   return resolved;
@@ -25,7 +27,8 @@ export async function resolveQQAccountById(accountId: string, bindings: RuntimeB
   const stored = await repository.get('accounts', accountId);
   if (!stored || stored.protocol !== 'qq') return null;
   const account = await decryptSecrets(stored as JsonObject, bindings) as unknown as BotAccountRecord;
-  const plugin = await repository.get('plugins', account.pluginId);
+  const storedPlugin = await repository.get('plugins', account.pluginId);
+  const plugin = storedPlugin ? await decryptSecrets(storedPlugin as JsonObject, bindings) : null;
   return toQQAccountContext(account, plugin);
 }
 
@@ -33,13 +36,14 @@ function toQQAccountContext(
   account: BotAccountRecord,
   plugin: JsonObject | null,
 ): QQAccountContext | null {
-  const appId = account.credentials.appId;
-  const botSecret = account.credentials.botSecret;
-  const clientSecret = account.credentials.clientSecret;
+  const credentials = account.credentials ?? {};
+  const appId = credentials.appId;
+  const secrets = [credentials.appSecret, credentials.botSecret, credentials.clientSecret]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  const appSecret = secrets[0];
   if (
-    typeof appId !== 'string' ||
-    typeof botSecret !== 'string' ||
-    typeof clientSecret !== 'string' ||
+    typeof appId !== 'string' || !appId || appId.length > 64 ||
+    !appSecret || appSecret.length > 4096 || secrets.some((value) => value !== appSecret) ||
     !plugin ||
     plugin.type !== CHATBOT_PLUGIN_TYPE
   ) {
@@ -48,8 +52,7 @@ function toQQAccountContext(
   return {
     account,
     appId,
-    botSecret,
-    clientSecret,
+    appSecret,
     pluginEnabled: plugin.enabled === true,
     pluginConfig: plugin.config as JsonObject | undefined,
   };

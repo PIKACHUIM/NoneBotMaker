@@ -1,12 +1,13 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
 import type { BotAccountRecord, JsonObject, RecordKind, RuntimeBindings } from '../../shared/types';
-import { missingRequiredField, normalizeFieldValues, pluginDefinition } from '../../shared/plugin-catalog';
+import { effectiveGroupConfig, missingRequiredField, normalizeFieldValues, pluginDefinition } from '../../shared/plugin-catalog';
+import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
-import { decryptSecrets, encryptSecrets, redactSecrets } from '../storage/secrets';
+import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
-const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'skills', 'mcps', 'rules'];
+const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules'];
 
 export class ApiError extends Error {
   constructor(readonly status: 400 | 404 | 409 | 502 | 503, readonly code: string) {
@@ -61,6 +62,38 @@ function numberField(source: JsonObject, key: string, fallback: number, min?: nu
   return value;
 }
 
+function httpUrl(value: string, key: string): string {
+  if (value === '') return '';
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error();
+    return url.toString();
+  } catch {
+    throw new ApiError(400, `invalid_${key}`);
+  }
+}
+
+function normalizedMcpConfig(config: JsonObject): JsonObject {
+  const result = { ...config };
+  result.url = httpUrl(stringField(config, 'url', ''), 'mcp_url');
+  const token = config.authToken ?? config.bearerToken ?? config.token;
+  if (token !== undefined) {
+    if (typeof token !== 'string') throw new ApiError(400, 'invalid_mcp_authToken');
+    result.authToken = token.replace(/^Bearer\s+/i, '').trim();
+  }
+  const allowedTools = config.allowedTools ?? config.tools;
+  if (allowedTools !== undefined) {
+    if (!Array.isArray(allowedTools) || allowedTools.some((value) => typeof value !== 'string')) {
+      throw new ApiError(400, 'invalid_mcp_allowedTools');
+    }
+    result.allowedTools = [...new Set(allowedTools.map((value) => value.trim()).filter(Boolean))];
+  }
+  delete result.bearerToken;
+  delete result.token;
+  delete result.tools;
+  return result;
+}
+
 function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, createdAt: string, updatedAt: string): StoredRecord {
   const common = { id, createdAt, updatedAt };
   switch (kind) {
@@ -68,13 +101,18 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
       const type = stringField(data, 'type', CHATBOT_PLUGIN_TYPE);
       const definition = pluginDefinition(type);
       if (!definition) throw new ApiError(400, 'unsupported_plugin_type');
+      const config = objectField(data, 'config');
       return {
         ...common,
         type,
         name: stringField(data, 'name'),
         description: stringField(data, 'description', ''),
         enabled: booleanField(data, 'enabled', true),
-        config: normalizeFieldValues(definition.configFields, objectField(data, 'config')),
+        config: {
+          ...config,
+          ...normalizeFieldValues(definition.configFields, config),
+          ...normalizeFieldValues(definition.groupFields.filter((field) => config[field.key] !== undefined), config),
+        },
       };
     }
     case 'accounts':
@@ -89,11 +127,15 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
       };
     case 'groups': {
       const reasoningEffort = stringField(data, 'reasoningEffort', 'medium');
-      if (!['low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
+      if (!['default', 'low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
+      const conversationType = stringField(data, 'conversationType', 'group');
+      if (!['group', 'private'].includes(conversationType)) throw new ApiError(400, 'invalid_conversationType');
       return {
         ...common,
         accountId: stringField(data, 'accountId'),
-        externalId: stringField(data, 'externalId'),
+        externalId: stringField(data, 'externalId').trim(),
+        conversationType,
+        config: objectField(data, 'config'),
         name: stringField(data, 'name'),
         enabled: booleanField(data, 'enabled', true),
         providerId: stringField(data, 'providerId'),
@@ -103,8 +145,8 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         nonMentionReplyRate: numberField(data, 'nonMentionReplyRate', DEFAULT_NON_MENTION_REPLY_RATE, 0, 1),
         whitelistEnabled: booleanField(data, 'whitelistEnabled', false),
         whitelistUserIds: stringArrayField(data, 'whitelistUserIds'),
-        inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0),
-        outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
+        ...(data.inputCostPerMillion === undefined ? {} : { inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0) }),
+        ...(data.outputCostPerMillion === undefined ? {} : { outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0) }),
         dailyCostLimit: numberField(data, 'dailyCostLimit', 0, 0),
         monthlyCostLimit: numberField(data, 'monthlyCostLimit', 0, 0),
         totalCostLimit: numberField(data, 'totalCostLimit', 0, 0),
@@ -113,7 +155,11 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         ruleIds: stringArrayField(data, 'ruleIds'),
       };
     }
-    case 'providers':
+    case 'providers': {
+      const mediaCapabilities = data.mediaCapabilities === undefined ? ['image'] : stringArrayField(data, 'mediaCapabilities');
+      if (mediaCapabilities.some((value) => !['image', 'audio', 'video', 'file', 'speech'].includes(value))) {
+        throw new ApiError(400, 'invalid_mediaCapabilities');
+      }
       return {
         ...common,
         name: stringField(data, 'name'),
@@ -121,7 +167,30 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         apiKey: stringField(data, 'apiKey', ''),
         enabled: booleanField(data, 'enabled', true),
         models: stringArrayField(data, 'models'),
+        priceMultiplier: numberField(data, 'priceMultiplier', 1, 0),
+        mediaCapabilities: [...new Set(mediaCapabilities)],
       };
+    }
+    case 'prices': {
+      const currency = stringField(data, 'currency', 'USD');
+      if (currency !== 'USD') throw new ApiError(400, 'invalid_currency');
+      const unit = stringField(data, 'unit', 'tokens');
+      if (!['tokens', 'characters'].includes(unit)) throw new ApiError(400, 'invalid_unit');
+      const model = stringField(data, 'model').trim();
+      if (!model) throw new ApiError(400, 'invalid_model');
+      return {
+        ...common,
+        name: stringField(data, 'name'),
+        model,
+        currency,
+        unit,
+        enabled: booleanField(data, 'enabled', true),
+        inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0),
+        outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
+        ...(data.cacheInputCostPerMillion === undefined || data.cacheInputCostPerMillion === null ? {} : { cacheInputCostPerMillion: numberField(data, 'cacheInputCostPerMillion', 0, 0) }),
+        ...(data.sourceUrl === undefined ? {} : { sourceUrl: httpUrl(stringField(data, 'sourceUrl'), 'sourceUrl') }),
+      };
+    }
     case 'skills':
     case 'mcps':
     case 'rules':
@@ -130,7 +199,7 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         name: stringField(data, 'name'),
         description: stringField(data, 'description', ''),
         enabled: booleanField(data, 'enabled', true),
-        config: objectField(data, 'config'),
+        config: kind === 'mcps' ? normalizedMcpConfig(objectField(data, 'config')) : objectField(data, 'config'),
       };
   }
 }
@@ -167,20 +236,70 @@ async function normalizeAccountCredentials(
   const definition = pluginDefinition(typeof plugin?.type === 'string' ? plugin.type : undefined);
   if (!definition) return;
 
-  let credentials = record.credentials as JsonObject;
-  if (previous) {
-    const oldAccount = await decryptSecrets(previous as JsonObject, bindings) as unknown as BotAccountRecord;
-    const oldCredentials = oldAccount.credentials ?? {};
-    credentials = {
-      ...oldCredentials,
-      ...Object.fromEntries(Object.entries(credentials).filter(([, value]) => value !== '' && value !== undefined && value !== null)),
-    };
+  const submitted = record.credentials as JsonObject;
+  const oldAccount = previous ? await decryptSecrets(previous as JsonObject, bindings) as unknown as BotAccountRecord : undefined;
+  const supplied = Object.fromEntries(Object.entries(submitted).filter(([, value]) =>
+    value !== '' && value !== '********' && value !== undefined && value !== null));
+  const credentials: JsonObject = { ...oldAccount?.credentials, ...supplied };
+  if (definition.type === CHATBOT_PLUGIN_TYPE) {
+    if (record.protocol !== 'qq') throw new ApiError(400, 'unsupported_protocol');
+    const explicit = supplied.appSecret;
+    const canonical = explicit ?? (credentials.appSecret || undefined);
+    const botSecret = credentials.botSecret || undefined;
+    const clientSecret = credentials.clientSecret || undefined;
+    if (canonical === undefined && botSecret && clientSecret && botSecret !== clientSecret) {
+      throw new ApiError(400, 'legacy_secret_conflict_reenter_appSecret');
+    }
+    credentials.appSecret = canonical ?? botSecret ?? clientSecret;
+    if (typeof credentials.appId === 'string') credentials.appId = credentials.appId.trim();
+    if (oldAccount && (oldAccount.pluginId !== record.pluginId || oldAccount.credentials.appId !== credentials.appId)) {
+      if ((await repository.list('groups')).some((group) => group.accountId === record.id)) {
+        throw new ApiError(409, 'account_binding_locked');
+      }
+    }
+    for (const existing of await repository.list('accounts')) {
+      if (existing.id === record.id || existing.protocol !== record.protocol) continue;
+      const account = await decryptSecrets(existing, bindings) as unknown as BotAccountRecord;
+      if (account.credentials?.appId === credentials.appId) throw new ApiError(409, 'duplicate_appId');
+    }
   }
 
   const normalized = normalizeFieldValues(definition.credentialFields, credentials);
   const missing = missingRequiredField(definition.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);
   record.credentials = normalized;
+  record.config = {
+    ...(record.config as JsonObject),
+    ...normalizeFieldValues(definition.accountFields, record.config as JsonObject),
+  };
+}
+
+async function readableConfig(config: JsonObject | undefined, bindings: RuntimeBindings): Promise<JsonObject> {
+  const count = config?.agent_max_output_tokens;
+  if (!isEncryptedSecret(count)) return config ?? {};
+  const counts = await decryptSecrets({ agent_max_output_tokens: count }, bindings);
+  return { ...config, ...counts };
+}
+
+async function normalizeGroupConfig(repository: RecordRepository, record: StoredRecord, bindings: RuntimeBindings, previous?: StoredRecord): Promise<void> {
+  if (!record.externalId) throw new ApiError(400, 'invalid_externalId');
+  if (previous && (record.accountId !== previous.accountId || record.externalId !== previous.externalId ||
+    record.conversationType !== (previous.conversationType ?? 'group'))) {
+    throw new ApiError(409, 'group_binding_locked');
+  }
+  const account = await repository.get('accounts', record.accountId as string);
+  const plugin = account ? await repository.get('plugins', account.pluginId as string) : null;
+  const definition = pluginDefinition(typeof plugin?.type === 'string' ? plugin.type : undefined);
+  const config = await readableConfig(record.config as JsonObject, bindings);
+  const pluginConfig = await readableConfig(plugin?.config as JsonObject | undefined, bindings);
+  record.config = definition ? {
+    ...config,
+    ...normalizeFieldValues(definition.groupFields, { ...pluginConfig, ...config }),
+  } : config;
+  const duplicate = (await repository.list('groups')).some((group) => group.id !== record.id &&
+    group.accountId === record.accountId && group.externalId === record.externalId &&
+    (group.conversationType ?? 'group') === record.conversationType);
+  if (duplicate) throw new ApiError(409, 'duplicate_conversation');
 }
 
 async function assertReferences(repository: RecordRepository, kind: RecordKind, record: StoredRecord): Promise<void> {
@@ -216,8 +335,40 @@ async function assertNotReferenced(repository: RecordRepository, kind: RecordKin
   }
 }
 
-async function redacted(record: StoredRecord): Promise<StoredRecord> {
-  return await redactSecrets(record as JsonObject) as StoredRecord;
+async function redacted(record: StoredRecord, kind?: RecordKind, bindings?: RuntimeBindings): Promise<StoredRecord> {
+  const visible = await redactSecrets(record as JsonObject) as StoredRecord;
+  if (kind === 'accounts' && bindings) {
+    const account = await decryptSecrets(record, bindings) as unknown as BotAccountRecord;
+    const credentials = account.credentials ?? {};
+    visible.credentials = { appId: credentials.appId ?? '', appSecret: '********', configured: true, masked: true };
+    if (!credentials.appSecret && credentials.botSecret && credentials.clientSecret && credentials.botSecret !== credentials.clientSecret) {
+      visible.credentialStatus = 'legacy_secret_conflict_reenter_appSecret';
+    }
+  }
+  return visible;
+}
+
+async function visibleRecord(repository: RecordRepository, kind: RecordKind, record: StoredRecord, bindings: RuntimeBindings): Promise<StoredRecord> {
+  if (kind === 'groups') {
+    const account = await repository.get('accounts', record.accountId as string);
+    const plugin = account ? await repository.get('plugins', account.pluginId as string) : null;
+    const config = await readableConfig(record.config as JsonObject | undefined, bindings);
+    const pluginConfig = await readableConfig(plugin?.config as JsonObject | undefined, bindings);
+    record = {
+      ...groupCostDefaults(record),
+      conversationType: record.conversationType ?? 'group',
+      config: { ...config, ...effectiveGroupConfig(pluginConfig, config) },
+    };
+  } else if (kind === 'plugins') {
+    record = { ...record, config: await readableConfig(record.config as JsonObject | undefined, bindings) };
+  } else if (kind === 'providers') {
+    record = { ...record, priceMultiplier: record.priceMultiplier ?? 1, mediaCapabilities: record.mediaCapabilities ?? ['image'] };
+  } else if (kind === 'prices') {
+    record = { ...record, unit: record.unit ?? 'tokens' };
+  } else if (kind === 'mcps') {
+    record = { ...record, config: normalizedMcpConfig(objectField(await redactSecrets(record), 'config')) };
+  }
+  return redacted(record, kind, bindings);
 }
 
 function groupCostDefaults(record: StoredRecord): StoredRecord {
@@ -238,14 +389,20 @@ function setCostConsistencyHeader(context: Context<{ Bindings: RuntimeBindings }
 }
 
 export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }>): void {
+  api.get('/prices/presets', (context) => context.json({
+    data: MODEL_PRICE_PRESETS,
+    checkedAt: MODEL_PRICE_CHECKED_AT,
+    realtime: false,
+  }));
+
   api.get('/:kind', async (context) => {
     const kind = context.req.param('kind');
     assertKind(kind);
     setCostConsistencyHeader(context, kind);
     const repository = await recordRepository(context);
     const records = await repository.list(kind);
-    const visibleRecords = kind === 'groups' ? records.map(groupCostDefaults) : records;
-    return context.json({ data: await Promise.all(visibleRecords.map(redacted)) });
+    context.header('X-Storage-Consistency', repository.consistency);
+    return context.json({ data: await Promise.all(records.map((record) => visibleRecord(repository, kind, record, context.env))) });
   });
 
   api.post('/:kind', async (context) => {
@@ -260,10 +417,11 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     const record = normalizedRecord(kind, data, id, now, now);
     await assertReferences(repository, kind, record);
     if (kind === 'accounts') await normalizeAccountCredentials(repository, record, undefined, context.env);
+    if (kind === 'groups') await normalizeGroupConfig(repository, record, context.env);
     const encrypted = await encryptSecrets(record, undefined, context.env);
     await repository.put(kind, encrypted);
     context.header('X-Storage-Consistency', repository.consistency);
-    return context.json({ data: await redacted(encrypted) }, 201);
+    return context.json({ data: await visibleRecord(repository, kind, encrypted, context.env) }, 201);
   });
 
   api.get('/:kind/:id', async (context) => {
@@ -274,7 +432,7 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     const record = await repository.get(kind, context.req.param('id'));
     if (!record) throw new ApiError(404, 'not_found');
     context.header('X-Storage-Consistency', repository.consistency);
-    return context.json({ data: await redacted(kind === 'groups' ? groupCostDefaults(record) : record) });
+    return context.json({ data: await visibleRecord(repository, kind, record, context.env) });
   });
 
   api.on(['PUT', 'PATCH'], '/:kind/:id', async (context) => {
@@ -286,15 +444,31 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     if (!previous) throw new ApiError(404, 'not_found');
     const data = await requestBody(context);
     const now = new Date().toISOString();
-    const visiblePrevious = await redacted(previous);
+    const visiblePrevious = await visibleRecord(repository, kind, previous, context.env);
     const merged = { ...visiblePrevious, ...data, id } as JsonObject;
+    if (data.config !== undefined) merged.config = { ...objectField(visiblePrevious, 'config'), ...objectField(data, 'config') };
+    if (kind === 'mcps') {
+      const config = objectField(merged, 'config');
+      const incoming = objectField(data, 'config');
+      if (incoming.authToken === undefined && (incoming.bearerToken !== undefined || incoming.token !== undefined)) {
+        config.authToken = incoming.bearerToken ?? incoming.token;
+      }
+      if (incoming.allowedTools === undefined && incoming.tools !== undefined) config.allowedTools = incoming.tools;
+      const oldConfig = objectField(previous, 'config');
+      if (oldConfig.authToken === undefined && (oldConfig.bearerToken !== undefined || oldConfig.token !== undefined) &&
+        (!config.authToken || config.authToken === '********')) {
+        const clearConfig = objectField(await decryptSecrets(previous, context.env), 'config');
+        merged.config = { ...config, authToken: clearConfig.bearerToken ?? clearConfig.token };
+      }
+    }
     const record = normalizedRecord(kind, merged, id, previous.createdAt, now);
     await assertReferences(repository, kind, record);
     if (kind === 'accounts') await normalizeAccountCredentials(repository, record, previous, context.env);
+    if (kind === 'groups') await normalizeGroupConfig(repository, record, context.env, previous);
     const encrypted = await encryptSecrets(record, previous, context.env);
     await repository.put(kind, encrypted);
     context.header('X-Storage-Consistency', repository.consistency);
-    return context.json({ data: await redacted(encrypted) });
+    return context.json({ data: await visibleRecord(repository, kind, encrypted, context.env) });
   });
 
   api.delete('/:kind/:id', async (context) => {

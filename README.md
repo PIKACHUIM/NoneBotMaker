@@ -80,7 +80,7 @@ npx wrangler secret put SYS_SECRET
 https://<your-worker-domain>/setup
 ```
 
-输入 `SYS_SECRET` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0003` 的 D1 migration 标记。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。初始化完成后即可登录管理台。
+输入 `SYS_SECRET` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0004` 的 D1 migration 标记。`0004` 为插件扩展日志增加元数据字段。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。升级已有部署时也应执行初始化或 CLI migration。
 
 也可以在部署前使用 CLI 应用迁移：
 
@@ -94,7 +94,7 @@ npx wrangler d1 migrations apply your-d1-database-name --remote --config wrangle
 
 将 `wrangler.jsonc` 的 `vars.API_METHOD` 改为 `websocket`。配置中 Durable Object binding 名为 `QQ_GATEWAY_SESSIONS`，class 为 `QQGatewayDurableObject`，并通过 `v1` / `new_sqlite_classes` migration 初始化。首次 Worker 请求会为已配置 QQ 账号启动 Gateway 会话。
 
-DO 持久化账号、Gateway session/sequence、上下文和成本；alarm 在冷启动或断线后恢复连接。Outbound WebSocket 不支持 DO hibernation，会使 Durable Object 持续活跃并产生持续资源/计费成本，alarm 每 5 分钟维护连接。切回 webhook 时 Worker 会通过 `/disconnect` 清理旧会话；无 DO binding 的默认 webhook 不依赖 Durable Object，也不会启动 Gateway session。
+DO 持久化账号、Gateway session/sequence、上下文、成本及消息队列；alarm 在冷启动或断线后恢复连接并处理到期队列。Outbound WebSocket 不支持 DO hibernation，会使 Durable Object 持续活跃并产生持续资源/计费成本，alarm 每 5 分钟维护连接。Cloudflare 的 Webhook 也使用 `QQ_GATEWAY_SESSIONS` 持久化消息、去重、合并窗口与出站限流，存储成功后立即 ACK；缺少该 binding 会返回 `queue_unavailable`。切回 Webhook 只关闭 Gateway 连接，不应清除待处理消息的 alarm。
 
 ## EdgeOne 与 ESA
 
@@ -127,19 +127,41 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 
 管理台会按声明生成开关、文本框、数字框、下拉框或密码框；服务端会按声明做类型归一化、默认值和必填校验。账号字段使用同一套声明机制，密钥字段留空时保留原值。插件配置与账号凭据不再提供 JSON 输入框。
 
-内置 `elysia-best/plugin-chatbot` 的字段已与插件的 `Settings` / `nonebot2-chat-docker` 环境变量对齐，包括 `AGENT_*`、`BRIDGE_*`、`MAX_CONTEXT`、`COMPACT_RATE`、`BRAVE_API_KEY`。当前 Worker 已接入模型回退、群/owner 白名单、运行模式、回复分段、每分钟限流、上下文预算和成本回退；语音、黑话抽取、MCP、本地路径和联网搜索字段会保存，但对应能力暂未在 Worker 运行时启用。
+配置严格按 `插件 → 多个平台账号 → 多个群聊/私聊策略` 分层：
+
+- 插件通过 `configFields` 声明全局配置，通过 `credentialFields` / `accountFields` 声明账号配置，通过 `groupFields` 声明会话配置，通过 `logFields` 声明日志字段的双语名称。
+- QQ 平台账号只需要 `AppID` 和 `AppSecret`。旧 `botSecret` / `clientSecret` 相同时可兼容；不相同时必须重新填写 AppSecret，不能静默任选密钥。
+- 会话策略选择 AI API、模型、思考强度、多个 MCP 和 Skills/Rules，并配置访问名单、运行模式、分段与限流、合并窗口、上下文预算和压缩比例。
+- AI API 保存地址、密钥、价格倍率及实际支持的媒体能力。媒体通过所选 API 处理；不支持的附件会明确标注，不假装已读取。
+- 模型单价在「接口能力 → 模型单价」管理。预置是注明来源和日期的手动导入快照，不会自动修改已保存价格。
+- 无效的本地工作区、状态目录、控制台令牌、语音库目录及未实现的群黑话配置已经移除。旧字段仅为数据兼容保留，不再作为可编辑项。
+
+内置聊天执行链支持 JSON/流式 SSE 响应、多轮工具调用、多个 MCP 的发现与调用、Skills/Rules 提示词、历史摘要压缩和身份元数据。`chat` 正常回复；`reserved` 抑制 `[SILENT]`；`reserved2` 仍运行 Agent，但只通过发送工具发消息；`closed-agent` 仅允许管理员私聊。管理员可通过 `/status`、`/reset`、`/mode`、`/role`、`/memory` 管理当前会话。
+
+- `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理命名角色卡，支持按运行模式渲染内容。
+- 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。不会跨账号或跨会话共享。
+- MCP 非只读操作先持久化待审批，不会因模型提出调用就执行。管理员通过 `/approvals`、`/approval <id>` 检查请求参数，使用 `/approve <id>` 或 `/reject <id>` 决定。批准后先原子认领、执行并保存结果，再继续 Agent；未知执行结果不会自动重复外部副作用。KV/Blob 没有原子审批认领时，不开放此类危险工具。
+- `/tools disable <name>`、`/tools enable <name>`、`/tools reset` 控制当前会话的工具；启用操作不能扩充会话原本的权限，切换模式会重置额外禁用项。
+- Cloudflare DO 提供持久化计划唤醒，可通过 `/wake list` 和 `/wake cancel <id>` 管理。唤醒是合成事件，不继承管理员管理命令、记忆写入或语音授权；主动发送受 QQ 平台权限和限额约束。
+- AI 语音配置使用会话选择的 AI API 和语音模型，必须登记字符单价并由用户明确请求语音。生成 MP3 后走 QQ 富媒体上传和发送，不需要本地语音目录。直传上限为 5 MiB。
+
+`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver、适配器生态及本地 shell/文件系统工具不能因此宣称完全兼容。
+
+尚未完整移植上游的表情素材审核与持久素材库、完整控制台会话管理接口及全部 NoneBot driver/adapter。当前媒体发送、角色卡和记忆工具不能替代这些缺失能力；测试通过不代表上游全功能达到 100% 等价。真实 QQ 收发、主动消息权限和供应商媒体能力仍需用测试账号做外部联调。
 
 管理台右上角提供「中 / EN」切换，导航、页面标题、表格、表单和插件字段标签/说明会跟随语言切换。语言选择保存在浏览器本地。
 
 ## 群聊预算与一致性
 
-群配置的 `dailyCostLimit`、`monthlyCostLimit`、`totalCostLimit` 单位为 USD，默认 `0` 表示不限制。支出按 `inputCostPerMillion`、`outputCostPerMillion` 与模型返回的 usage 估算。日限额按 UTC 日期重置，月限额按 UTC 月份重置，总额不重置；达到任一适用限额后，会在模型调用前停止处理。
+群配置的 `dailyCostLimit`、`monthlyCostLimit`、`totalCostLimit` 单位为 USD，默认 `0` 表示不限制。支出使用独立模型单价的输入、缓存输入、输出价格，乘以 AI API 的 `priceMultiplier`；工具循环和摘要请求逐次计费。价格单位可选择每百万 token 或每百万字符，字符单位供语音 API 使用。没有有效价格记录且没有可用旧价格时，运行时拒绝无价模型调用，而不是按零成本绕过预算。日限额按 UTC 日期重置，月限额按 UTC 月份重置，总额不重置；达到任一适用限额后，会在下一次模型调用前停止处理。
 
 群管理 API 响应头 `X-Chatbot-Cost-Consistency` 标明成本 adapter：D1 使用原子累计写入，KV 为 eventual consistency，Blob 为 provider-defined。检查发生在模型调用前，实际 usage 在模型返回后累计，因此检查和计费不是同一事务；并发调用可能超额。这是使用量控制，不是严格财务防护。
 
 ## 对话日志清理
 
-`LOG_RECORD` 默认关闭。启用后记录入站消息和机器人回复，保留 30 天；日志不包含 bot/client secret 或 HTTP headers。
+`LOG_RECORD` 默认关闭。启用后记录用户/会话 OpenID、消息内容、插件类型、事件、模型/工具状态、usage、费用及错误，保留 30 天。日志的 `details` 支持不同插件的嵌套扩展字段，后台按插件双语声明展示，未知字段仍可展开查看和搜索；不会把 token 用量数字误脱敏为密钥。密钥和内联媒体数据不会进入日志。
+
+已有 D1 尚未应用 `0004` 时，扩展字段暂存现有 `records` 表的内部元数据类型，迁移后仍能读取过渡日志，避免代码发布先于迁移时丢数据或报列不存在。建议部署后通过 `/setup` 或 CLI 应用迁移；不会自动执行生产 DDL。
 
 Cloudflare Worker 保留 `scheduled` handler，可在控制台为 Worker 添加每日 `03:00 UTC` 的 Cron Trigger；若账户的 Cron 配额已满，可不配置 Cron，改用外部调度器调用下方受保护接口。`wrangler.example.jsonc` 默认不声明 Cron，避免免费账户触发配额导致部署失败。其他平台或手动触发时，配置清理节流所需 KV，然后使用 `SYS_SECRET` 调用：
 

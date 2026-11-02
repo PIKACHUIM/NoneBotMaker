@@ -78,20 +78,21 @@ describe('conversation log cleanup route', () => {
   });
 
   it('runs D1 scheduled cleanup without a KV throttle binding', async () => {
-    let statement = '';
-    const db = {
+    const statements: string[] = [];
+    const db: D1DatabaseLike = {
       prepare(query: string) {
-        statement = query;
+        statements.push(query);
         return {
-          bind() {
-            return { run: async () => ({ meta: { changes: 4 } }) };
-          },
+          bind() { return this; },
+          async run() { return { meta: { changes: 4 } }; },
+          async all<T>() { return { results: [] as T[] }; },
+          async first<T>() { return null as T | null; },
         };
       },
-    } as unknown as D1DatabaseLike;
+    };
 
     await expect(purgeExpiredLogs({ PLATFORM: 'cloudflare', DB: db }, 1234)).resolves.toBe(4);
-    expect(statement).toContain('DELETE FROM conversation_logs WHERE expires_at <= ?');
+    expect(statements).toContain('DELETE FROM conversation_logs WHERE expires_at <= ?');
   });
 
   it('clears the throttle marker when a cleanup sweep fails', async () => {

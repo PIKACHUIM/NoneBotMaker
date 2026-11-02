@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import type { D1DatabaseLike, D1StatementLike, GroupRecord, KVNamespaceLike, RuntimeBindings } from '../../../shared/types';
-import { createPersistentChatbotStores } from './runtime';
+import { createPersistentChatbotStores, createStoredChatbotHandler } from './runtime';
+import { createRepository } from '../../storage/repository';
+import { encryptSecrets } from '../../storage/secrets';
+import { sendQQMedia } from '../../protocols/qq/api';
 
 const sqliteModule = await import('node:sqlite').catch(() => null);
 const DatabaseSyncConstructor = sqliteModule?.DatabaseSync;
@@ -184,6 +187,115 @@ describe('persistent chatbot cost accounting', () => {
     } finally {
       database.close();
     }
+  });
+
+  it.skipIf(!DatabaseSyncConstructor)('atomically claims each approval once across recreated D1 stores and preserves scope isolation', async () => {
+    const database = new DatabaseSyncConstructor!(':memory:');
+    try {
+      database.exec(readFileSync(new URL('../../../../migrations/0001_initial.sql', import.meta.url), 'utf8'));
+      const bindings = { DB: d1Adapter(database) };
+      const first = createPersistentChatbotStores(bindings).conversationStore;
+      const second = createPersistentChatbotStores(bindings).conversationStore;
+      const results = await Promise.all([first.claimApproval!('scope-1', 'approval'), second.claimApproval!('scope-1', 'approval')]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      await expect(createPersistentChatbotStores(bindings).conversationStore.claimApproval!('scope-1', 'approval')).resolves.toBe(false);
+      await expect(second.claimApproval!('scope-2', 'approval')).resolves.toBe(true);
+      expect(database.prepare("SELECT COUNT(*) AS count FROM records WHERE kind = 'chatbot-approval-claims-v1'").get()).toMatchObject({ count: 2 });
+    } finally { database.close(); }
+  });
+
+  it('does not advertise atomic approval claims for eventual KV stores', () => {
+    const { kv } = memoryKV();
+    expect(createPersistentChatbotStores({ KV: kv }).conversationStore.claimApproval).toBeUndefined();
+  });
+
+  it('persists complete tool turns, supports replacement/reset and isolates memory state', async () => {
+    const { kv } = memoryKV();
+    const { conversationStore } = createPersistentChatbotStores({ KV: kv });
+    const key = JSON.stringify(['account-1', 'group', 'room']);
+    const other = JSON.stringify(['account-2', 'group', 'room']);
+    const entries = [
+      { role: 'user' as const, content: 'first' },
+      { role: 'assistant' as const, content: '', tool_calls: [{ id: 'call', type: 'function' as const, function: { name: 'chat_time', arguments: '{}' } }] },
+      { role: 'tool' as const, content: 'time', tool_call_id: 'call' },
+      { role: 'assistant' as const, content: 'done' },
+    ];
+    await conversationStore.append(key, entries);
+    await expect(conversationStore.getRecent(key, 2)).resolves.toEqual(entries);
+    await expect(conversationStore.getRecent(other, 100)).resolves.toEqual([]);
+    await conversationStore.setState!(key, { memory: 'durable', role: 'short', mode: 'reserved2' });
+    const recreated = createPersistentChatbotStores({ KV: kv }).conversationStore;
+    await expect(recreated.getState!(key)).resolves.toMatchObject({ memory: 'durable', role: 'short' });
+    await expect(recreated.getState!(other)).resolves.toEqual({});
+    await recreated.replace!(key, [{ role: 'assistant', content: 'summary' }]);
+    await expect(recreated.getRecent(key, 100)).resolves.toEqual([{ role: 'assistant', content: 'summary' }]);
+    await recreated.clear!(key);
+    await expect(recreated.getRecent(key, 100)).resolves.toEqual([]);
+    await expect(recreated.getState!(key)).resolves.toMatchObject({ memory: 'durable' });
+  });
+
+  it('decrypts legacy encrypted group numeric config before provider request normalization', async () => {
+    const { kv, values } = memoryKV();
+    kv.list = vi.fn(async (options) => ({ keys: [...values.keys()].filter((key) => key.startsWith(options?.prefix ?? '')).map((name) => ({ name })), list_complete: true }));
+    const bindings: RuntimeBindings = { KV: kv, SYS_SECRET: 'test-sys-secret' };
+    const records = createRepository(bindings);
+    const legacy = await encryptSecrets({ token: 123 }, undefined, bindings);
+    await records.put('groups', { ...group(), config: { agent_max_output_tokens: legacy.token } });
+    await records.put('providers', await encryptSecrets({ id: 'provider-1', name: 'provider', baseUrl: 'https://provider.example/v1', apiKey: 'provider-key', enabled: true, models: ['test-model'], createdAt: '', updatedAt: '' }, undefined, bindings));
+    const requests: any[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).includes('dns-query')) return Response.json({ Status: 0, Answer: [{ type: 1, data: '8.8.8.8' }] });
+      requests.push(JSON.parse(String(init?.body)));
+      return Response.json({ choices: [{ message: { content: 'done' } }] });
+    });
+    const handler = createStoredChatbotHandler(bindings, { ...createPersistentChatbotStores(bindings), sendReply: vi.fn(async () => undefined), fetch: fetchImpl });
+    const account = { appId: 'app', appSecret: 'app-secret', pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
+    await handler(account, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'message', accountId: 'account-1', botId: 'app', groupId: 'external-group-1', userId: 'user', text: 'hello', mentionsBot: true, receivedAt: Date.now() });
+    expect(requests[0].max_completion_tokens).toBe(123);
+  });
+
+  it('runs StoredHandler through real speech generation and QQ media upload/send with character billing', async () => {
+    const { kv, values } = memoryKV();
+    kv.list = vi.fn(async (options) => ({ keys: [...values.keys()].filter((key) => key.startsWith(options?.prefix ?? '')).map((name) => ({ name })), list_complete: true }));
+    const bindings: RuntimeBindings = { KV: kv, SYS_SECRET: 'test-sys-secret' };
+    const records = createRepository(bindings);
+    await records.put('groups', { ...group(), config: { voice_model: 'tts-1' } });
+    await records.put('providers', await encryptSecrets({ id: 'provider-1', name: 'provider', baseUrl: 'https://provider.example/v1', apiKey: 'speech-provider-key', enabled: true, models: ['test-model'], mediaCapabilities: ['speech'], priceMultiplier: 2, createdAt: '', updatedAt: '' }, undefined, bindings));
+    for (const [model, unit, inputPrice] of [['test-model', 'tokens', 1], ['tts-1', 'characters', 15]] as const) await records.put('prices', { id: unit, name: model, model, unit, enabled: true, currency: 'USD', inputCostPerMillion: inputPrice, outputCostPerMillion: 0, createdAt: '', updatedAt: '' });
+    const requests: Array<{ url: string; body: any }> = [];
+    let modelRound = 0;
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).includes('dns-query')) return Response.json({ Status: 0, Answer: [{ type: 1, data: '8.8.8.8' }] });
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url: String(url), body });
+      if (String(url).endsWith('/audio/speech')) return new Response(new Uint8Array([0x49, 0x44, 0x33, 0]), { headers: { 'content-type': 'audio/mpeg' } });
+      if (String(url).endsWith('/app/getAppAccessToken')) return Response.json({ access_token: 'qq-media-token', expires_in: 7200 });
+      if (String(url).endsWith('/files')) return Response.json({ file_info: 'uploaded-speech-file' });
+      if (String(url).endsWith('/messages')) return Response.json({ id: 'qq-sent-id' });
+      return Response.json({ choices: [{ message: ++modelRound === 1 ? { content: '', tool_calls: [{ id: 'speech', type: 'function', function: { name: 'chat_tts', arguments: '{"text":"hello"}' } }] } : { content: 'do not duplicate media' } }], usage: { prompt_tokens: 10, completion_tokens: 0 } });
+    });
+    const stores = createPersistentChatbotStores(bindings);
+    const handler = createStoredChatbotHandler(bindings, { ...stores, fetch: fetchImpl, sendReply: vi.fn(async () => { throw new Error('Unexpected final text send'); }), sendMedia: (account, targetId, id, media, options) => sendQQMedia(account, targetId, id, media, options, fetchImpl) });
+    const account = { appId: 'tts-runtime-app', appSecret: 'tts-runtime-secret', pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
+    await handler(account, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'message', accountId: 'account-1', botId: account.appId, groupId: 'external-group-1', userId: 'user', text: '请用语音回复', mentionsBot: true, receivedAt: Date.now() });
+    const upload = requests.find(({ url }) => url.endsWith('/files'))!;
+    expect(upload.body).toMatchObject({ file_type: 3, srv_send_msg: false, file_data: 'SUQzAA==' });
+    const sent = requests.find(({ url }) => url.endsWith('/messages'))!;
+    expect(sent.body).toMatchObject({ msg_type: 7, msg_id: 'message', msg_seq: 1, media: { file_info: 'uploaded-speech-file' } });
+    const costState = JSON.parse([...values.entries()].find(([key]) => key.startsWith('nonebotmaker:chatbot:cost:'))![1]);
+    expect(costState.totalSpend).toBeCloseTo(0.00019, 8);
+    expect(requests.filter(({ url }) => url.endsWith('/messages'))).toHaveLength(1);
+  });
+
+  it('expires context envelopes even when a BLOB provider does not support TTL', async () => {
+    const values = new Map<string, string>();
+    const blob = { get: async (key: string) => values.get(key) ?? null, put: async (key: string, value: string) => { values.set(key, value); } };
+    const { conversationStore } = createPersistentChatbotStores({ PLATFORM: 'edgeone', EDGEONE_BLOB: blob });
+    await conversationStore.append('room', [{ role: 'user', content: 'past' }]);
+    const [key, value] = [...values.entries()][0];
+    const envelope = JSON.parse(value);
+    values.set(key, JSON.stringify({ ...envelope, expiresAt: Date.now() - 1 }));
+    await expect(conversationStore.getRecent('room', 100)).resolves.toEqual([]);
   });
 
   it('fails clearly when the selected platform has no persistent state binding', () => {

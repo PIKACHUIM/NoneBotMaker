@@ -13,10 +13,12 @@ interface ExecutionContextLike {
 }
 
 export default {
-  async fetch(request: Request, env: RuntimeBindings): Promise<Response> {
+  async fetch(request: Request, env: RuntimeBindings, context?: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
     const bindings = { ...env, PLATFORM: 'cloudflare' };
-    await ensureQQGatewaySessions(bindings);
+    const maintenance = ensureQQGatewaySessions(bindings).catch(() => { console.error('QQ gateway maintenance failed; management remains available.'); });
+    if (context) context.waitUntil(maintenance);
+    else await maintenance;
     const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname === '/webhook/qq';
     if (isApplicationPath || !env.ASSETS) {
       return app.fetch(request, bindings);

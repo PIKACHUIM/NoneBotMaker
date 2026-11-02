@@ -7,6 +7,18 @@ vi.mock('../../server/storage/log-retention', () => ({ purgeExpiredLogs: cleanup
 import worker from './worker';
 
 describe('Cloudflare Worker routing', () => {
+  it('keeps health and management reachable when gateway maintenance fails', async () => {
+    const statement = { bind: vi.fn(), all: vi.fn(async () => ({ results: [{ value: JSON.stringify({ id: 'broken-account', protocol: 'qq' }) }] })) };
+    statement.bind.mockImplementation(() => statement);
+    const bindings = { DB: { prepare: () => statement }, QQ_GATEWAY_SESSIONS: { idFromName: (name: string) => name, get: () => ({ fetch: async () => new Response('unavailable', { status: 503 }) }) } } as unknown as RuntimeBindings;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await worker.fetch(new Request('https://example.test/api/health'), bindings);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true });
+    } finally { error.mockRestore(); }
+  });
+
   it('routes API and QQ webhook requests to the application, and pages to assets', async () => {
     const assets = { fetch: vi.fn(async () => new Response('asset')) };
     const bindings = { ASSETS: assets } as unknown as RuntimeBindings;

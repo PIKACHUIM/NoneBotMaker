@@ -46,7 +46,6 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MessageOutlined,
-  MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -69,6 +68,7 @@ import type {
   Language,
   LibraryKind,
   LibraryRecord,
+  ModelPriceRecord,
   PluginFieldDefinition,
   PluginRecord,
   ProviderRecord,
@@ -79,6 +79,7 @@ import {
   pluginDefinition,
   pluginDefinitions,
 } from '../shared/plugin-catalog';
+import { findModelPrice, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
 
@@ -88,7 +89,7 @@ const { Sider, Content } = Layout;
 type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'integrations' | 'logs';
 type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'setup' } | { kind: 'admin'; page: AdminPage };
 type LibraryData = Record<LibraryKind, LibraryRecord[]>;
-type LogFilters = { q?: string; accountId?: string; groupId?: string; from?: string; to?: string };
+type LogFilters = { q?: string; pluginId?: string; openid?: string; accountId?: string; groupId?: string; from?: string; to?: string };
 
 const libraryNames: Record<LibraryKind, string> = { skills: 'Skills', mcps: 'MCP', rules: 'Rules' };
 const pageTitles: Record<AdminPage, { title: string; eyebrow: string; description: string }> = {
@@ -120,10 +121,10 @@ function go(path: string) {
   window.location.hash = path;
 }
 
-function prettyDate(value?: string | number) {
+function prettyDate(value?: string | number, language: Language = 'zh') {
   if (!value) return '—';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 function formatError(error: unknown) {
@@ -367,6 +368,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   const [accounts, setAccounts] = useState<BotAccountRecord[]>([]);
   const [groups, setGroups] = useState<GroupRecord[]>([]);
   const [providers, setProviders] = useState<ProviderRecord[]>([]);
+  const [prices, setPrices] = useState<ModelPriceRecord[]>([]);
   const [libraries, setLibraries] = useState<LibraryData>({ skills: [], mcps: [], rules: [] });
   const [logs, setLogs] = useState<ConversationLog[]>([]);
   const [logsTotal, setLogsTotal] = useState(0);
@@ -406,37 +408,39 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
             break;
           }
           case 'groups': {
-            const [groupData, accountData, providerData, skillData, mcpData, ruleData] = await Promise.all([
-              api.listGroups(), api.listAccounts(), api.listProviders(),
+            const [groupData, accountData, pluginData, providerData, priceData, skillData, mcpData, ruleData] = await Promise.all([
+              api.listGroups(), api.listAccounts(), api.listPlugins(), api.listProviders(), api.listPrices(),
               api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'),
             ]);
             if (!active) return;
-            setGroups(groupData); setAccounts(accountData); setProviders(providerData);
+            setGroups(groupData); setAccounts(accountData); setPlugins(pluginData); setProviders(providerData); setPrices(priceData);
             setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
             break;
           }
           case 'integrations': {
-            const [providerData, skillData, mcpData, ruleData] = await Promise.all([
-              api.listProviders(), api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'),
+            const [providerData, priceData, skillData, mcpData, ruleData] = await Promise.all([
+              api.listProviders(), api.listPrices(), api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'),
             ]);
             if (!active) return;
-            setProviders(providerData); setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
+            setProviders(providerData); setPrices(priceData); setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
             break;
           }
           case 'logs': {
-            const [result, accountData, groupData] = await Promise.all([
+            const [result, pluginData, accountData, groupData] = await Promise.all([
               api.listLogs({
                 page: logPage,
                 pageSize: 20,
                 q: logFilters.q,
+                pluginId: logFilters.pluginId,
+                openid: logFilters.openid,
                 accountId: logFilters.accountId,
                 groupId: logFilters.groupId,
                 from: parseTimestamp(logFilters.from),
                 to: parseTimestamp(logFilters.to),
-              }), api.listAccounts(), api.listGroups(),
+              }), api.listPlugins(), api.listAccounts(), api.listGroups(),
             ]);
             if (!active) return;
-            setLogs(result.items); setLogsTotal(result.total); setLogsEnabled(result.enabled); setAccounts(accountData); setGroups(groupData);
+            setLogs(result.items); setLogsTotal(result.total); setLogsEnabled(result.enabled); setPlugins(pluginData); setAccounts(accountData); setGroups(groupData);
             break;
           }
         }
@@ -462,15 +466,6 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   const setPage = (key: string) => {
     setMobileNav(false);
     go(`/admin/${key}`);
-  };
-  const runAction = async (operation: () => Promise<unknown>) => {
-    setActionError('');
-    try {
-      await operation();
-      refresh();
-    } catch (reason) {
-      handleError(reason);
-    }
   };
   const logout = async () => {
     try { await api.logout(); } catch (reason) { handleError(reason); }
@@ -521,9 +516,9 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
-              {page === 'groups' && <GroupsPage groups={groups} accounts={accounts} providers={providers} libraries={libraries} onRefresh={refresh} onError={handleError} />}
-              {page === 'integrations' && <IntegrationsPage providers={providers} libraries={libraries} onRefresh={refresh} onError={handleError} />}
-              {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
+              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} prices={prices} libraries={libraries} onRefresh={refresh} onError={handleError} />}
+              {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} onRefresh={refresh} onError={handleError} />}
+              {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
             </>
           )}
           <footer className="content-footer"><span>EDGE CONFIGURATION / NONEBOTMAKER</span><span>SESSION ISOLATED <i /></span></footer>
@@ -630,20 +625,38 @@ function PluginField({ field, path, editing = false }: { field: PluginFieldDefin
       label={localized(field.label)}
       extra={localized(field.description)}
       valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
-      rules={field.required && !editing ? [{ required: true, message: tr('此字段为必填项') }] : undefined}
+      rules={field.required && !(editing && field.secret) ? [{ required: true, message: tr('此字段为必填项') }] : undefined}
     >
       <PluginFieldInput field={field} editing={editing} />
     </Form.Item>
   );
 }
 
-function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+function SchemaFields({ fields, path, editing = false }: { fields: PluginFieldDefinition[]; path: string; editing?: boolean }) {
   const { tr, localized } = useI18n();
+  const sections = new Map<string, PluginFieldDefinition[]>();
+  for (const field of fields) {
+    const label = field.group ? localized(field.group) : tr('其他');
+    sections.set(label, [...(sections.get(label) ?? []), field]);
+  }
+  return <div className="schema-fields">{[...sections].map(([label, items]) => <section key={label} className="schema-section"><div className="form-section-heading"><span>{label}</span><small>{items.length} FIELDS</small></div>{items.map((field) => <PluginField key={field.key} field={field} path={[path, field.key]} editing={editing} />)}</section>)}</div>;
+}
+
+function editableFieldValues(fields: PluginFieldDefinition[], previous: JsonObject = {}) {
+  const values = { ...defaultFieldValues(fields), ...previous };
+  for (const field of fields) {
+    if (field.secret) values[field.key] = '';
+  }
+  return values;
+}
+
+function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { language, tr, localized } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
-  const selectedType = (Form.useWatch('type', form) as string | undefined) ?? editing?.type ?? CHATBOT_PLUGIN_TYPE;
+  const selectedType = (Form.useWatch('type', { form, preserve: true }) as string | undefined) ?? editing?.type ?? CHATBOT_PLUGIN_TYPE;
   const definition = pluginDefinition(selectedType);
   const configFields = definition?.configFields ?? [];
   const typeOptions = pluginDefinitions().map((item) => ({ value: item.type, label: `${localized(item.name)} · ${item.type}` }));
@@ -656,18 +669,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
     return sections;
   }, []);
 
-  const initialConfig = useMemo(() => {
-    const config = {
-      ...defaultFieldValues(pluginDefinition(editing?.type)?.configFields ?? []),
-      ...(editing?.config ?? {}),
-    };
-    if (editing) {
-      for (const field of configFields) {
-        if (field.secret) config[field.key] = '';
-      }
-    }
-    return config;
-  }, [editing, configFields]);
+  const initialConfig = useMemo(() => editableFieldValues(pluginDefinition(editing?.type ?? CHATBOT_PLUGIN_TYPE)?.configFields ?? [], editing?.config), [editing]);
 
   useEffect(() => {
     if (!drawer.open) return;
@@ -687,9 +689,10 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
     setSaving(true);
     try {
       const currentDefinition = pluginDefinition(values.type);
-      const config = currentDefinition
-        ? normalizeFieldValues(currentDefinition.configFields, values.config)
-        : values.config ?? {};
+      const config = {
+        ...(editing?.config ?? {}),
+        ...(currentDefinition ? normalizeFieldValues(currentDefinition.configFields, values.config) : values.config ?? {}),
+      };
       await api.savePlugin({ name: values.name, type: values.type, description: values.description ?? '', enabled: values.enabled, config }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
@@ -700,7 +703,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
     { title: tr('类型'), dataIndex: 'type', key: 'type', render: (value: string) => <code className="type-code">{value}</code> },
     { title: tr('实例'), key: 'accounts', render: (_, row) => <span className="table-mono">{(row as PluginRecord & { accountCount?: number }).accountCount ?? '—'}</span> },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.savePlugin({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除插件')}“${row.name}”？`} description={tr('关联实例可能无法继续运行。')} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePlugin(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <section className="data-page"><PageToolbar count={data.length} noun="PLUGINS" action={tr('新增插件')} onCreate={() => drawer.edit()} />
@@ -721,7 +724,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
         }}
       >
         <Form.Item name="name" label={tr('插件名称')} rules={[{ required: true, message: tr('请输入插件名称') }]}><Input placeholder={tr('例如：群聊助手')} /></Form.Item>
-        <Form.Item name="type" label={tr('插件类型')} rules={[{ required: true, message: tr('请输入插件类型') }]}><Select options={typeOptions} placeholder={CHATBOT_PLUGIN_TYPE} /></Form.Item>
+        <Form.Item name="type" label={tr('插件类型')} rules={[{ required: true, message: tr('请输入插件类型') }]}><Select options={typeOptions} placeholder={CHATBOT_PLUGIN_TYPE} onChange={(type: string) => form.setFieldValue('config', editableFieldValues(pluginDefinition(type)?.configFields ?? [], type === editing?.type ? editing.config : {}))} /></Form.Item>
         <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={3} placeholder={tr('描述插件用途')} /></Form.Item>
         {configFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>
@@ -742,20 +745,24 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
-  const selectedPluginId = Form.useWatch('pluginId', form) as string | undefined;
+  const selectedPluginId = (Form.useWatch('pluginId', { form, preserve: true }) as string | undefined) ?? editing?.pluginId;
   const selectedPlugin = plugins.find((item) => item.id === selectedPluginId);
   const definition = pluginDefinition(selectedPlugin?.type);
   const credentialFields = definition?.credentialFields ?? [];
+  const accountFields = definition?.accountFields ?? [];
   useEffect(() => {
     if (!drawer.open) return;
+    const currentDefinition = pluginDefinition(plugins.find((item) => item.id === editing?.pluginId)?.type);
+    form.resetFields();
     form.setFieldsValue({
       pluginId: editing?.pluginId,
-      protocol: editing?.protocol ?? '',
+      protocol: editing?.protocol ?? 'qq',
       name: editing?.name ?? '',
       enabled: editing?.enabled ?? true,
-      credentials: {},
+      credentials: editableFieldValues(currentDefinition?.credentialFields ?? [], editing?.credentials),
+      config: editableFieldValues(currentDefinition?.accountFields ?? [], editing?.config),
     });
-  }, [drawer.open, editing, form]);
+  }, [drawer.open, editing, form, plugins]);
   const save = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
@@ -766,7 +773,10 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
         name: String(values.name),
         enabled: Boolean(values.enabled),
         credentials,
-        config: editing?.config ?? {},
+        config: {
+          ...(editing?.config ?? {}),
+          ...normalizeFieldValues(pluginDefinition(plugins.find((item) => item.id === values.pluginId)?.type)?.accountFields ?? [], values.config as JsonObject),
+        },
       }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
@@ -785,40 +795,74 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
     <Drawer title={<DrawerTitle label="BOT INSTANCE" title={editing ? tr('编辑机器人账号') : tr('新增机器人账号')} />} width={600} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存账号')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('实例名称')} rules={[{ required: true, message: tr('请输入实例名称') }]}><Input placeholder={tr('例如：主群机器人')} /></Form.Item>
-        <Form.Item name="pluginId" label={tr('关联插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+        <Form.Item name="pluginId" label={tr('关联插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} onChange={(pluginId: string) => {
+          const nextDefinition = pluginDefinition(plugins.find((item) => item.id === pluginId)?.type);
+          form.setFieldsValue({ credentials: editableFieldValues(nextDefinition?.credentialFields ?? [], pluginId === editing?.pluginId ? editing.credentials : {}), config: editableFieldValues(nextDefinition?.accountFields ?? [], pluginId === editing?.pluginId ? editing.config : {}) });
+        }} /></Form.Item>
         {!plugins.length && <Alert type="warning" showIcon message={tr('当前没有插件记录，请先创建插件。')} />}
-        <Form.Item name="protocol" label={tr('平台协议')}><Input placeholder={tr('例如：qq / discord')} /></Form.Item>
+        <Form.Item name="protocol" label={tr('平台协议')}><Select options={(definition?.protocols ?? ['qq']).map((protocol) => ({ label: protocol.toUpperCase(), value: protocol }))} /></Form.Item>
         {credentialFields.length ? <div className="schema-fields">
-          <div className="form-section-heading"><span>{tr('账号字段')}</span><small>{definition?.type} / {credentialFields.length} FIELDS</small></div>
+          <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{definition?.type} / {credentialFields.length} FIELDS</small></div>
           {credentialFields.map((field) => <PluginField key={field.key} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
           {editing && <p className="form-note">{tr('敏感字段留空会保留现有值。')}</p>}
         </div> : <Alert type="info" showIcon message={tr('该插件类型没有声明账号字段。')} />}
+        {accountFields.length > 0 && <SchemaFields fields={accountFields} path="config" editing={Boolean(editing)} />}
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </section>;
 }
 
-function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError }: {
-  groups: GroupRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
+function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, onRefresh, onError }: {
+  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
   const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = groups.find((item) => item.id === drawer.editingId);
-  const providerId = Form.useWatch('providerId', form) as string | undefined;
+  const providerId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) ?? editing?.providerId;
   const provider = providers.find((item) => item.id === providerId);
+  const selectedAccountId = (Form.useWatch('accountId', { form, preserve: true }) as string | undefined) ?? editing?.accountId;
+  const selectedModel = (Form.useWatch('model', { form, preserve: true }) as string | undefined) ?? editing?.model;
+  const conversationType = (Form.useWatch('conversationType', { form, preserve: true }) as GroupRecord['conversationType']) ?? editing?.conversationType ?? 'group';
+  const selectedAccount = accounts.find((item) => item.id === selectedAccountId);
+  const selectedPlugin = plugins.find((item) => item.id === selectedAccount?.pluginId);
+  const definition = pluginDefinition(selectedPlugin?.type);
+  const price = findModelPrice(prices, selectedModel ?? '');
   useEffect(() => {
     if (!drawer.open) return;
-    form.setFieldsValue({ accountId: editing?.accountId, externalId: editing?.externalId ?? '', name: editing?.name ?? '', enabled: editing?.enabled ?? true, providerId: editing?.providerId, model: editing?.model ?? undefined, systemPrompt: editing?.systemPrompt ?? '', reasoningEffort: editing?.reasoningEffort ?? 'medium', nonMentionReplyRate: editing?.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE, whitelistEnabled: editing?.whitelistEnabled ?? false, whitelistUserIds: editing?.whitelistUserIds ?? [], whitelistText: editing?.whitelistUserIds.join('\n') ?? '', inputCostPerMillion: editing?.inputCostPerMillion ?? 0, outputCostPerMillion: editing?.outputCostPerMillion ?? 0, dailyCostLimit: editing?.dailyCostLimit ?? 0, monthlyCostLimit: editing?.monthlyCostLimit ?? 0, totalCostLimit: editing?.totalCostLimit ?? 0, skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [] });
-  }, [drawer.open, editing, form]);
+    const currentPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === editing?.accountId)?.pluginId);
+    form.resetFields();
+    form.setFieldsValue({
+      accountId: editing?.accountId,
+      externalId: editing?.externalId ?? '',
+      conversationType: editing?.conversationType ?? 'group',
+      name: editing?.name ?? '', enabled: editing?.enabled ?? true,
+      providerId: editing?.providerId, model: editing?.model ?? undefined,
+      systemPrompt: editing?.systemPrompt ?? '', reasoningEffort: editing?.reasoningEffort ?? 'default',
+      nonMentionReplyRate: editing?.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE,
+      whitelistEnabled: editing?.whitelistEnabled ?? false,
+      whitelistText: editing?.whitelistUserIds.join('\n') ?? '',
+      dailyCostLimit: editing?.dailyCostLimit ?? 0, monthlyCostLimit: editing?.monthlyCostLimit ?? 0, totalCostLimit: editing?.totalCostLimit ?? 0,
+      skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
+      config: editableFieldValues(pluginDefinition(currentPlugin?.type)?.groupFields ?? [], editing?.config),
+    });
+  }, [drawer.open, editing, form, plugins, accounts]);
   const save = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
       const userIds = typeof values.whitelistText === 'string' ? values.whitelistText.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean) : values.whitelistUserIds as string[] ?? [];
       await api.saveGroup({
-        accountId: String(values.accountId), externalId: String(values.externalId), name: String(values.name ?? ''), enabled: Boolean(values.enabled), providerId: String(values.providerId ?? ''), model: String(values.model ?? ''), systemPrompt: String(values.systemPrompt ?? ''), reasoningEffort: values.reasoningEffort as GroupRecord['reasoningEffort'], nonMentionReplyRate: Number(values.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE), whitelistEnabled: Boolean(values.whitelistEnabled), whitelistUserIds: userIds, inputCostPerMillion: Number(values.inputCostPerMillion ?? 0), outputCostPerMillion: Number(values.outputCostPerMillion ?? 0), dailyCostLimit: Number(values.dailyCostLimit ?? 0), monthlyCostLimit: Number(values.monthlyCostLimit ?? 0), totalCostLimit: Number(values.totalCostLimit ?? 0), skillIds: values.skillIds as string[] ?? [], mcpIds: values.mcpIds as string[] ?? [], ruleIds: values.ruleIds as string[] ?? [],
+        accountId: String(values.accountId), externalId: String(values.externalId), name: String(values.name ?? ''),
+        conversationType: values.conversationType as GroupRecord['conversationType'],
+        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(definition?.groupFields ?? [], values.config as JsonObject) },
+        enabled: Boolean(values.enabled), providerId: String(values.providerId ?? ''), model: String(values.model ?? ''),
+        systemPrompt: String(values.systemPrompt ?? ''), reasoningEffort: values.reasoningEffort as GroupRecord['reasoningEffort'],
+        nonMentionReplyRate: Number(values.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE),
+        whitelistEnabled: Boolean(values.whitelistEnabled), whitelistUserIds: userIds,
+        dailyCostLimit: Number(values.dailyCostLimit ?? 0), monthlyCostLimit: Number(values.monthlyCostLimit ?? 0), totalCostLimit: Number(values.totalCostLimit ?? 0),
+        skillIds: values.skillIds as string[] ?? [], mcpIds: values.mcpIds as string[] ?? [], ruleIds: values.ruleIds as string[] ?? [],
       }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
@@ -826,6 +870,7 @@ function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError
   };
   const columns: TableColumnsType<GroupRecord> = [
     { title: tr('群聊'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><TeamOutlined /></span><span><strong>{name || row.externalId}</strong><small>{row.externalId} / {row.id}</small></span></div> },
+    { title: tr('会话类型'), dataIndex: 'conversationType', key: 'conversationType', render: (value: string) => <Tag>{value === 'private' ? tr('私聊') : tr('群聊')}</Tag> },
     { title: tr('账号'), dataIndex: 'accountId', key: 'accountId', render: (id: string) => accounts.find((item) => item.id === id)?.name ?? id },
     { title: tr('模型'), dataIndex: 'model', key: 'model', render: (model: string, row) => <span className="model-cell">{model || tr('未配置')}<small>{providers.find((item) => item.id === row.providerId)?.name ?? ''}</small></span> },
     { title: tr('非 @ 回复率'), dataIndex: 'nonMentionReplyRate', key: 'nonMentionReplyRate', render: (value: number) => <span className="table-mono">{((value ?? DEFAULT_NON_MENTION_REPLY_RATE) * 100).toFixed(0)}%</span> },
@@ -833,15 +878,20 @@ function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name || row.externalId}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveGroup({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name || row.externalId}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteGroup(row.id).then(onRefresh).catch(onError)}><Button aria-label={tr('删除')} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  const choices = (kind: LibraryKind) => libraries[kind].filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }));
+  const choices = (kind: LibraryKind) => libraries[kind].map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id }));
   return <section className="data-page"><PageToolbar count={groups.length} noun="GROUP POLICIES" action={tr('新增群聊策略')} onCreate={() => drawer.edit()} />
     {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有群聊策略')} description={tr('新增群聊并为其绑定 AI 模型、回复策略和工具。')} onCreate={() => drawer.edit()} action={tr('新增群聊策略')} />}
     <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? tr('编辑群聊策略') : tr('新增群聊策略')} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <div className="form-grid two-cols">
-          <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-          <Form.Item name="externalId" label={tr('平台群聊 ID')} rules={[{ required: true, message: tr('请输入群聊 ID') }]}><Input placeholder="123456789" /></Form.Item>
+          <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select disabled={Boolean(editing)} placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: `${item.name} · ${plugins.find((plugin) => plugin.id === item.pluginId)?.name ?? item.pluginId}`, value: item.id }))} onChange={(accountId: string) => {
+            const nextPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === accountId)?.pluginId);
+            form.setFieldValue('config', editableFieldValues(pluginDefinition(nextPlugin?.type)?.groupFields ?? [], accountId === editing?.accountId ? editing.config : {}));
+          }} /></Form.Item>
+          <Form.Item name="conversationType" label={tr('会话类型')} extra={tr('群聊绑定群 openid；私聊绑定用户 openid。')}><Select disabled={Boolean(editing)} options={[{ value: 'group', label: tr('群聊') }, { value: 'private', label: tr('私聊') }]} /></Form.Item>
+          <Form.Item name="externalId" label={conversationType === 'private' ? tr('用户 openid') : tr('群 openid')} rules={[{ required: true, message: tr('请输入会话 openid') }]}><Input disabled={Boolean(editing)} placeholder="openid" /></Form.Item>
         </div>
+        {editing && <p className="form-note">{tr('已创建会话的账号、类型和 openid 不可变更；需要重新绑定时请新建策略。')}</p>}
         <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
         <div className="form-section-heading"><span>AI MODEL</span><small>PER-GROUP ROUTING</small></div>
         <div className="form-grid two-cols">
@@ -850,15 +900,13 @@ function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError
         </div>
         <Form.Item name="systemPrompt" label={tr('系统提示词')}><Input.TextArea rows={5} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
         <div className="form-grid two-cols">
-          <Form.Item name="reasoningEffort" label={tr('思考强度')}><Select options={[{ label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
+          <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
         </div>
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
-        <div className="form-section-heading"><span>TOKEN PRICING</span><small>USD / 1M TOKENS</small></div>
-        <div className="form-grid two-cols">
-          <Form.Item name="inputCostPerMillion" label={tr('输入成本')}><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
-          <Form.Item name="outputCostPerMillion" label={tr('输出成本')}><InputNumber className="full-width" min={0} precision={4} addonBefore="$" /></Form.Item>
-        </div>
+        <div className="form-section-heading"><span>{tr('模型成本估算')}</span><small>USD / {price?.unit === 'characters' ? tr('百万字符') : tr('百万 token')}</small></div>
+        <Alert className="price-estimate" type={price ? 'info' : 'warning'} showIcon message={price ? `${tr('输入成本')} $${(price.inputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)} / ${tr('输出成本')} $${(price.outputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)}` : tr('当前模型尚未登记单价，成本估算不可用。')} description={<div className="price-source">{price && <>{tr('计价来源')}：{price.name} · {price.model}<br />{tr('基础单价')}：${price.inputCostPerMillion} / ${price.outputCostPerMillion} · {tr('API 计价倍率')} × {provider?.priceMultiplier ?? 1}<br />{price.cacheInputCostPerMillion !== undefined && <>{tr('缓存输入单价')}：${price.cacheInputCostPerMillion * (provider?.priceMultiplier ?? 1)}<br /></>}{price.sourceUrl && <>{tr('来源地址')}：{price.sourceUrl}<br /></>}</>}{tr('估算使用模型单价 × API 倍率，并按所选计价单位的实际用量计算；不等于供应商账单。')} <Button type="link" href="#/admin/integrations">{tr('管理模型单价')}</Button></div>} />
+        {selectedAccountId && (definition?.groupFields.length ? <SchemaFields fields={definition.groupFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
@@ -879,10 +927,11 @@ function GroupsPage({ groups, accounts, providers, libraries, onRefresh, onError
   </section>;
 }
 
-function IntegrationsPage({ providers, libraries, onRefresh, onError }: { providers: ProviderRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void }) {
+function IntegrationsPage({ providers, prices, libraries, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
     { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
@@ -895,15 +944,16 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
   const [saving, setSaving] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
-  const models = Form.useWatch('models', form) as string[] | undefined;
+  const models = Form.useWatch('models', { form, preserve: true }) as string[] | undefined;
   useEffect(() => {
     if (!drawer.open) return;
-    form.setFieldsValue({ name: editing?.name ?? '', baseUrl: editing?.baseUrl ?? '', apiKey: '', enabled: editing?.enabled ?? true, models: editing?.models ?? [] });
+    form.resetFields();
+    form.setFieldsValue({ name: editing?.name ?? '', baseUrl: editing?.baseUrl ?? '', apiKey: '', enabled: editing?.enabled ?? true, models: editing?.models ?? [], priceMultiplier: editing?.priceMultiplier ?? 1, mediaCapabilities: editing?.mediaCapabilities ?? ['image'] });
   }, [drawer.open, editing, form]);
-  const save = async (values: { name: string; baseUrl: string; apiKey?: string; enabled: boolean; models?: string[] }) => {
+  const save = async (values: { name: string; baseUrl: string; apiKey?: string; enabled: boolean; models?: string[]; priceMultiplier?: number; mediaCapabilities?: ProviderRecord['mediaCapabilities'] }) => {
     setSaving(true);
     try {
-      await api.saveProvider({ name: values.name, baseUrl: values.baseUrl, ...(values.apiKey ? { apiKey: values.apiKey } : {}), enabled: values.enabled, models: values.models ?? [] }, editing?.id);
+      await api.saveProvider({ name: values.name, baseUrl: values.baseUrl, ...(values.apiKey ? { apiKey: values.apiKey } : {}), enabled: values.enabled, models: values.models ?? [], priceMultiplier: values.priceMultiplier ?? 1, mediaCapabilities: values.mediaCapabilities ?? ['image'] }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
     finally { setSaving(false); }
@@ -924,6 +974,7 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
   const columns: TableColumnsType<ProviderRecord> = [
     { title: tr('供应商'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ApiOutlined /></span><span><strong>{name}</strong><small>{row.baseUrl}</small></span></div> },
     { title: tr('模型'), dataIndex: 'models', key: 'models', render: (values: string[]) => <div className="model-tags">{values.length ? values.slice(0, 3).map((value) => <Tag key={value}>{value}</Tag>) : <span className="muted">{tr('尚未登记')}</span>}{values.length > 3 && <span>+{values.length - 3}</span>}</div> },
+    { title: tr('API 计价倍率'), dataIndex: 'priceMultiplier', key: 'priceMultiplier', align: 'right', render: (value?: number) => <span className="table-mono">× {value ?? 1}</span> },
     { title: tr('密钥'), dataIndex: 'apiKey', key: 'apiKey', render: (value: string) => value ? <span className="secret-mask">••••••••</span> : <span className="muted">{tr('未配置')}</span> },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑供应商')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveProvider({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除供应商')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteProvider(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
@@ -935,6 +986,8 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
         <Form.Item name="name" label={tr('供应商名称')} rules={[{ required: true, message: tr('请输入供应商名称') }]}><Input placeholder={tr('例如：团队模型网关')} /></Form.Item>
         <Form.Item name="baseUrl" label="API Base URL" rules={[{ required: true, message: tr('请输入 Base URL') }, { type: 'url', message: tr('请输入有效 URL') }]}><Input placeholder="https://api.example.com/v1" /></Form.Item>
         <Form.Item name="apiKey" label="API Key" extra={editing ? tr('为安全起见密钥不会回显；留空表示保持现有密钥。') : tr('密钥由服务端保存，请勿分享控制台截图。')}><Input.Password autoComplete="new-password" placeholder={editing ? tr('留空以保持现有密钥') : tr('输入 API Key')} /></Form.Item>
+        <Form.Item name="priceMultiplier" label={tr('API 计价倍率')} extra={tr('默认 1。该 API 的模型成本按基础模型单价乘以此倍率估算。')} rules={[{ required: true, message: tr('此字段为必填项') }]}><InputNumber min={0} precision={4} step={0.1} className="full-width" addonBefore="×" /></Form.Item>
+        <Form.Item name="mediaCapabilities" label={tr('API 媒体能力')} extra={tr('仅选择该供应商实际支持的能力。默认图片；清空表示仅使用文本，不会自动验证或承诺 API 支持。')}><Select mode="multiple" virtual={false} allowClear placeholder={tr('选择供应商支持的媒体能力')} options={[{ value: 'image', label: tr('图片') }, { value: 'audio', label: tr('音频') }, { value: 'video', label: tr('视频') }, { value: 'file', label: tr('文件') }, { value: 'speech', label: tr('语音合成') }]} /></Form.Item>
         <Form.Item name="models" label={tr('可用模型')} extra={tr('输入模型 ID 后按 Enter 添加。')}><Select mode="tags" tokenSeparators={[',', '，', ' ']} placeholder="gpt-4o-mini" /></Form.Item>
         <div className="discover-row"><Button icon={<ReloadOutlined />} loading={discovering} disabled={!editing} onClick={() => void discoverModels()}>{tr('自动获取模型')}</Button><span>{editing ? tr('通过服务端安全请求供应商 /models') : tr('请先保存供应商，再获取模型列表')}</span></div>
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
@@ -943,79 +996,130 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
   </div>;
 }
 
-type ConfigEntryType = 'text' | 'number' | 'boolean';
-interface ConfigEntry { key: string; type: ConfigEntryType; value: string | number | boolean }
-
-function configEntries(config: JsonObject): ConfigEntry[] {
-  const entries: ConfigEntry[] = [];
-  for (const [key, value] of Object.entries(config)) {
-    if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
-      entries.push({ key, type: typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'text', value });
-    }
-  }
-  return entries;
-}
-
-function configFromEntries(entries: ConfigEntry[] | undefined, previous: JsonObject): JsonObject {
-  const next: JsonObject = {};
-  for (const [key, value] of Object.entries(previous)) {
-    if (value !== null && typeof value === 'object') next[key] = value;
-  }
-  for (const entry of entries ?? []) {
-    const key = entry.key.trim();
-    if (!key) continue;
-    if (entry.type === 'boolean') next[key] = entry.value === true || entry.value === 'true' || entry.value === 1;
-    else if (entry.type === 'number') {
-      const parsed = Number(entry.value);
-      if (Number.isFinite(parsed)) next[key] = parsed;
-    } else next[key] = String(entry.value ?? '');
-  }
-  return next;
-}
-
-function ConfigEntryRow({ field, onRemove }: { field: { name: number; key: number }, onRemove: () => void }) {
+function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
-  const form = Form.useFormInstance();
-  const type = Form.useWatch(['configEntries', field.name, 'type'], form) as ConfigEntryType | undefined;
-  return (
-    <div className="config-entry-row">
-      <Form.Item name={[field.name, 'key']} rules={[{ required: true, message: tr('请输入键名') }]}><Input placeholder={tr('键')} /></Form.Item>
-      <Form.Item name={[field.name, 'type']}><Select options={[
-        { value: 'text', label: tr('文本') },
-        { value: 'number', label: tr('数字') },
-        { value: 'boolean', label: tr('布尔') },
-      ]} /></Form.Item>
-      <Form.Item name={[field.name, 'value']} valuePropName={type === 'boolean' ? 'checked' : 'value'}>
-        {type === 'boolean' ? <Switch /> : type === 'number' ? <InputNumber className="full-width" /> : <Input placeholder={tr('值')} />}
-      </Form.Item>
-      <Button type="text" danger aria-label={tr('删除配置项')} icon={<MinusCircleOutlined />} onClick={onRemove} />
-    </div>
-  );
+  const { message } = AntApp.useApp();
+  const drawer = useDrawer();
+  const [form] = Form.useForm<ModelPriceRecord>();
+  const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [presetIds, setPresetIds] = useState<string[]>([]);
+  const editing = data.find((item) => item.id === drawer.editingId);
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({ name: editing?.name ?? '', model: editing?.model ?? '', inputCostPerMillion: editing?.inputCostPerMillion ?? 0, outputCostPerMillion: editing?.outputCostPerMillion ?? 0, cacheInputCostPerMillion: editing?.cacheInputCostPerMillion, unit: editing?.unit ?? 'tokens', sourceUrl: editing?.sourceUrl ?? '', enabled: editing?.enabled ?? true });
+  }, [drawer.open, editing, form]);
+  const save = async (values: Omit<ModelPriceRecord, 'cacheInputCostPerMillion'> & { cacheInputCostPerMillion?: number | null }) => {
+    setSaving(true);
+    try {
+      await api.savePrice({ ...values, currency: 'USD' }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const importPresets = async () => {
+    setImporting(true);
+    let imported = 0;
+    try {
+      for (const preset of MODEL_PRICE_PRESETS.filter((item) => presetIds.includes(item.id) && !data.some((saved) => saved.model === item.model))) {
+        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
+        imported += 1;
+      }
+      message.success(`${tr('已导入预置单价')}：${imported}`);
+      setPresetIds([]);
+    } catch (reason) {
+      onError(new Error(`${tr('已导入预置单价')}：${imported}；${formatError(reason)}`));
+    } finally {
+      setImporting(false);
+      if (imported > 0) onRefresh();
+    }
+  };
+  const columns: TableColumnsType<ModelPriceRecord> = [
+    { title: tr('模型'), dataIndex: 'model', key: 'model', render: (value: string, row) => <div className="model-cell">{value}<small>{row.name}</small></div> },
+    { title: tr('计价单位'), dataIndex: 'unit', key: 'unit', render: (value?: string) => value === 'characters' ? tr('百万字符') : tr('百万 token') },
+    { title: tr('输入成本'), dataIndex: 'inputCostPerMillion', key: 'input', align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
+    { title: tr('输出成本'), dataIndex: 'outputCostPerMillion', key: 'output', align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
+    { title: tr('缓存输入单价'), dataIndex: 'cacheInputCostPerMillion', key: 'cache', align: 'right', render: (value?: number) => <span className="table-mono">{value === undefined ? '—' : `$${value}`}</span> },
+    { title: tr('计价来源'), dataIndex: 'sourceUrl', key: 'source', ellipsis: true, render: (value?: string) => <span className="price-source" title={value}>{value || tr('手动登记')}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (value: boolean) => <StatusTag enabled={value} /> },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Button size="small" aria-label={`${tr('编辑')} ${row.model}`} icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /><Switch checked={row.enabled} aria-label={`${row.model} ${tr('启用状态')}`} onChange={(enabled) => void api.savePrice({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除模型单价')} ${row.model}？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePrice(row.id).then(onRefresh).catch(onError)}><Button danger size="small" aria-label={`${tr('删除')} ${row.model}`} icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  return <div className="tab-panel"><PageToolbar count={data.length} noun="USD / 1M UNITS" action={tr('新增模型单价')} onCreate={() => drawer.edit()} />
+    <p className="form-note">{tr('预置为官方标准模型价格快照，不会自动更新；导入前请核对来源。')} {tr('核对日期')}：{MODEL_PRICE_CHECKED_AT}</p>
+    <div className="preset-import"><Select mode="multiple" virtual={false} optionFilterProp="label" value={presetIds} onChange={setPresetIds} aria-label={tr('选择预置模型单价')} placeholder={tr('选择预置模型单价')} options={MODEL_PRICE_PRESETS.map((item) => ({ label: `${item.name} · $${item.inputCostPerMillion} / $${item.outputCostPerMillion}`, value: item.id, disabled: data.some((saved) => saved.model === item.model) }))} /><Button loading={importing} disabled={!presetIds.length} onClick={() => void importPresets()}>{tr('导入所选预置')}</Button></div>
+    {data.length ? <Table<ModelPriceRecord> rowKey="id" dataSource={data} columns={columns} className="data-table" scroll={{ x: 1000 }} pagination={{ pageSize: 8, showSizeChanger: false }} /> : <EmptyTable title={tr('还没有模型单价')} description={tr('手动登记或选择官方预置导入，再在群聊选择模型。')} />}
+    <Drawer title={<DrawerTitle label="MODEL PRICING" title={editing ? tr('编辑模型单价') : tr('新增模型单价')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
+        <Form.Item name="model" label={tr('模型 ID')} extra={tr('与供应商模型 ID 对齐；精确匹配优先，也支持版本后缀。')} rules={[{ required: true, message: tr('此字段为必填项') }]}><Input /></Form.Item>
+        <div className="form-grid two-cols">
+          <Form.Item name="inputCostPerMillion" label={tr('输入成本')} rules={[{ required: true, message: tr('此字段为必填项') }]}><InputNumber min={0} precision={6} addonBefore="$" /></Form.Item>
+          <Form.Item name="outputCostPerMillion" label={tr('输出成本')} rules={[{ required: true, message: tr('此字段为必填项') }]}><InputNumber min={0} precision={6} addonBefore="$" /></Form.Item>
+          <Form.Item name="cacheInputCostPerMillion" label={tr('缓存输入单价')}><InputNumber min={0} precision={6} addonBefore="$" /></Form.Item>
+        </div>
+        <Form.Item name="unit" label={tr('计价单位')}><Select options={[{ value: 'tokens', label: tr('百万 token') }, { value: 'characters', label: tr('百万字符') }]} /></Form.Item>
+        <p className="form-note">{tr('价格按 USD / 百万所选单位登记。缓存单价可选，未填写时使用标准输入单价。')}</p>
+        <Form.Item name="sourceUrl" label={tr('来源地址')} rules={[{ type: 'url', message: tr('请输入有效 URL') }]}><Input /></Form.Item>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
+}
+
+function DetailValue({ value, labels = {} }: { value: unknown; labels?: Record<string, string> }) {
+  const { tr } = useI18n();
+  if (value === null || value === undefined) return <span className="muted">—</span>;
+  if (typeof value === 'boolean') return <span>{value ? tr('是') : tr('否')}</span>;
+  if (typeof value === 'string' || typeof value === 'number') return <span className="detail-text">{String(value)}</span>;
+  if (Array.isArray(value)) return value.length ? <ol className="detail-list">{value.map((item, index) => <li key={index}><DetailValue value={item} labels={labels} /></li>)}</ol> : <span className="muted">{tr('空列表')}</span>;
+  if (typeof value === 'object') return <DetailFields values={value as JsonObject} labels={labels} />;
+  return <span>{String(value)}</span>;
+}
+
+function DetailFields({ values, labels = {} }: { values: JsonObject; labels?: Record<string, string> }) {
+  const { tr } = useI18n();
+  const entries = Object.entries(values);
+  const knownLabels: Record<string, string> = { userName: tr('用户昵称'), promptTokens: tr('输入 token'), completionTokens: tr('输出 token'), cachedPromptTokens: tr('缓存输入 token'), inputCharacters: tr('输入字符数'), conversationType: tr('会话类型'), messageId: tr('消息 ID'), seq: tr('发送序号') };
+  return entries.length ? <dl className="detail-fields">{entries.map(([key, value]) => <div key={key}><dt>{labels[key] ?? knownLabels[key] ?? key}</dt><dd><DetailValue value={value} labels={labels} /></dd></div>)}</dl> : <span className="muted">{tr('没有详情字段')}</span>;
 }
 
 function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; data: LibraryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
-  const { tr } = useI18n();
+  const { language, tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
   useEffect(() => {
     if (!drawer.open) return;
+    form.resetFields();
     form.setFieldsValue({
       name: editing?.name ?? '',
       description: editing?.description ?? '',
       enabled: editing?.enabled ?? true,
-      configEntries: configEntries(editing?.config ?? {}),
+      config: {
+        prompt: '', content: '', url: '',
+        ...(editing?.config ?? {}),
+        allowedTools: editing?.config.allowedTools ?? editing?.config.tools ?? [],
+        authToken: '',
+      },
     });
   }, [drawer.open, editing, form]);
-  const save = async (values: { name: string; description?: string; enabled: boolean; configEntries?: ConfigEntry[] }) => {
+  const save = async (values: { name: string; description?: string; enabled: boolean; config?: JsonObject }) => {
     setSaving(true);
     try {
+      const fields = kind === 'mcps' ? ['url', 'authToken', 'allowedTools'] : kind === 'skills' ? ['prompt', 'content'] : ['content'];
+      const config = { ...(editing?.config ?? {}) };
+      for (const key of fields) {
+        const value = values.config?.[key];
+        if (key === 'authToken' && !value) continue;
+        config[key] = value ?? (key === 'allowedTools' ? [] : '');
+      }
       await api.saveLibrary(kind, {
         name: values.name,
         description: values.description ?? '',
         enabled: values.enabled,
-        config: configFromEntries(values.configEntries, editing?.config ?? {}),
+        config,
       }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
@@ -1025,7 +1129,7 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
     { title: tr('能力字段'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ToolOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
     { title: tr('说明'), dataIndex: 'description', key: 'description', render: (value: string) => value || '—' },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
-    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: prettyDate },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveLibrary(kind, { ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteLibrary(kind, row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun={libraryNames[kind].toUpperCase()} action={`${tr('新增')} ${libraryNames[kind]}`} onCreate={() => drawer.edit()} />
@@ -1035,13 +1139,15 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
         <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
         <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={3} /></Form.Item>
         <div className="schema-fields">
-          <div className="form-section-heading"><span>{tr('配置项')}</span><small>KEY / TYPE / VALUE</small></div>
-          <Form.List name="configEntries">
-            {(fields, { add, remove }) => <>
-              {fields.map((field) => <ConfigEntryRow key={field.key} field={field} onRemove={() => remove(field.name)} />)}
-              <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ key: '', type: 'text', value: '' })}>{tr('添加配置项')}</Button>
-            </>}
-          </Form.List>
+          <div className="form-section-heading"><span>{tr('能力配置')}</span><small>{libraryNames[kind]}</small></div>
+          {kind === 'skills' && <Form.Item name={['config', 'prompt']} label={tr('Skill 提示词')} extra={tr('为模型说明何时使用此能力，以及如何执行。')}><Input.TextArea rows={5} /></Form.Item>}
+          {kind !== 'mcps' && <Form.Item name={['config', 'content']} label={kind === 'rules' ? tr('规则内容') : tr('Skill 内容')} extra={kind === 'rules' ? tr('规则将作为群聊模型上下文的一部分。') : tr('能力的详细步骤或参考内容，不需要填写 JSON。')}><Input.TextArea rows={7} /></Form.Item>}
+          {kind === 'mcps' && <>
+            <Form.Item name={['config', 'url']} label={tr('MCP 服务地址')} extra={tr('填写支持 HTTP 的 MCP 服务端点。')} rules={[{ required: true, message: tr('请输入有效 URL') }, { type: 'url', message: tr('请输入有效 URL') }]}><Input /></Form.Item>
+            <Form.Item name={['config', 'authToken']} label={tr('MCP 访问令牌')} extra={tr('可选。令牌由服务端保存；编辑时留空保持原值。')}><Input.Password autoComplete="new-password" placeholder={editing ? tr('留空保持现有值') : undefined} /></Form.Item>
+            <Form.Item name={['config', 'allowedTools']} label={tr('允许的 MCP 工具')} extra={tr('输入工具名称并按 Enter 添加；留空允许该服务的全部工具。')}><Select mode="tags" tokenSeparators={[',', '，', ' ']} /></Form.Item>
+          </>}
+          {editing && Object.keys(editing.config).some((key) => !(kind === 'mcps' ? ['url', 'authToken', 'allowedTools'] : kind === 'skills' ? ['prompt', 'content'] : ['content']).includes(key)) && <details className="legacy-fields"><summary>{tr('已有扩展字段（保存时保留）')}</summary><DetailFields values={Object.fromEntries(Object.entries(editing.config).filter(([key]) => !(kind === 'mcps' ? ['url', 'authToken', 'allowedTools'] : kind === 'skills' ? ['prompt', 'content'] : ['content']).includes(key)))} /></details>}
         </div>
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
@@ -1049,21 +1155,46 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
   </div>;
 }
 
-function LogsPage({ data, total, enabled, accounts, groups, page, onPage, form, onFilter }: {
-  data: ConversationLog[]; total: number; enabled: boolean | null; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void;
+function logFieldValue(row: ConversationLog, key: string): unknown {
+  const direct = (row as unknown as JsonObject)[key];
+  if (direct !== undefined) return direct;
+  let value: unknown = row.details;
+  for (const part of key.replace(/^details\./, '').split('.')) {
+    if (!value || typeof value !== 'object') return undefined;
+    value = (value as JsonObject)[part];
+  }
+  return value;
+}
+
+function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter }: {
+  data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void;
 }) {
-  const { language, tr } = useI18n();
+  const { language, tr, localized } = useI18n();
+  const selectedPluginId = Form.useWatch('pluginId', { form, preserve: true }) as string | undefined;
+  const rowPlugin = (row: ConversationLog) => plugins.find((item) => item.id === (row.pluginId || accounts.find((account) => account.id === row.accountId)?.pluginId));
+  const rowDefinition = (row: ConversationLog) => pluginDefinition(row.pluginType || rowPlugin(row)?.type);
+  const selectedDefinition = pluginDefinition(plugins.find((item) => item.id === selectedPluginId)?.type);
+  const fields = new Map<string, { key: string; label: { zh: string; en: string } }>();
+  for (const definition of selectedDefinition ? [selectedDefinition] : data.map(rowDefinition)) {
+    for (const field of definition?.logFields ?? []) fields.set(field.key, field);
+  }
+  const label = (key: string, fallback: string) => fields.has(key) ? localized(fields.get(key)!.label) : tr(fallback);
+  const fixedKeys = new Set(['id', 'createdAt', 'pluginId', 'pluginType', 'userId', 'groupExternalId', 'content', 'status', 'expiresAt']);
   const columns: TableColumnsType<ConversationLog> = [
-    { title: tr('时间'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value) },
-    { title: tr('方向'), dataIndex: 'direction', key: 'direction', width: 110, render: (value: string) => <Tag className={`direction-tag direction-${value}`} icon={value === 'in' ? <ArrowDownOutlined /> : <ArrowUpOutlined />}>{value === 'in' ? tr('收到') : tr('发出')}</Tag> },
-    { title: tr('群聊'), dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: string, row) => groups.find((item) => item.id === row.groupId)?.name || value },
-    { title: tr('用户 ID'), dataIndex: 'userId', key: 'userId', width: 180, render: (value: string) => <code className="table-code">{value}</code> },
-    { title: tr('消息'), dataIndex: 'content', key: 'content', render: (value: string) => <span className="log-content">{value}</span> },
+    { title: label('createdAt', '时间'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value, language) },
+    { title: label('pluginId', '插件'), key: 'plugin', width: 180, render: (_, row) => <div className="model-cell">{rowPlugin(row)?.name || row.pluginType || tr('未知插件')}<small>{row.pluginType || rowPlugin(row)?.type || row.pluginId || '—'}</small></div> },
+    { title: label('userId', '用户 openid'), dataIndex: 'userId', key: 'userId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
+    { title: label('groupExternalId', '群 openid'), dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
+    { title: label('content', '内容'), dataIndex: 'content', key: 'content', width: 300, render: (value: unknown) => <div className="log-content"><DetailValue value={value} /></div> },
+    { title: label('status', '状态'), key: 'status', width: 120, render: (_, row) => <Tag color={row.status === 'error' || row.status === 'failed' ? 'error' : row.status === 'success' || row.status === 'sent' ? 'success' : 'default'}>{row.status ? tr(({ success: '成功', sent: '已发出', received: '已收到', error: '错误', failed: '失败', skipped: '已跳过', rejected: '已拒绝', processing: '处理中', completed: '已完成' } as Record<string, string>)[row.status] ?? row.status) : row.direction === 'in' ? tr('收到') : tr('发出')}</Tag> },
+    ...[...fields.values()].filter((field) => !fixedKeys.has(field.key)).map((field) => ({ title: localized(field.label), key: field.key, width: 180, render: (_: unknown, row: ConversationLog) => <div className="log-field-preview"><DetailValue value={logFieldValue(row, field.key)} /></div> })),
   ];
   if (enabled === false) return <section className="logs-disabled"><div className="disabled-icon"><MessageOutlined /></div><div className="eyebrow"><span className="eyebrow-line" /> OBSERVABILITY / DISABLED</div><Title level={2}>{tr('对话日志已关闭')}</Title><Paragraph>{tr('服务端未启用 LOG_RECORD。如需记录对话，请在部署环境启用该配置；现有日志保留策略为 30 天。')}</Paragraph><div className="disabled-meta"><span>LOG_RECORD</span><b>OFF</b><span>RETENTION</span><b>30 DAYS</b></div></section>;
   return <section className="data-page logs-page">
     <div className="log-toolbar"><Form form={form} layout="inline" onFinish={onFilter} className="log-filter-form">
-      <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder={tr('搜索消息内容或用户 ID')} /></Form.Item>
+      <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder={tr('搜索消息内容或用户 ID')} aria-label={tr('搜索消息内容或用户 ID')} /></Form.Item>
+      <Form.Item name="pluginId"><Select allowClear placeholder={tr('全部插件')} aria-label={tr('全部插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+      <Form.Item name="openid"><Input allowClear placeholder={tr('用户或群 openid')} aria-label={tr('用户或群 openid')} /></Form.Item>
       <Form.Item name="from"><Input type="datetime-local" aria-label={tr('开始时间')} /></Form.Item>
       <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
       <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
@@ -1071,7 +1202,7 @@ function LogsPage({ data, total, enabled, accounts, groups, page, onPage, form, 
       <Form.Item><Button type="primary" htmlType="submit">{tr('应用筛选')}</Button></Form.Item>
       <Form.Item><Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button></Form.Item>
     </Form><div className="log-count"><span className="online-dot" /> {total} RECORDS / 30D</div></div>
-    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 950 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
+    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: Math.max(1140, columns.length * 180) }} className="data-table logs-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('完整消息与插件详情')}</h3><DetailFields values={{ content: row.content, ...Object.fromEntries(Object.entries(row).filter(([key]) => !fixedKeys.has(key))) }} labels={{ content: tr('内容'), direction: tr('方向'), accountId: tr('账号'), groupId: tr('群聊'), details: tr('插件详情'), ...Object.fromEntries((rowDefinition(row)?.logFields ?? []).map((field) => [field.key, localized(field.label)])) }} /></div> }} /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
   </section>;
 }
 

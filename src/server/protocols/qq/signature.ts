@@ -123,6 +123,7 @@ function getKeyMaterial(botSecret: string): Promise<{ privateKey: CryptoKey; pub
     const [privateKey, publicKey] = await Promise.all([importPrivateKey(seed), derivePublicKey(seed)]);
     return { privateKey, publicKey };
   })();
+  if (keyCache.size >= 200) keyCache.delete(keyCache.keys().next().value!);
   keyCache.set(botSecret, material);
   void material.catch(() => keyCache.delete(botSecret));
   return material;

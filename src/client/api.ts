@@ -5,6 +5,7 @@ import type {
   GroupRecord,
   LibraryKind,
   LibraryRecord,
+  ModelPriceRecord,
   PluginRecord,
   ProviderRecord,
 } from '../shared/types';
@@ -158,6 +159,21 @@ export const api = {
     }
     throw new Error('模型接口返回格式无效');
   },
+  async listPrices() {
+    return records<ModelPriceRecord>(await request('/api/prices'));
+  },
+  async getPrice(id: string) {
+    return record<ModelPriceRecord>(await request(`/api/prices/${encodeURIComponent(id)}`));
+  },
+  async savePrice(data: Omit<Partial<ModelPriceRecord>, 'cacheInputCostPerMillion'> & Pick<ModelPriceRecord, 'name' | 'model'> & { cacheInputCostPerMillion?: number | null }, id?: string) {
+    return record<ModelPriceRecord>(await request(id ? `/api/prices/${encodeURIComponent(id)}` : '/api/prices', {
+      method: id ? 'PUT' : 'POST',
+      ...jsonBody(data),
+    }));
+  },
+  async deletePrice(id: string) {
+    return request(`/api/prices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
   async listLibraries(kind: LibraryKind) {
     return records<LibraryRecord>(await request(`/api/${kind}`));
   },
@@ -171,9 +187,11 @@ export const api = {
   async deleteLibrary(kind: LibraryKind, id: string) {
     return request(`/api/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
-  async listLogs(params: { page: number; pageSize: number; q?: string; accountId?: string; groupId?: string; from?: number; to?: number }) {
+  async listLogs(params: { page: number; pageSize: number; q?: string; pluginId?: string; openid?: string; accountId?: string; groupId?: string; from?: number; to?: number }) {
     const search = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
     if (params.q) search.set('q', params.q);
+    if (params.pluginId) search.set('pluginId', params.pluginId);
+    if (params.openid) search.set('openid', params.openid);
     if (params.accountId) search.set('accountId', params.accountId);
     if (params.groupId) search.set('groupId', params.groupId);
     if (params.from !== undefined) search.set('from', String(params.from));

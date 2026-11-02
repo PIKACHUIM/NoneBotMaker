@@ -16,6 +16,7 @@ export interface QQWebhookDependencies {
 export function createQQWebhookRouter(dependencies: QQWebhookDependencies) {
   const router = new Hono<{ Bindings: RuntimeBindings }>();
   const now = dependencies.now ?? Date.now;
+  const recent = new Map<string, { at: number; processing: Promise<void> }>();
 
   router.post('/webhook/qq', async (context) => {
     const bindings = context.env ?? {};
@@ -31,7 +32,8 @@ export function createQQWebhookRouter(dependencies: QQWebhookDependencies) {
     if (!appId) return context.json({ error: 'invalid callback' }, 401);
 
     const account = await dependencies.resolveAccount(appId, bindings);
-    if (!account || account.appId !== appId || !account.botSecret) {
+    const appSecret = account?.appSecret ?? account?.botSecret;
+    if (!account || account.appId !== appId || !appSecret) {
       return context.json({ error: 'invalid callback' }, 401);
     }
 
@@ -42,7 +44,23 @@ export function createQQWebhookRouter(dependencies: QQWebhookDependencies) {
     const contentLength = Number(context.req.header('content-length') ?? 0);
     if (contentLength > MAX_WEBHOOK_BODY_BYTES) return context.json({ error: 'invalid callback' }, 413);
 
-    const body = new Uint8Array(await context.req.arrayBuffer());
+    const reader = context.req.raw.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          if (size > MAX_WEBHOOK_BODY_BYTES) { await reader.cancel(); return context.json({ error: 'invalid callback' }, 413); }
+          chunks.push(chunk.value);
+        }
+      } finally { reader.releaseLock(); }
+    }
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
     if (body.length === 0 || body.length > MAX_WEBHOOK_BODY_BYTES) {
       return context.json({ error: 'invalid callback' }, 400);
     }
@@ -64,12 +82,11 @@ export function createQQWebhookRouter(dependencies: QQWebhookDependencies) {
         typeof challenge.event_ts !== 'string' ||
         !/^\d{1,20}$/.test(challenge.event_ts) ||
         typeof challenge.plain_token !== 'string' ||
-        challenge.plain_token.length === 0 ||
-        challenge.plain_token.length > 256
+        !/^[A-Za-z0-9_-]{1,256}$/.test(challenge.plain_token)
       ) {
         return context.json({ error: 'invalid callback' }, 400);
       }
-      const signature = await signWebhookChallenge(account.botSecret, challenge.event_ts, challenge.plain_token);
+      const signature = await signWebhookChallenge(appSecret, challenge.event_ts, challenge.plain_token);
       return context.json({ plain_token: challenge.plain_token, signature });
     }
 
@@ -79,13 +96,40 @@ export function createQQWebhookRouter(dependencies: QQWebhookDependencies) {
     if (
       !timestamp ||
       !signature ||
-      !(await verifyWebhookSignature(account.botSecret, timestamp, body, signature))
+      !/^\d{1,12}$/.test(timestamp) ||
+      Math.abs(now() - Number(timestamp) * 1000) > 5 * 60_000 ||
+      !(await verifyWebhookSignature(appSecret, timestamp, body, signature))
     ) {
       return context.json({ error: 'invalid callback' }, 401);
     }
 
     const message = normalizeQQGroupMessage(payload, account, now());
-    if (message) await dependencies.handleMessage(account, message, bindings);
+    if (message) {
+      if (bindings.PLATFORM === 'cloudflare') {
+        const namespace = bindings.QQ_GATEWAY_SESSIONS as {
+          idFromName(name: string): unknown;
+          get(id: unknown): { fetch(request: Request): Promise<Response> };
+        } | undefined;
+        if (!namespace) return context.json({ error: 'queue_unavailable' }, 503);
+        const response = await namespace.get(namespace.idFromName(account.account.id)).fetch(new Request('https://qq-gateway.internal/enqueue', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accountId: account.account.id, message }),
+          signal: AbortSignal.timeout(5_000),
+        }));
+        if (!response.ok) return context.json({ error: 'queue_unavailable' }, 503);
+      } else {
+        for (const [key, entry] of recent) if (now() - entry.at > 10 * 60_000) recent.delete(key);
+        const key = `${account.account.id}:${message.eventId ?? message.id}`;
+        const previous = recent.get(key);
+        if (previous) await previous.processing;
+        else {
+          if (recent.size >= 2000) return context.json({ error: 'queue_full' }, 503);
+          const processing = dependencies.handleMessage(account, message, bindings);
+          recent.set(key, { at: now(), processing });
+          try { await processing; } catch (error) { recent.delete(key); throw error; }
+        }
+      }
+    }
     return context.json(ACK);
   });
 

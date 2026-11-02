@@ -3,10 +3,15 @@ import type { JsonObject, RuntimeBindings } from '../../shared/types';
 const SECRET_MARKER = '__nonebotmaker_aes_gcm_v1__';
 const REDACTED = '********';
 const SENSITIVE_NAME = /(secret|token|password|passwd|api.?key|credential|private.?key|access.?key|client.?secret)/i;
+const TOKEN_COUNT_NAME = /^(?:(?:agent_)?max_output_tokens|maxTokens|(?:input|output|prompt|completion|cached(?:_?prompt)?|total)_?tokens)$/i;
+
+function isSensitiveName(name: string): boolean {
+  return SENSITIVE_NAME.test(name) && !TOKEN_COUNT_NAME.test(name);
+}
 
 type EncryptedSecret = { [SECRET_MARKER]: true; iv: string; ciphertext: string };
 
-function isEncryptedSecret(value: unknown): value is EncryptedSecret {
+export function isEncryptedSecret(value: unknown): value is EncryptedSecret {
   return typeof value === 'object' && value !== null && (value as Record<string, unknown>)[SECRET_MARKER] === true;
 }
 
@@ -54,7 +59,7 @@ async function transformSecrets(
   key: CryptoKey | null,
   propertyName = '',
 ): Promise<unknown> {
-  if (action === 'redact' && SENSITIVE_NAME.test(propertyName) && value !== null && value !== undefined) {
+  if (action === 'redact' && isSensitiveName(propertyName) && value !== null && value !== undefined) {
     return propertyName.toLowerCase() === 'credentials' ? { configured: true, masked: true } : REDACTED;
   }
   if (isEncryptedSecret(value)) {
@@ -67,7 +72,7 @@ async function transformSecrets(
     return action === 'decrypt' ? decoded : value;
   }
 
-  if (action === 'encrypt' && SENSITIVE_NAME.test(propertyName)) {
+  if (action === 'encrypt' && isSensitiveName(propertyName)) {
     if ((value === '' || value === REDACTED || isCredentialsMask(value)) && isEncryptedSecret(previous)) return previous;
     if (value === null || value === undefined) return value;
     if (!key) key = await encryptionKey(bindings);

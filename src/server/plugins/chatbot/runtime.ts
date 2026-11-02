@@ -1,5 +1,9 @@
+import { CHATBOT_PLUGIN_TYPE } from '../../../shared/types';
 import type {
+  ChatMessage,
   D1DatabaseLike,
+  LibraryRecord,
+  ModelPriceRecord,
   GroupRecord,
   JsonObject,
   KVNamespaceLike,
@@ -7,16 +11,24 @@ import type {
   RuntimeBindings,
 } from '../../../shared/types';
 import { readBoolean } from '../../env';
-import type { QQAccountContext } from '../../protocols/qq/types';
+import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
+import { findModelPrice } from '../../../shared/model-pricing';
+import { createD1MatcherSessionStore, PluginRuntime } from '../dispatcher';
 import { createConversationLogRepository, type ConversationLogRepository } from '../../storage/conversation-log-repository';
 import type { EdgeOneBlobStoreLike } from '../../storage/edgeone-blob-repository';
 import { createRepository } from '../../storage/repository';
 import { decryptSecrets } from '../../storage/secrets';
 import { createChatbotHandler, type ChatbotHandlerDependencies } from './handler';
+import { completeRecentTurns } from './tools';
 
 export interface GroupConversationStore {
-  getRecent(groupId: string, limit: number): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>;
-  append(groupId: string, entries: Array<{ role: 'user' | 'assistant'; content: string }>): Promise<void>;
+  getRecent(groupId: string, limit: number): Promise<ChatMessage[]>;
+  append(groupId: string, entries: ChatMessage[]): Promise<void>;
+  replace?(groupId: string, entries: ChatMessage[]): Promise<void>;
+  clear?(groupId: string): Promise<void>;
+  getState?(groupId: string): Promise<JsonObject>;
+  setState?(groupId: string, state: JsonObject): Promise<void>;
+  claimApproval?(scopeKey: string, approvalId: string): Promise<boolean>;
 }
 
 export type ChatbotStateConsistency = 'atomic-upsert' | 'eventual' | 'provider-defined' | 'durable-object';
@@ -46,7 +58,12 @@ export interface GroupCostStore {
 export interface StoredChatbotDependencies {
   conversationStore: GroupConversationStore;
   costStore: GroupCostStore;
-  sendReply(account: QQAccountContext, groupOpenId: string, messageId: string, content: string): Promise<void>;
+  sendReply: ChatbotHandlerDependencies['sendReply'];
+  sendMedia?: ChatbotHandlerDependencies['sendMedia'];
+  scheduleWake?: ChatbotHandlerDependencies['scheduleWake'];
+  listWakes?: ChatbotHandlerDependencies['listWakes'];
+  cancelWake?: ChatbotHandlerDependencies['cancelWake'];
+  reserveOutbound?: ChatbotHandlerDependencies['reserveOutbound'];
   fetch?: typeof fetch;
   random?: () => number;
   now?: () => number;
@@ -55,9 +72,18 @@ export interface StoredChatbotDependencies {
 const CONTEXT_PREFIX = 'nonebotmaker:chatbot:context:';
 const COST_PREFIX = 'nonebotmaker:chatbot:cost:';
 const CHAT_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60;
-const MAX_CONTEXT_ENTRIES = 40;
+const MAX_CONTEXT_ENTRIES = 1000;
 
-type ContextEntry = { role: 'user' | 'assistant'; content: string };
+function decodeContext(stored: string | null): ChatMessage[] {
+  if (!stored) return [];
+  const value = JSON.parse(stored) as ChatMessage[] | { entries: ChatMessage[]; expiresAt: number };
+  if (Array.isArray(value)) return value;
+  return value.expiresAt > Date.now() ? value.entries : [];
+}
+
+function encodeContext(entries: ChatMessage[]): string {
+  return JSON.stringify({ entries: completeRecentTurns(entries, MAX_CONTEXT_ENTRIES), expiresAt: Date.now() + CHAT_STATE_RETENTION_SECONDS * 1000 });
+}
 
 interface CostState {
   dayKey: string;
@@ -134,14 +160,20 @@ function createKeyValueStores(
     conversationStore: {
       getRecent: async (groupId, limit) => {
         const stored = await get(`${CONTEXT_PREFIX}${encodeId(groupId)}`);
-        return stored ? (JSON.parse(stored) as ContextEntry[]).slice(-limit) : [];
+        return completeRecentTurns(decodeContext(stored), limit);
       },
       append: async (groupId, entries) => {
         const key = `${CONTEXT_PREFIX}${encodeId(groupId)}`;
-        const stored = await get(key);
-        const current = stored ? JSON.parse(stored) as ContextEntry[] : [];
-        await put(key, JSON.stringify([...current, ...entries].slice(-MAX_CONTEXT_ENTRIES)), CHAT_STATE_RETENTION_SECONDS);
+        await put(key, encodeContext([...decodeContext(await get(key)), ...entries]), CHAT_STATE_RETENTION_SECONDS);
       },
+      replace: async (groupId, entries) => put(`${CONTEXT_PREFIX}${encodeId(groupId)}`, encodeContext(entries), CHAT_STATE_RETENTION_SECONDS),
+      clear: async (groupId) => put(`${CONTEXT_PREFIX}${encodeId(groupId)}`, encodeContext([]), CHAT_STATE_RETENTION_SECONDS),
+      getState: async (groupId) => {
+        const stored = await get(`${CONTEXT_PREFIX}state:${encodeId(groupId)}`);
+        return stored ? JSON.parse(stored) as JsonObject : {};
+      },
+      setState: async (groupId, state) => put(`${CONTEXT_PREFIX}state:${encodeId(groupId)}`, JSON.stringify(state)),
+
     },
     costStore: {
       consistency,
@@ -159,21 +191,27 @@ function createKeyValueStores(
 }
 
 function createD1ChatbotStores(db: D1DatabaseLike): Pick<StoredChatbotDependencies, 'conversationStore' | 'costStore'> {
+  async function getValue(groupId: string): Promise<string | null> {
+    const row = await db.prepare('SELECT value, updated_at FROM chatbot_group_context WHERE group_id = ? LIMIT 1')
+      .bind(groupId).first<{ value: string; updated_at: number }>();
+    return row?.value ?? null;
+  }
+  async function putValue(groupId: string, value: string): Promise<void> {
+    await db.prepare('INSERT INTO chatbot_group_context (group_id, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(group_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+      .bind(groupId, value, Date.now()).run();
+  }
   const contextStore: GroupConversationStore = {
-    getRecent: async (groupId, limit) => {
-      const row = await db.prepare('SELECT value FROM chatbot_group_context WHERE group_id = ? LIMIT 1')
-        .bind(groupId)
-        .first<{ value: string }>();
-      return row ? (JSON.parse(row.value) as ContextEntry[]).slice(-limit) : [];
-    },
-    append: async (groupId, entries) => {
-      const existing = await db.prepare('SELECT value FROM chatbot_group_context WHERE group_id = ? LIMIT 1')
-        .bind(groupId)
-        .first<{ value: string }>();
-      const current = existing ? JSON.parse(existing.value) as ContextEntry[] : [];
-      await db.prepare(
-        'INSERT INTO chatbot_group_context (group_id, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(group_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
-      ).bind(groupId, JSON.stringify([...current, ...entries].slice(-MAX_CONTEXT_ENTRIES)), Date.now()).run();
+    getRecent: async (groupId, limit) => completeRecentTurns(decodeContext(await getValue(groupId)), limit),
+    append: async (groupId, entries) => putValue(groupId, encodeContext([...decodeContext(await getValue(groupId)), ...entries])),
+    replace: async (groupId, entries) => putValue(groupId, encodeContext(entries)),
+    clear: async (groupId) => putValue(groupId, encodeContext([])),
+    getState: async (groupId) => { const value = await getValue(`state:${groupId}`); return value ? JSON.parse(value) as JsonObject : {}; },
+    setState: async (groupId, state) => putValue(`state:${groupId}`, JSON.stringify(state)),
+    claimApproval: async (scopeKey, approvalId) => {
+      const id = JSON.stringify([scopeKey, approvalId]);
+      const row = await db.prepare('INSERT INTO records (kind, id, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, id) DO NOTHING RETURNING id')
+        .bind('chatbot-approval-claims-v1', id, '{}', new Date().toISOString()).first<{ id: string }>();
+      return Boolean(row);
     },
   };
   const costStore: GroupCostStore = {
@@ -246,26 +284,54 @@ export function createStoredChatbotHandler(
     ? createConversationLogRepository(bindings)
     : undefined;
   const dependencies: ChatbotHandlerDependencies = {
-    findGroup: async (accountId, groupOpenId) => {
+    findGroup: async (accountId, groupOpenId, conversationType = 'group') => {
       const recordsForAccount = await records.list('groups');
-      const group = recordsForAccount.find((record) => record.accountId === accountId && record.externalId === groupOpenId);
-      return group ? group as unknown as GroupRecord : null;
+      const group = recordsForAccount.find((record) => record.accountId === accountId && record.externalId === groupOpenId && (record.conversationType ?? 'group') === conversationType);
+      return group ? await decryptSecrets(group as JsonObject, bindings) as unknown as GroupRecord : null;
     },
     findProvider: async (providerId) => {
       const provider = await records.get('providers', providerId);
       if (!provider) return null;
       return await decryptSecrets(provider as JsonObject, bindings) as unknown as ProviderRecord;
     },
+    findPrice: async (model, unit = 'tokens') => {
+      const prices = await records.list('prices') as unknown as ModelPriceRecord[];
+      return findModelPrice(prices.filter((price) => (price.unit ?? 'tokens') === unit), model) ?? null;
+    },
+    findLibrary: async (kind, id) => {
+      const library = await records.get(kind, id);
+      return library ? await decryptSecrets(library as JsonObject, bindings) as unknown as LibraryRecord : null;
+    },
     getRecentContext: (groupId, limit) => services.conversationStore.getRecent(groupId, limit),
     appendContext: (groupId, entries) => services.conversationStore.append(groupId, entries),
+    replaceContext: services.conversationStore.replace?.bind(services.conversationStore),
+    clearContext: services.conversationStore.clear?.bind(services.conversationStore),
+    getState: services.conversationStore.getState?.bind(services.conversationStore),
+    setState: services.conversationStore.setState?.bind(services.conversationStore),
+    claimApproval: services.conversationStore.claimApproval?.bind(services.conversationStore),
+    scheduleWake: services.scheduleWake,
+    listWakes: services.listWakes,
+    cancelWake: services.cancelWake,
+    reserveOutbound: services.reserveOutbound,
     isWithinCostLimits: (group, at) => services.costStore.isWithinLimits(group, at),
     recordGroupCost: (group, amount, at) => services.costStore.add(group, amount, at),
     ...(conversationLogs ? { conversationLogs } : {}),
     logRecord: bindings.LOG_RECORD,
     sendReply: services.sendReply,
+    sendMedia: services.sendMedia,
     fetch: services.fetch,
     random: services.random,
     now: services.now,
   };
-  return createChatbotHandler(dependencies);
+  const handler = createChatbotHandler(dependencies);
+  const runtime = new PluginRuntime({ sessions: bindings.DB ? createD1MatcherSessionStore(bindings) : undefined, now: services.now });
+  runtime.register({ id: CHATBOT_PLUGIN_TYPE, matchers: [{ id: 'message', type: 'message', priority: 20, handlers: [async (context) => {
+    const account = (context.event.payload as { account: QQAccountContext }).account;
+    await handler(account, context.event.message as QQGroupMessage);
+  }] }] });
+  return async (account: QQAccountContext, message: QQGroupMessage): Promise<void> => {
+    const result = await runtime.dispatch({ id: account.account.id, platform: 'qq', send: async (event, text) => services.sendReply(account, event.message!.groupId, event.message!.id, text, { seq: 1, conversationType: event.message?.conversationType ?? 'group' }) },
+      { type: 'message', platform: 'qq', botId: account.account.id, sessionId: JSON.stringify([message.conversationType ?? 'group', message.groupId]), userId: message.userId, message, payload: { account } });
+    if (result.errors.length) throw result.errors[0].error;
+  };
 }

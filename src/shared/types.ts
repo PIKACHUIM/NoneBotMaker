@@ -2,7 +2,7 @@ export const CHATBOT_PLUGIN_TYPE = 'elysia-best/plugin-chatbot' as const;
 export const DEFAULT_NON_MENTION_REPLY_RATE = 0.05;
 export const LOG_RETENTION_DAYS = 30;
 
-export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'skills' | 'mcps' | 'rules';
+export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules';
 export type JsonObject = Record<string, unknown>;
 
 export type Language = 'zh' | 'en';
@@ -30,12 +30,21 @@ export interface PluginFieldDefinition {
   step?: number;
 }
 
+export interface PluginLogFieldDefinition {
+  key: string;
+  label: LocalizedText;
+}
+
 export interface PluginDefinition {
   type: string;
   name: LocalizedText;
   description: LocalizedText;
+  protocols?: string[];
   configFields: PluginFieldDefinition[];
+  accountFields: PluginFieldDefinition[];
+  groupFields: PluginFieldDefinition[];
   credentialFields: PluginFieldDefinition[];
+  logFields?: PluginLogFieldDefinition[];
 }
 
 export interface PluginRecord {
@@ -61,21 +70,25 @@ export interface BotAccountRecord {
   updatedAt: string;
 }
 
+export type ConversationType = 'group' | 'private';
+
 export interface GroupRecord {
   id: string;
   accountId: string;
   externalId: string;
+  conversationType?: ConversationType;
+  config?: JsonObject;
   name: string;
   enabled: boolean;
   providerId: string;
   model: string;
   systemPrompt: string;
-  reasoningEffort: 'low' | 'medium' | 'high';
+  reasoningEffort: 'default' | 'low' | 'medium' | 'high';
   nonMentionReplyRate: number;
   whitelistEnabled: boolean;
   whitelistUserIds: string[];
-  inputCostPerMillion: number;
-  outputCostPerMillion: number;
+  inputCostPerMillion?: number;
+  outputCostPerMillion?: number;
   /** USD budget; 0 means unlimited. */
   dailyCostLimit: number;
   monthlyCostLimit: number;
@@ -94,6 +107,23 @@ export interface ProviderRecord {
   apiKey: string;
   enabled: boolean;
   models: string[];
+  priceMultiplier?: number;
+  mediaCapabilities?: Array<'image' | 'audio' | 'video' | 'file' | 'speech'>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelPriceRecord {
+  id: string;
+  name: string;
+  model: string;
+  inputCostPerMillion: number;
+  outputCostPerMillion: number;
+  cacheInputCostPerMillion?: number;
+  currency: 'USD';
+  unit?: 'tokens' | 'characters';
+  sourceUrl?: string;
+  enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -113,6 +143,11 @@ export type ConversationDirection = 'in' | 'out';
 
 export interface ConversationLog {
   id: string;
+  pluginId?: string;
+  pluginType?: string;
+  eventId?: string;
+  status?: string;
+  details?: JsonObject;
   accountId: string;
   groupId: string;
   groupExternalId: string;
@@ -123,8 +158,19 @@ export interface ConversationLog {
   expiresAt: number;
 }
 
+export interface MessageAttachment {
+  type: 'image' | 'audio' | 'video' | 'file';
+  url: string;
+  contentType?: string;
+  filename?: string;
+  size?: number;
+}
+
 export interface NormalizedMessage {
   id: string;
+  conversationType?: ConversationType;
+  attachments?: MessageAttachment[];
+  batchMessages?: NormalizedMessage[];
   accountId: string;
   botId: string;
   groupId: string;
@@ -142,9 +188,38 @@ export interface DatabaseSetupStatus {
   pendingMigrations: number;
 }
 
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
+  | { type: 'input_audio'; input_audio: { data: string; format: string } }
+  | { type: 'file'; file: { file_id?: string; file_data?: string; filename?: string } }
+  | { type: 'video_url'; video_url: { url: string } };
+
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export interface ChatTool {
+  type: 'function';
+  function: { name: string; description?: string; parameters: JsonObject; strict?: boolean };
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | ChatContentPart[];
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+}
+
 export interface ProviderChatRequest {
+  stream?: boolean;
   model: string;
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  messages: ChatMessage[];
+  tools?: ChatTool[];
+  temperature?: number;
+  maxTokens?: number;
   reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
