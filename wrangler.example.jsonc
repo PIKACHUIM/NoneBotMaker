@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nonebotmaker",
+  "main": "src/platform/cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "replace-with-d1-database-name",
+      "database_id": "replace-with-d1-database-id",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QQ_GATEWAY_SESSIONS",
+        "class_name": "QQGatewayDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["QQGatewayDurableObject"]
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "replace-with-kv-namespace-id"
+    }
+  ],
+  "vars": {
+    "API_METHOD": "webhook",
+    "LOG_RECORD": "false"
+  }
+}

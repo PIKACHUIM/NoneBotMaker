@@ -1,0 +1,5 @@
+SYS_PASSWD=replace-with-a-long-random-password
+DB_SECRET=replace-with-an-independent-32-byte-base64-secret
+API_METHOD=webhook
+LOG_RECORD=false
+LOG_CLEANUP_SECRET=replace-with-an-independent-cleanup-secret

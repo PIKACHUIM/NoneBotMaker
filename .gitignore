@@ -147,3 +147,23 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Serverless application
+.wrangler/
+.wrangler-build/
+dist/
+.local/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env.local
+.dev.vars
+coverage/
+
+# Local deployment configs; use the sanitized tracked template
+wrangler.jsonc
+wrangler.*.jsonc
+!wrangler.example.jsonc
+
+# Locally cloned reference source
+nonebot2-chat-docker/
