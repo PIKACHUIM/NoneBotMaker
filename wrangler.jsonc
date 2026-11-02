@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nonebots-work",
+  "workers_dev": true,
+  "preview_urls": true,
+  "main": "src/platform/cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "nonbot.524228.xyz/*",
+      "zone_name": "524228.xyz"
+    }
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nonebots-data",
+      "database_id": "76ddfc43-6ba2-4060-953a-5498c5e1bbb3",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "QQ_GATEWAY_SESSIONS",
+        "class_name": "QQGatewayDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["QQGatewayDurableObject"]
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "a6e42f3f33df4ef094f58c4473a4d4b4"
+    }
+  ],
+  "vars": {
+    "API_METHOD": "webhook",
+    "LOG_RECORD": "true"
+  }
+}

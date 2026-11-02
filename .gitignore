@@ -161,8 +161,7 @@ dist/
 .dev.vars
 coverage/
 
-# Local deployment configs; use the sanitized tracked template
-wrangler.jsonc
+# Local test configs; production wrangler.jsonc is tracked
 wrangler.*.jsonc
 !wrangler.example.jsonc
 

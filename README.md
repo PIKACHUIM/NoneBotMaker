@@ -46,39 +46,28 @@ npm run build
 https://<your-worker-domain>/webhook/qq
 ```
 
-`<your-worker-domain>` 必须替换成实际部署域名。Webhook 会使用 `X-Bot-Appid` 定位账号，并验证 QQ 的签名；不要在代理层删除或改写签名相关请求头和原始 JSON body。Cloudflare 默认 `API_METHOD=webhook`，`LOG_RECORD=false`。
+`<your-worker-domain>` 必须替换成实际部署域名。Webhook 会使用 `X-Bot-Appid` 定位账号，并验证 QQ 的签名；不要在代理层删除或改写签名相关请求头和原始 JSON body。模板默认 `API_METHOD=webhook`、`LOG_RECORD=false`；正式配置可按需启用日志。
 
 ## Cloudflare Workers
 
 ### 配置与部署
 
-仓库提供不含账号专属 ID 的 `wrangler.example.jsonc` 模板。首次部署时复制为本地 `wrangler.jsonc`（该文件由 Git 忽略），填写 D1 database name/ID 与 KV namespace ID。手动 Wrangler 命令显式指定本地配置；`npm run build:worker` 使用已跟踪的安全模板做通用 dry-run：
+仓库根目录的 `wrangler.jsonc` 是 Cloudflare Workers Builds 使用的正式配置，包含 D1/KV binding、自定义域名和静态资源设置。`wrangler.example.jsonc` 是不含账号专属 ID 的模板，供 fork 后替换。
 
-PowerShell:
-
-```powershell
-Copy-Item wrangler.example.jsonc wrangler.jsonc
-```
-
-macOS/Linux:
+Cloudflare Workers Builds 的 deploy 命令使用默认配置即可：
 
 ```sh
-cp wrangler.example.jsonc wrangler.jsonc
+npx wrangler deploy
 ```
 
-填入 D1/KV 资源信息后先部署 Worker：
+手动部署也使用同一条命令。Fork 仓库后，把 `wrangler.jsonc` 中的 D1 database ID、KV namespace ID 和自定义域名替换成自己的资源，或参考 `wrangler.example.jsonc` 重写。`npm run build:worker` 使用安全模板做通用 dry-run，不会触碰正式资源。
 
-```sh
-npx wrangler deploy --dry-run --config wrangler.jsonc --outdir .wrangler-build
-npx wrangler deploy --config wrangler.jsonc
-```
-
-配置管理员密码和系统密钥。下面命令会逐项提示输入值；生成器可分别运行，为两个 secret 生成独立高熵值：
+管理员密码和系统密钥必须通过 Secret 写入，不要直接写进 `wrangler.jsonc`。下面命令会逐项提示输入值；生成器可分别运行，为两个 secret 生成独立高熵值：
 
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
-npx wrangler secret put SYS_PASSWD --config wrangler.jsonc
-npx wrangler secret put SYS_SECRET --config wrangler.jsonc
+npx wrangler secret put SYS_PASSWD
+npx wrangler secret put SYS_SECRET
 ```
 
 `SYS_PASSWD` 用于管理台登录；`SYS_SECRET` 同时用于 session 签名、账号/provider 凭据加密、在线数据库初始化授权和手动日志清理授权。因为 `SYS_SECRET` 权限较高，外部调度器必须安全保存它。若从旧版本升级且数据库中已有加密凭据，将 `SYS_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
