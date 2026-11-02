@@ -37,6 +37,7 @@ import {
   CheckCircleOutlined,
   CodeOutlined,
   CloudServerOutlined,
+  DatabaseOutlined,
   DeleteOutlined,
   EditOutlined,
   GithubOutlined,
@@ -60,6 +61,7 @@ import {
 import type {
   BotAccountRecord,
   ConversationLog,
+  DatabaseSetupStatus,
   GroupRecord,
   JsonObject,
   LibraryKind,
@@ -73,7 +75,7 @@ const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
 
 type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'integrations' | 'logs';
-type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'admin'; page: AdminPage };
+type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'setup' } | { kind: 'admin'; page: AdminPage };
 type LibraryData = Record<LibraryKind, LibraryRecord[]>;
 type LogFilters = { q?: string; accountId?: string; groupId?: string; from?: string; to?: string };
 
@@ -88,14 +90,19 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
 };
 
 function currentRoute(): Route {
-  const path = window.location.hash.slice(1) || '/';
-  if (path === '/login') return { kind: 'login' };
-  if (path.startsWith('/admin')) {
-    const page = path.split('/')[2] as AdminPage | undefined;
-    const valid: AdminPage[] = ['overview', 'plugins', 'accounts', 'groups', 'integrations', 'logs'];
-    return { kind: 'admin', page: valid.includes(page as AdminPage) ? page as AdminPage : 'overview' };
+  const path = window.location.hash.slice(1);
+  if (path) {
+    if (path === '/setup') return { kind: 'setup' };
+    if (path === '/login') return { kind: 'login' };
+    if (path.startsWith('/admin')) {
+      const page = path.split('/')[2] as AdminPage | undefined;
+      const valid: AdminPage[] = ['overview', 'plugins', 'accounts', 'groups', 'integrations', 'logs'];
+      return { kind: 'admin', page: valid.includes(page as AdminPage) ? page as AdminPage : 'overview' };
+    }
+    return { kind: 'home' };
   }
-  return { kind: 'home' };
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  return pathname === '/setup' ? { kind: 'setup' } : { kind: 'home' };
 }
 
 function go(path: string) {
@@ -233,10 +240,112 @@ function LoginPage({ onSuccess }: { onSuccess: () => void }) {
             </Form.Item>
             <Button block type="primary" size="large" htmlType="submit" loading={busy} icon={<LoginOutlined />}>验证并进入</Button>
           </Form>
+          <Button type="link" href="/setup" className="setup-entry">首次部署？初始化数据库</Button>
           <div className="login-footnote"><span className="online-dot" /> SESSION COOKIE ENCRYPTED <span>HTTPS 推荐</span></div>
         </section>
       </div>
       <footer className="login-footer"><span>NONEBOTMAKER / ADMIN CONSOLE</span><a href="https://github.com/PIKACHUIM/NoneBotMaker" target="_blank" rel="noreferrer"><GithubOutlined /> GITHUB</a></footer>
+    </main>
+  );
+}
+
+function SetupPage() {
+  const [form] = Form.useForm<{ token: string }>();
+  const [status, setStatus] = useState<DatabaseSetupStatus | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    setChecking(true);
+    setError('');
+    try {
+      setStatus(await api.setupStatus());
+    } catch (reason) {
+      setError(formatError(reason));
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const submit = async ({ token }: { token: string }) => {
+    setBusy(true);
+    setError('');
+    try {
+      setStatus(await api.initializeDatabase(token));
+      form.resetFields();
+    } catch (reason) {
+      setError(formatError(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ready = status?.schemaReady === true;
+  const connected = status?.databaseConfigured === true;
+
+  return (
+    <main className="login-shell setup-shell">
+      <header className="login-header">
+        <a className="brand-link" href="/" aria-label="NoneBotMaker 首页"><BrandMark /></a>
+        <a href="#/login" className="back-link">管理员登录 <ArrowRightOutlined /></a>
+      </header>
+      <div className="login-layout setup-layout">
+        <section className="login-context">
+          <div className="eyebrow"><span className="eyebrow-line" /> SYSTEM BOOTSTRAP <span className="eyebrow-index">SETUP / 00</span></div>
+          <h1>初始化<br /><span>数据平面。</span></h1>
+          <p>首次部署需要把基础表结构与迁移记录写入 D1。初始化脚本可重复执行，不会清空已有配置或对话数据。</p>
+          <div className="setup-facts">
+            <div><span>STORAGE</span><strong>D1 / SQLITE</strong></div>
+            <div><span>TOKEN</span><strong>SETUP_TOKEN</strong></div>
+            <div><span>EXECUTION</span><strong>IDEMPOTENT</strong></div>
+          </div>
+        </section>
+
+        <section className="login-panel setup-panel" aria-labelledby="setup-title">
+          <div className="panel-index">DATABASE BOOTSTRAP <span>SETUP-01</span></div>
+          <div className="login-icon"><DatabaseOutlined /></div>
+          <Title level={2} id="setup-title">数据库初始化</Title>
+          <Paragraph>检查当前 D1 绑定并应用基础表结构。管理员密码由部署环境的 <code>SYS_PASSWD</code> 提供，不在此页面设置。</Paragraph>
+
+          {error && <Alert className="form-alert" type="error" showIcon message={error} />}
+          {checking && !status && <div className="setup-checking"><Spin size="small" /><span>正在检查数据库状态…</span></div>}
+
+          {status && (
+            <div className="setup-status">
+              <div><span>D1 BINDING</span><Tag bordered={false} className={`setup-badge ${connected ? 'setup-badge-on' : 'setup-badge-off'}`}>{connected ? 'CONNECTED' : 'MISSING'}</Tag></div>
+              <div><span>SCHEMA</span><Tag bordered={false} className={`setup-badge ${ready ? 'setup-badge-on' : 'setup-badge-wait'}`}>{ready ? 'READY' : 'PENDING'}</Tag></div>
+              <div><span>MIGRATION LEDGER</span><strong>{status.pendingMigrations === 0 ? 'SYNCED' : `${status.pendingMigrations} PENDING`}</strong></div>
+            </div>
+          )}
+
+          {status && !ready && status.missing.length > 0 && (
+            <p className="setup-hint">待创建：{status.missing.join(' · ')}</p>
+          )}
+
+          {ready ? (
+            <div className="setup-complete">
+              <Alert type="success" showIcon message="数据库已就绪" description="基础表、对话日志表、chatbot 状态表与迁移记录均已写入。" />
+              <Button block type="primary" size="large" href="#/login" icon={<LoginOutlined />}>前往管理员登录</Button>
+            </div>
+          ) : (
+            <Form form={form} layout="vertical" requiredMark={false} onFinish={submit}>
+              <Form.Item
+                name="token"
+                label="初始化令牌"
+                rules={[{ required: true, message: '请输入 SETUP_TOKEN' }]}
+              >
+                <Input.Password size="large" autoComplete="off" placeholder="输入部署时配置的 SETUP_TOKEN" disabled={!connected} />
+              </Form.Item>
+              <Button block type="primary" size="large" htmlType="submit" loading={busy} disabled={!connected} icon={<DatabaseOutlined />}>执行初始化</Button>
+            </Form>
+          )}
+          <div className="login-footnote"><span className="online-dot" /> DATABASE / D1 <span>REFRESH TO RECHECK</span></div>
+        </section>
+      </div>
+      <footer className="login-footer"><span>NONEBOTMAKER / DATABASE BOOTSTRAP</span><a href="https://github.com/PIKACHUIM/NoneBotMaker" target="_blank" rel="noreferrer"><GithubOutlined /> GITHUB</a></footer>
     </main>
   );
 }
@@ -825,6 +934,7 @@ function RoutedApp() {
 
   if (route.kind === 'home') return <LandingPage />;
   if (route.kind === 'login') return <LoginPage onSuccess={loginSuccess} />;
+  if (route.kind === 'setup') return <SetupPage />;
   if (authState === 'checking') return <div className="auth-check"><Spin /><span>正在验证管理员会话…</span></div>;
   if (authState === 'error') return <main className="auth-error"><BrandMark /><Alert type="error" showIcon message="无法验证管理员会话" description={authError || '请重新登录后再试。'} action={<Button type="primary" href="#/login">前往登录</Button>} /><Button type="link" href="#/">返回首页</Button></main>;
   return <AdminConsole key={route.page} page={route.page} onLogout={logout} />;

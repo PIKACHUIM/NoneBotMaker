@@ -13,6 +13,7 @@ import { ApiError, registerManagementRoutes } from './management';
 import { registerLogRoutes } from './logs';
 import { registerProviderModelRoutes } from './provider-models';
 import { registerLogCleanupRoute } from './log-cleanup';
+import { registerSetupRoutes } from './setup';
 
 const MANAGED_PATH = /(?:^|\/)(plugins|accounts|groups|providers|skills|mcps|rules|logs)(?:\/|$)/;
 const AUTH_PATH = /^\/(?:api\/)?auth(?:\/|$)/;
@@ -92,6 +93,7 @@ export function createApiRouter() {
     return context.json({ data: { authenticated: true } });
   });
 
+  registerSetupRoutes(api);
   registerLogRoutes(api);
   registerLogCleanupRoute(api);
   registerProviderModelRoutes(api);

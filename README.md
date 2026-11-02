@@ -52,7 +52,7 @@ https://<your-worker-domain>/webhook/qq
 
 ### 配置与部署
 
-仓库提供不含账号专属 ID 的 `wrangler.example.jsonc` 模板。首次部署时复制为本地 `wrangler.jsonc`（该文件由 Git 忽略），填写 D1 database name/ID 与 KV namespace ID。手动 Wrangler 命令显式指定本地配置；`npm run build:worker` 使用已跟踪的安全模板做通用 dry-run。D1 migrations 包含记录、对话日志和 chatbot 上下文/成本表：
+仓库提供不含账号专属 ID 的 `wrangler.example.jsonc` 模板。首次部署时复制为本地 `wrangler.jsonc`（该文件由 Git 忽略），填写 D1 database name/ID 与 KV namespace ID。手动 Wrangler 命令显式指定本地配置；`npm run build:worker` 使用已跟踪的安全模板做通用 dry-run：
 
 PowerShell:
 
@@ -66,23 +66,20 @@ macOS/Linux:
 cp wrangler.example.jsonc wrangler.jsonc
 ```
 
-填入 D1/KV 资源信息后应用迁移并部署：
+填入 D1/KV 资源信息后先部署 Worker：
 
 ```sh
-npx wrangler d1 migrations apply your-d1-database-name --remote --config wrangler.jsonc
-npm run build:worker
 npx wrangler deploy --dry-run --config wrangler.jsonc --outdir .wrangler-build
 npx wrangler deploy --config wrangler.jsonc
 ```
 
-将 `your-d1-database-name` 替换为本地 `wrangler.jsonc` 中的 `database_name`。
-
-配置管理密码和共享密钥 `DB_SECRET`。`DB_SECRET` 同时用于签发管理 session 与加密账号/provider 凭据，代码会按用途派生不同密钥。下面命令会逐项提示输入值；生成器可分别运行，为两个 secret 生成独立高熵值：
+配置管理员密码、会话/加密共享密钥和初始化令牌。下面命令会逐项提示输入值；生成器可分别运行，为每个 secret 生成独立高熵值：
 
 ```sh
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 npx wrangler secret put SYS_PASSWD --config wrangler.jsonc
 npx wrangler secret put DB_SECRET --config wrangler.jsonc
+npx wrangler secret put SETUP_TOKEN --config wrangler.jsonc
 ```
 
 若需要调用手动日志清理 endpoint，再设置独立的 bearer secret：
@@ -91,7 +88,29 @@ npx wrangler secret put DB_SECRET --config wrangler.jsonc
 npx wrangler secret put LOG_CLEANUP_SECRET --config wrangler.jsonc
 ```
 
-`SYS_PASSWD` 用于管理台登录，`DB_SECRET` 同时用于 session 签名和账号/provider 凭据加密。`LOG_CLEANUP_SECRET` 仅用于手动清理接口，需与上述密钥保持独立。若从旧版本升级且数据库中已有加密凭据，将 `DB_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
+`SYS_PASSWD` 用于管理台登录，`DB_SECRET` 同时用于 session 签名和账号/provider 凭据加密，`SETUP_TOKEN` 只用于在线初始化数据库。`LOG_CLEANUP_SECRET` 仅用于手动清理接口，需与上述密钥保持独立。若从旧版本升级且数据库中已有加密凭据，将 `DB_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
+
+### 在线数据库初始化
+
+首次部署后访问：
+
+```text
+https://<your-worker-domain>/setup
+```
+
+输入 `SETUP_TOKEN` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0003` 的 D1 migration 标记。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。初始化完成后即可登录管理台。
+
+也可以在部署前使用 CLI 应用迁移：
+
+```sh
+npx wrangler d1 migrations apply your-d1-database-name --remote --config wrangler.jsonc
+```
+
+两种方式二选一即可；在线初始化会记录迁移标记，之后 CLI 不会重复执行已应用的迁移。完成初始化后可通过以下命令移除一次性初始化令牌：
+
+```sh
+npx wrangler secret delete SETUP_TOKEN --config wrangler.jsonc
+```
 
 ### WebSocket Gateway（仅 Cloudflare）
 
@@ -129,7 +148,7 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 
 `LOG_RECORD` 默认关闭。启用后记录入站消息和机器人回复，保留 30 天；日志不包含 bot/client secret 或 HTTP headers。
 
-Cloudflare `wrangler.jsonc` 配置了每日 `03:00 UTC` cron，由 Worker scheduled handler 执行物理清理，不需要 `LOG_CLEANUP_SECRET`。其他平台或需要手动触发时，配置 `LOG_CLEANUP_SECRET` 及清理节流所需 KV，然后调用：
+Cloudflare Worker 保留 `scheduled` handler，可在控制台为 Worker 添加每日 `03:00 UTC` 的 Cron Trigger；若账户的 Cron 配额已满，可不配置 Cron，改用外部调度器调用下方受保护接口。`wrangler.example.jsonc` 默认不声明 Cron，避免免费账户触发配额导致部署失败。其他平台或手动触发时，配置 `LOG_CLEANUP_SECRET` 及清理节流所需 KV，然后调用：
 
 ```sh
 curl -X POST "$SERVICE_URL/api/internal/logs/purge" \

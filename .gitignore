@@ -151,6 +151,7 @@ vite.config.ts.timestamp-*
 # Serverless application
 .wrangler/
 .wrangler-build/
+.wrangler-build-local/
 dist/
 .local/
 *.sqlite

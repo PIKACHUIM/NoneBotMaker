@@ -1,6 +1,7 @@
 import type {
   BotAccountRecord,
   ConversationLog,
+  DatabaseSetupStatus,
   GroupRecord,
   LibraryKind,
   LibraryRecord,
@@ -76,6 +77,15 @@ function collectionPath(path: string, params?: URLSearchParams): string {
 }
 
 export const api = {
+  async setupStatus() {
+    return request<DatabaseSetupStatus>('/api/setup/status');
+  },
+  async initializeDatabase(token: string) {
+    return request<DatabaseSetupStatus>('/api/setup', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  },
   async login(password: string) {
     return request<{ authenticated?: boolean }>('/api/auth/login', {
       method: 'POST',

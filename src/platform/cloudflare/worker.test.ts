@@ -6,6 +6,22 @@ vi.mock('../../server/storage/log-retention', () => ({ purgeExpiredLogs: cleanup
 
 import worker from './worker';
 
+describe('Cloudflare Worker routing', () => {
+  it('routes API and QQ webhook requests to the application, and pages to assets', async () => {
+    const assets = { fetch: vi.fn(async () => new Response('asset')) };
+    const bindings = { ASSETS: assets } as unknown as RuntimeBindings;
+
+    const health = await worker.fetch(new Request('https://example.test/api/health'), bindings);
+    const webhook = await worker.fetch(new Request('https://example.test/webhook/qq', { method: 'POST' }), bindings);
+    const setup = await worker.fetch(new Request('https://example.test/setup'), bindings);
+
+    expect(await health.json()).toMatchObject({ ok: true });
+    expect(webhook.status).toBe(401);
+    expect(await setup.text()).toBe('asset');
+    expect(assets.fetch).toHaveBeenCalledOnce();
+  });
+});
+
 describe('Cloudflare scheduled cleanup', () => {
   it('passes the scheduled timestamp to physical log cleanup', () => {
     const scheduledTime = 1_800_000_000_000;

@@ -4,7 +4,7 @@ Conversation log records are written with `expiresAt` capped at 30 days. List op
 
 ## Cloudflare Workers
 
-`wrangler.jsonc` schedules the Worker's `scheduled` handler daily at 03:00 UTC. The handler calls `runScheduledConversationLogCleanup(bindings, now)` from `src/server/storage/conversation-log-cleanup.ts`, which delegates to `purgeExpiredLogs(bindings, now)` in `src/server/storage/log-retention.ts`. This direct scheduled path needs only the configured log repository and does not require a KV throttle binding. D1 deletion uses the `expires_at` index. Cloudflare KV records also have a native TTL.
+The Worker exposes a `scheduled` handler. Add a Cloudflare Cron Trigger for 03:00 UTC in the dashboard when the account has Cron quota available. The handler calls `runScheduledConversationLogCleanup(bindings, now)` from `src/server/storage/conversation-log-cleanup.ts`, which delegates to `purgeExpiredLogs(bindings, now)` in `src/server/storage/log-retention.ts`. This direct scheduled path needs only the configured log repository and does not require a KV throttle binding. D1 deletion uses the `expires_at` index. Cloudflare KV records also have a native TTL. When the account Cron quota is full, use an external scheduler against the authenticated cleanup endpoint described below.
 
 ## EdgeOne
 

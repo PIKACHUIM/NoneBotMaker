@@ -17,13 +17,11 @@ export default {
     const url = new URL(request.url);
     const bindings = { ...env, PLATFORM: 'cloudflare' };
     await ensureQQGatewaySessions(bindings);
-    if (url.pathname.startsWith('/api/')) {
+    const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname === '/webhook/qq';
+    if (isApplicationPath || !env.ASSETS) {
       return app.fetch(request, bindings);
     }
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
-    }
-    return app.fetch(request, bindings);
+    return env.ASSETS.fetch(request);
   },
   scheduled(controller: ScheduledControllerLike, env: RuntimeBindings, context: ExecutionContextLike): void {
     const bindings = { ...env, PLATFORM: 'cloudflare' };

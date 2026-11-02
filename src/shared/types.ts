@@ -102,6 +102,13 @@ export interface NormalizedMessage {
   receivedAt: number;
 }
 
+export interface DatabaseSetupStatus {
+  databaseConfigured: boolean;
+  schemaReady: boolean;
+  missing: string[];
+  pendingMigrations: number;
+}
+
 export interface ProviderChatRequest {
   model: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
@@ -134,6 +141,7 @@ export interface RuntimeBindings {
   LOG_RECORD?: string;
   LOG_CLEANUP_SECRET?: string;
   LOG_CLEANUP_KV?: KVNamespaceLike;
+  SETUP_TOKEN?: string;
   PLATFORM?: 'cloudflare' | 'edgeone' | 'esa' | string;
   QQ_BOTS?: string;
   DB?: D1DatabaseLike;
