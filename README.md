@@ -125,7 +125,9 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 - `label` / `description`：`{ zh, en }` 双语标签与说明
 - 可选：`required`、`secret`、`multiline`、`default`、`placeholder`、`min`、`max`、`step`
 
-管理台会按声明生成开关、文本框、数字框或密码框；服务端会按声明做类型归一化、默认值和必填校验。账号字段使用同一套声明机制，密钥字段留空时保留原值。插件配置与账号凭据不再提供 JSON 输入框。
+管理台会按声明生成开关、文本框、数字框、下拉框或密码框；服务端会按声明做类型归一化、默认值和必填校验。账号字段使用同一套声明机制，密钥字段留空时保留原值。插件配置与账号凭据不再提供 JSON 输入框。
+
+内置 `elysia-best/plugin-chatbot` 的字段已与插件的 `Settings` / `nonebot2-chat-docker` 环境变量对齐，包括 `AGENT_*`、`BRIDGE_*`、`MAX_CONTEXT`、`COMPACT_RATE`、`BRAVE_API_KEY`。当前 Worker 已接入模型回退、群/owner 白名单、运行模式、回复分段、每分钟限流、上下文预算和成本回退；语音、黑话抽取、MCP、本地路径和联网搜索字段会保存，但对应能力暂未在 Worker 运行时启用。
 
 管理台右上角提供「中 / EN」切换，导航、页面标题、表格、表单和插件字段标签/说明会跟随语言切换。语言选择保存在浏览器本地。
 

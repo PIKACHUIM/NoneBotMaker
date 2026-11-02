@@ -34,9 +34,10 @@ describe('declared plugin configuration', () => {
         name: 'Chatbot',
         type: 'elysia-best/plugin-chatbot',
         config: {
-          contextMessageLimit: '200',
-          includeHistory: 'false',
-          defaultSystemPrompt: 42,
+          bridge_max_message_chars: '9999',
+          bridge_slang_enabled: 'false',
+          agent_model: 42,
+          bridge_allowed_groups: 'group-a, group-b',
           undeclared: 'ignored',
         },
       }),
@@ -45,9 +46,10 @@ describe('declared plugin configuration', () => {
     expect(response.status).toBe(201);
     expect((await json(response)).data).toMatchObject({
       config: {
-        contextMessageLimit: 100,
-        includeHistory: false,
-        defaultSystemPrompt: '',
+        bridge_max_message_chars: 4000,
+        bridge_slang_enabled: false,
+        agent_model: '',
+        bridge_allowed_groups: 'group-a, group-b',
       },
     });
   });

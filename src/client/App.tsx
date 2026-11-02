@@ -604,6 +604,9 @@ function PluginFieldInput({ field, editing = false, id, value, checked, onChange
 }) {
   const { tr, localized } = useI18n();
   const placeholder = field.placeholder ? localized(field.placeholder) : undefined;
+  if (field.options) {
+    return <Select id={id} value={value as string | undefined} onChange={onChange} placeholder={placeholder} options={field.options.map((option) => ({ value: option.value, label: localized(option.label) }))} />;
+  }
   if (field.type === 'boolean') {
     return <Switch id={id} checked={checked} onChange={onChange} checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} />;
   }
@@ -645,11 +648,26 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
   const configFields = definition?.configFields ?? [];
   const typeOptions = pluginDefinitions().map((item) => ({ value: item.type, label: `${localized(item.name)} · ${item.type}` }));
   if (selectedType && !definition) typeOptions.push({ value: selectedType, label: selectedType });
+  const configSections = configFields.reduce<Array<{ label: string; fields: PluginFieldDefinition[] }>>((sections, field) => {
+    const label = field.group ? localized(field.group) : tr('其他');
+    const section = sections.at(-1);
+    if (section?.label === label) section.fields.push(field);
+    else sections.push({ label, fields: [field] });
+    return sections;
+  }, []);
 
-  const initialConfig = useMemo(() => ({
-    ...defaultFieldValues(pluginDefinition(editing?.type)?.configFields ?? []),
-    ...(editing?.config ?? {}),
-  }), [editing?.type, editing?.config]);
+  const initialConfig = useMemo(() => {
+    const config = {
+      ...defaultFieldValues(pluginDefinition(editing?.type)?.configFields ?? []),
+      ...(editing?.config ?? {}),
+    };
+    if (editing) {
+      for (const field of configFields) {
+        if (field.secret) config[field.key] = '';
+      }
+    }
+    return config;
+  }, [editing, configFields]);
 
   useEffect(() => {
     if (!drawer.open) return;
@@ -707,7 +725,10 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
         <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={3} placeholder={tr('描述插件用途')} /></Form.Item>
         {configFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>
-          {configFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} />)}
+          {configSections.map((section) => <div key={section.label} className="schema-section">
+            <div className="form-section-heading"><span>{section.label}</span><small>{section.fields.length} FIELDS</small></div>
+            {section.fields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}
+          </div>)}
         </div> : <Alert type="info" showIcon message={tr('该插件类型没有声明可配置项。')} />}
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>

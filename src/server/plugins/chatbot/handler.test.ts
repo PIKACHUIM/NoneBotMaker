@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotAccountRecord, ConversationLog, GroupRecord, ProviderRecord } from '../../../shared/types';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
-import { createChatbotHandler, type ChatbotHandlerDependencies } from './handler';
+import { createChatbotHandler, resetOutboundRateLimits, type ChatbotHandlerDependencies } from './handler';
 
 const account: QQAccountContext = {
   appId: 'app-id',
@@ -101,6 +101,8 @@ function dependencies(overrides: Partial<ChatbotHandlerDependencies> = {}) {
 }
 
 describe('createChatbotHandler', () => {
+  beforeEach(() => resetOutboundRateLimits());
+
   it('handles whitelisted messages that mention the bot', async () => {
     const { deps, fetch, sentReplies } = dependencies();
     await createChatbotHandler(deps)(account, message());
@@ -119,29 +121,52 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.00002, 1_000);
   });
 
-  it('applies declared plugin config for history and system prompt defaults', async () => {
-    const { deps, fetch } = dependencies({
-      findGroup: vi.fn(async () => ({ ...group, systemPrompt: '' })),
-    });
+  it('only processes groups listed in bridge_allowed_groups', async () => {
+    const { deps, fetch } = dependencies();
+    const configured = { ...account, pluginConfig: { bridge_allowed_groups: 'another-group' } };
+
+    await createChatbotHandler(deps)(configured, message());
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('lets a plugin owner bypass the group whitelist', async () => {
+    const { deps, fetch } = dependencies();
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner-1' } };
+
+    await createChatbotHandler(deps)(configured, message({ userId: 'owner-1' }));
+
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('splits long replies by bridge_max_message_chars', async () => {
+    const longReply = 'A'.repeat(250);
+    const longFetch = vi.fn(async () => new Response(
+      JSON.stringify({
+        choices: [{ message: { content: longReply } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    const { deps, sentReplies } = dependencies({ fetch: longFetch as unknown as typeof globalThis.fetch });
     const configured = {
       ...account,
-      pluginConfig: {
-        contextMessageLimit: 5,
-        includeHistory: false,
-        defaultSystemPrompt: 'Plugin level prompt.',
-      },
+      pluginConfig: { bridge_max_message_chars: 100, bridge_max_messages_per_minute: 10 },
     };
 
     await createChatbotHandler(deps)(configured, message());
 
-    expect(deps.getRecentContext).not.toHaveBeenCalled();
-    const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as {
-      messages: Array<{ role: string; content: string }>;
-    };
-    expect(request.messages).toEqual([
-      { role: 'system', content: 'Plugin level prompt.' },
-      { role: 'user', content: 'hello' },
-    ]);
+    expect(sentReplies).toHaveLength(3);
+    expect(sentReplies.every((part) => part.length <= 100)).toBe(true);
+  });
+
+  it('does not auto reply in reserved2 mode', async () => {
+    const { deps, fetch } = dependencies();
+    const configured = { ...account, pluginConfig: { bridge_mode: 'reserved2' } };
+
+    await createChatbotHandler(deps)(configured, message());
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('allows a whitelisted non-mention when the injected probability sample passes', async () => {

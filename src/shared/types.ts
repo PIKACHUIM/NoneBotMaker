@@ -19,6 +19,8 @@ export interface PluginFieldDefinition {
   label: LocalizedText;
   description: LocalizedText;
   placeholder?: LocalizedText;
+  group?: LocalizedText;
+  options?: Array<{ value: string; label: LocalizedText }>;
   required?: boolean;
   secret?: boolean;
   multiline?: boolean;

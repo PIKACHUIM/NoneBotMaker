@@ -58,6 +58,7 @@ const EN: Record<string, string> = {
   '插件设置': 'Plugin settings',
   '账号字段': 'Account fields',
   '当前配置': 'Current configuration',
+  '其他': 'Other',
   '该插件类型没有声明可配置项。': 'This plugin type declares no configurable fields.',
   '该插件类型没有声明账号字段。': 'This plugin type declares no account fields.',
   '留空保持现有值': 'Leave blank to keep the existing value',
