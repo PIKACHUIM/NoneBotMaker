@@ -94,7 +94,7 @@ const libraryNames: Record<LibraryKind, string> = { skills: 'Skills', mcps: 'MCP
 const pageTitles: Record<AdminPage, { title: string; eyebrow: string; description: string }> = {
   overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '查看 Bot 实例、群聊与扩展能力的当前配置。' },
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
-  accounts: { title: '账号管理', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
+  accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '逐群设置模型、回复策略、白名单与扩展能力。' },
   integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 OpenAI 兼容模型供应商，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
@@ -452,10 +452,10 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
 
   const navItems = [
     { key: 'overview', icon: <BookOutlined />, label: tr('运行总览') },
-    { key: 'plugins', icon: <CodeOutlined />, label: tr('插件') },
-    { key: 'accounts', icon: <RobotOutlined />, label: tr('机器人账号') },
+    { key: 'plugins', icon: <CodeOutlined />, label: tr('插件管理') },
+    { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
     { key: 'groups', icon: <TeamOutlined />, label: tr('群聊策略') },
-    { key: 'integrations', icon: <ApiOutlined />, label: tr('接口与能力') },
+    { key: 'integrations', icon: <ApiOutlined />, label: tr('接口能力') },
     { key: 'logs', icon: <MessageOutlined />, label: tr('对话日志') },
   ];
   const title = pageTitles[page];

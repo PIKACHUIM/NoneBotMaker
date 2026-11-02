@@ -7,6 +7,7 @@ const EN: Record<string, string> = {
   '运行总览': 'Overview',
   '插件': 'Plugins',
   '插件管理': 'Plugins',
+  '平台账号': 'Platform accounts',
   '账号管理': 'Bot accounts',
   '接口能力': 'Integrations',
   '机器人账号': 'Bot accounts',
