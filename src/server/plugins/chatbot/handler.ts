@@ -264,14 +264,18 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       };
       await dependencies.conversationLogs.append([record]);
     }
-    async function send(text: string): Promise<void> {
+    async function send(text: string, replyToMessageId?: string): Promise<void> {
+      if (replyToMessageId !== undefined && !permitted.some((incoming) => incoming.id === replyToMessageId)) {
+        throw new Error('Reply target must be a message in the current conversation batch.');
+      }
+      const targetMessageId = replyToMessageId ?? message.id;
       const parts = splitMessage(text, Math.trunc(configNumber(config, 'bridge_max_message_chars', 500, 100, 4000)));
       if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, parts.length, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached.');
       for (const part of parts) {
         seq += 1;
-        await dependencies.sendReply(account, message.groupId, message.id, part, { seq, conversationType: kind });
+        await dependencies.sendReply(account, message.groupId, targetMessageId, part, { seq, conversationType: kind });
         sentCount += 1;
-        try { await log('out', part, 'sent', { seq }); } catch { postSendLogFailed = true; }
+        try { await log('out', part, 'sent', { seq, ...(replyToMessageId ? { replyToMessageId } : {}) }); } catch { postSendLogFailed = true; }
       }
     }
     function currentVoiceSendTimes(): number[] {
@@ -632,7 +636,13 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         tool('chat_current_datetime', '兼容插件工具名称别名：获取当前时区的本地时间和 UTC 时间。', {}, [], async () => timeContext(now())),
         tool('chat_timezone_info', '读取本会话配置的 IANA 时区。', {}, [], async () => JSON.stringify({ timezone })),
         tool('chat_history', '读取当前会话历史，不含其他群或私聊。', { limit: { type: 'integer', minimum: 1, maximum: 100 } }, [], async (args) => JSON.stringify(sanitize(storedMessages([...history, ...additions].slice(-Number(args.limit ?? 20))), secrets))),
-        tool('chat_send', '仅向当前已授权会话发送文本。', { text: { type: 'string', minLength: 1, maxLength: 8000 } }, ['text'], async (args) => { await send(String(args.text)); toolSendSucceeded = true; return 'sent'; }),
+        tool('chat_send', '仅向当前已授权会话发送文本；可选地回复本轮当前会话中已授权的消息。', {
+          text: { type: 'string', minLength: 1, maxLength: 8000 }, reply_to_message_id: { type: 'string', minLength: 1, maxLength: 256 },
+        }, ['text'], async (args) => {
+          await send(String(args.text), typeof args.reply_to_message_id === 'string' ? args.reply_to_message_id : undefined);
+          toolSendSucceeded = true;
+          return 'sent';
+        }),
         ...(dependencies.getState && dependencies.setState ? [tool('chat_wait', '在当前会话等待下一条用户消息后继续当前 Agent 工具调用。等待跨请求持久化，不会占住 Worker；每轮最多一条 wait 工具调用。', { seconds: { type: 'number', minimum: 1, maximum: 3600 }, prompt: { type: 'string', maxLength: 500 } }, ['seconds'], async (args) => {
           if (message.isWake || currentToolCallCount !== 1) throw new Error('chat_wait is unavailable for scheduled messages or parallel tool-call batches.');
           waitRequested = { seconds: Number(args.seconds), prompt: typeof args.prompt === 'string' ? args.prompt : '' };

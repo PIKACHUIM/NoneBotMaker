@@ -464,6 +464,29 @@ describe('createChatbotHandler', () => {
     expect(request.tools.some((entry: { function: { name: string } }) => entry.function.name === 'Bash')).toBe(false);
   });
 
+  it('allows chat_send to reply only to a message in the permitted current batch', async () => {
+    const providerFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'send', type: 'function', function: { name: 'chat_send', arguments: JSON.stringify({ text: 'replying to earlier', reply_to_message_id: 'earlier' }) } }] } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: 'done' } }] }));
+    const { deps } = dependencies({ fetch: providerFetch });
+    const first = message({ id: 'earlier', text: 'first', mentionsBot: false });
+    const latest = message({ id: 'latest', text: 'send a reply', mentionsBot: true });
+    await createChatbotHandler(deps)(account, message({ id: 'latest', text: 'first\nsend a reply', batchMessages: [first, latest] }));
+    expect(deps.sendReply).toHaveBeenCalledWith(account, 'group-openid', 'earlier', 'replying to earlier', { seq: 1, conversationType: 'group' });
+    expect(deps.sendReply).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects chat_send reply targets outside the permitted current batch', async () => {
+    const providerFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'send', type: 'function', function: { name: 'chat_send', arguments: JSON.stringify({ text: 'unsafe target', reply_to_message_id: 'other-conversation-message' }) } }] } }] }))
+      .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: 'do not send' } }] }));
+    const { deps } = dependencies({ fetch: providerFetch });
+    await createChatbotHandler(deps)({ ...account, pluginConfig: { bridge_mode: 'reserved2' } }, message());
+    const second = JSON.parse(String(providerFetch.mock.calls[1]?.[1]?.body));
+    expect(second.messages.at(-1).content).toContain('current conversation');
+    expect(deps.sendReply).not.toHaveBeenCalled();
+  });
+
   it('permits chat_send in reserved2 and increments sequence across tool and final sends', async () => {
     const providerFetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '', tool_calls: [{ id: 'send', type: 'function', function: { name: 'chat_send', arguments: '{"text":"tool reply"}' } }] } }] })))
