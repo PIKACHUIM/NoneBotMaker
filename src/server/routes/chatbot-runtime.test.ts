@@ -97,6 +97,24 @@ describe('chatbot conversation management API', () => {
     expect(await library.list('account-1')).toEqual([]);
   });
 
+  it('uploads, lists and deletes account-scoped MP3 voice assets through authenticated controls', async () => {
+    const f = fixture();
+    const path = '/chatbot/conversations/account-1/group-1/control';
+    const payload = { action: 'voiceUpload', voiceName: 'welcome.mp3', voiceContentType: 'audio/mpeg', voiceData: 'SUQzAAA=' };
+    const denied = await f.api.request(path, { method: 'POST', headers: { origin: 'http://localhost', 'content-type': 'application/json' }, body: JSON.stringify(payload) }, f.bindings);
+    expect(denied.status).toBe(401);
+    const control = (body: unknown) => authorized(f, path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const uploaded = await control(payload);
+    expect(uploaded.status).toBe(200);
+    expect(await uploaded.json()).toMatchObject({ data: { asset: { accountId: 'account-1', name: 'welcome.mp3', contentType: 'audio/mpeg', size: 5 } } });
+    const listed = await control({ action: 'voiceList' });
+    const items = (await listed.json() as { data: { items: Array<Record<string, unknown>> } }).data.items;
+    expect(items).toMatchObject([{ name: 'welcome.mp3', contentType: 'audio/mpeg', size: 5 }]);
+    expect(items[0]).not.toHaveProperty('bytes');
+    expect(await (await control({ action: 'voiceDelete', voiceName: 'welcome.mp3' })).json()).toMatchObject({ data: { deleted: true } });
+    expect(await (await control({ action: 'voiceList' })).json()).toMatchObject({ data: { items: [] } });
+  });
+
   it('supports scoped slang candidate research edits and manual approval in the authenticated console', async () => {
     const f = fixture();
     const control = (body: unknown) => authorized(f, '/chatbot/conversations/account-1/group-1/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

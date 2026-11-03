@@ -467,6 +467,13 @@ describe('Cloudflare QQ gateway Durable Object', () => {
     expect(decision.status).toBe(200);
     expect(await decision.json()).toMatchObject({ data: { decision: 'reject', actingOwnerId: 'owner-openid', messages: ['工具请求已拒绝。'] } });
     expect((await conversationStore.getState!(scopeA)).toolApprovals).toMatchObject([{ status: 'rejected' }]);
+    const uploaded = await post({ action: 'voiceUpload', externalId: 'group-a', voiceName: 'welcome.mp3', voiceContentType: 'audio/mpeg', voiceData: 'SUQzAAA=' });
+    expect(uploaded.status).toBe(200);
+    expect(await uploaded.json()).toMatchObject({ data: { asset: { accountId: bot.account.id, name: 'welcome.mp3', contentType: 'audio/mpeg', size: 5 } } });
+    const voices = await post({ action: 'voiceList', externalId: 'group-b' });
+    expect(await voices.json()).toMatchObject({ data: { items: [{ accountId: bot.account.id, name: 'welcome.mp3', size: 5 }] } });
+    expect((await post({ action: 'voiceDelete', externalId: 'group-b', voiceName: 'welcome.mp3' })).status).toBe(200);
+    expect(await (await post({ action: 'voiceList', externalId: 'group-a' })).json()).toMatchObject({ data: { items: [] } });
     expect((await post({ action: 'status', externalId: 'other-account-group' })).status).toBe(404);
   });
 
