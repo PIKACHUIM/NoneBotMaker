@@ -81,6 +81,10 @@ export interface MatcherDefinition {
   handlers: MatcherHandler[];
 }
 
+export function onMessage(matcher: Omit<MatcherDefinition, 'pluginId' | 'type'>): Omit<MatcherDefinition, 'pluginId'> {
+  return { ...matcher, type: 'message', block: matcher.block ?? true };
+}
+
 export interface RuntimePlugin {
   id: string;
   dependencies?: string[];
@@ -104,6 +108,8 @@ class MatcherControl extends Error {
 
 export class IgnoreEvent extends Error {}
 export class SkipMatcher extends Error {}
+
+class SkipHandler extends Error {}
 
 export class MatcherContext {
   readonly state: JsonObject;
@@ -177,6 +183,10 @@ export class MatcherContext {
     this.state[key] = received.text;
     delete this.state[receiveKey];
     return received.text;
+  }
+
+  skip(): never {
+    throw new SkipHandler();
   }
 
   stopPropagation(): void {
@@ -402,7 +412,10 @@ export class PluginRuntime {
     try {
       for (const hook of this.options.hooks?.matcherBefore ?? []) await hook(context);
       result.matched.push(matcherId);
-      for (; index < context.matcher.handlers.length; index += 1) await context.matcher.handlers[index](context);
+      for (; index < context.matcher.handlers.length; index += 1) {
+        try { await context.matcher.handlers[index](context); }
+        catch (error) { if (!(error instanceof SkipHandler)) throw error; }
+      }
     } catch (error) {
       if (error instanceof MatcherControl) {
         if (error.action !== 'finish') {

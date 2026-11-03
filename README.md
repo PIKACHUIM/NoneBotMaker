@@ -149,7 +149,7 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 - 群聊用语学习按配置的消息阈值与冷却时间收集候选，搜索/模型研究结果保持待审核；只有 owner 明确确认的词汇才会注入提示词。管理台支持候选查看、研究内容编辑、确认、拒绝和删除。
 - 管理台「会话运行管理」提供会话状态、模式/静默/一次性提示/工具限制、上下文重置、审批、计划唤醒、表情素材、账号语音素材和群聊用语的管理入口；生产接口仍受管理会话鉴权与账号/会话范围校验保护。
 
-`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver/adapter 生态及本地 shell/文件系统工具不能因此宣称完全兼容。Cloudflare Worker 也不运行 `pyttsx3` 等本地 Python 语音引擎，语音依赖兼容供应商 API。
+`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。`onMessage()` 复用 NoneBot 的消息 matcher 默认阻断，`MatcherContext.skip()` 只跳过当前 handler 并继续执行同 matcher 的下一个 handler。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver/adapter 生态及本地 shell/文件系统工具不能因此宣称完全兼容。Cloudflare Worker 也不运行 `pyttsx3` 等本地 Python 语音引擎，语音依赖兼容供应商 API。
 
 上述为项目内可执行的 TypeScript 行为移植，并不代表与上游 Python 插件生态 100% 等价。真实 QQ 收发、主动消息权限、AI/Brave/TTS 供应商行为和平台媒体能力仍需使用测试账号及真实服务完成外部联调。
 

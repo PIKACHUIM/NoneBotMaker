@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { IgnoreEvent, PluginRuntime, SkipMatcher, commandRule, regexRule, userPermission, type MatcherSession, type RuntimeBot, type RuntimeEvent } from './dispatcher';
+import { IgnoreEvent, PluginRuntime, SkipMatcher, commandRule, onMessage, regexRule, userPermission, type MatcherSession, type RuntimeBot, type RuntimeEvent } from './dispatcher';
 
 function fixtures(userId = 'user', botId = 'bot'): { bot: RuntimeBot; event: RuntimeEvent } {
   return {
@@ -44,6 +44,39 @@ describe('NoneBot-style event dispatcher', () => {
     const result = await runtime.dispatch(bot, event);
     expect(calls.sort()).toEqual(['first', 'peer']);
     expect(result.blocked).toBe(true);
+  });
+
+  it('skip() skips only the current handler and continues with the next handler', async () => {
+    const calls: string[] = [];
+    const runtime = new PluginRuntime();
+    runtime.register({ id: 'plugin', matchers: [{ id: 'handlers', priority: 1, block: true, handlers: [
+      async (context) => { calls.push('first'); await context.skip(); },
+      async () => { calls.push('second'); },
+    ] }, { id: 'lower', priority: 2, handlers: [async () => { calls.push('lower'); }] }] });
+    const { bot, event } = fixtures();
+    const result = await runtime.dispatch(bot, event);
+    expect(calls).toEqual(['first', 'second']);
+    expect(result.blocked).toBe(true);
+  });
+
+  it('onMessage defaults to blocking and allows explicit block opt-out', async () => {
+    const { bot, event } = fixtures();
+    const blockedCalls: string[] = [];
+    const blocking = new PluginRuntime();
+    blocking.register({ id: 'plugin', matchers: [
+      onMessage({ id: 'message', priority: 1, handlers: [async () => { blockedCalls.push('message'); }] }),
+      { id: 'lower', priority: 2, handlers: [async () => { blockedCalls.push('lower'); }] },
+    ] });
+    expect((await blocking.dispatch(bot, event)).blocked).toBe(true);
+    expect(blockedCalls).toEqual(['message']);
+    const passThroughCalls: string[] = [];
+    const passThrough = new PluginRuntime();
+    passThrough.register({ id: 'plugin', matchers: [
+      onMessage({ id: 'message', priority: 1, block: false, handlers: [async () => { passThroughCalls.push('message'); }] }),
+      { id: 'lower', priority: 2, handlers: [async () => { passThroughCalls.push('lower'); }] },
+    ] });
+    expect((await passThrough.dispatch(bot, event)).blocked).toBe(false);
+    expect(passThroughCalls).toEqual(['message', 'lower']);
   });
 
   it('uses AND rules, OR permissions, command arguments and regex groups', async () => {
