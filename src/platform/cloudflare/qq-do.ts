@@ -200,7 +200,8 @@ export class QQGatewayDurableObject {
       try {
         await this.connectAccount(body.accountId);
         return Response.json({ starting: this.accountId === body.accountId }, { status: 202 });
-      } catch {
+      } catch (error) {
+        console.error('QQ gateway connect failed.', error instanceof Error ? error.message : error);
         await this.scheduleReconnect();
         return Response.json({ starting: false, retryScheduled: true }, { status: 202 });
       }
@@ -337,6 +338,7 @@ export class QQGatewayDurableObject {
       }
       this.reconnectAttempt = 0;
       this.startHeartbeat();
+      console.log('QQ gateway session ready.', this.accountId);
     } else if (packet.t === 'RESUMED') {
       this.reconnectAttempt = 0;
       this.startHeartbeat();

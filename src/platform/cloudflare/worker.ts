@@ -16,7 +16,9 @@ export default {
   async fetch(request: Request, env: RuntimeBindings, context?: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
     const bindings = { ...env, PLATFORM: 'cloudflare' };
-    const maintenance = ensureQQGatewaySessions(bindings).catch(() => { console.error('QQ gateway maintenance failed; management remains available.'); });
+    const maintenance = ensureQQGatewaySessions(bindings).catch((error) => {
+      console.error('QQ gateway maintenance failed; management remains available.', error instanceof Error ? error.message : error);
+    });
     if (context) context.waitUntil(maintenance);
     else await maintenance;
     const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname === '/webhook/qq';

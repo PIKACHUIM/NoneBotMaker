@@ -47,7 +47,7 @@
     }
   ],
   "vars": {
-    "API_METHOD": "webhook",
+    "API_METHOD": "websocket",
     "LOG_RECORD": "true"
   }
 }
