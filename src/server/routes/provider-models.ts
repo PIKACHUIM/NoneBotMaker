@@ -5,7 +5,7 @@ import { createRepository, StorageUnavailableError } from '../storage/repository
 import { ApiError } from './management';
 
 const MAX_RESPONSE_BYTES = 1_000_000;
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 const PRIVATE_HOST_SUFFIXES = ['.localhost', '.local', '.internal', '.home', '.lan', '.test', '.invalid', '.example', '.nip.io', '.sslip.io', '.xip.io'];
 
 function modelEndpoint(baseUrl: string): URL {

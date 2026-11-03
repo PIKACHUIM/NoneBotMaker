@@ -30,6 +30,17 @@ describe('provider model discovery', () => {
     await expect(discoverProviderModels(provider, fetchMock as typeof fetch)).resolves.toEqual(['gpt-4o']);
   });
 
+  it('allows model discovery requests up to 20 seconds', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] })));
+      await expect(discoverProviderModels(provider, fetchMock as typeof fetch)).resolves.toEqual(['gpt-4o']);
+      expect(timeout).toHaveBeenCalledWith(20_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it('rejects private addresses and does not follow redirects', async () => {
     const fetchMock = vi.fn(async () => new Response('', { status: 302, headers: { Location: 'https://internal.example/' } }));
     await expect(discoverProviderModels({ ...provider, baseUrl: 'https://127.0.0.1/v1' }, fetchMock as typeof fetch))
