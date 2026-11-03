@@ -174,6 +174,21 @@ describe('NoneBot-style event dispatcher', () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
+  it('resumes a non-message pause on the next message by default', async () => {
+    const resumed = vi.fn();
+    const runtime = new PluginRuntime();
+    runtime.register({ id: 'plugin', matchers: [{ id: 'notice-flow', type: 'notice', handlers: [
+      async (context) => { await context.pause(); },
+      resumed,
+    ] }] });
+    const { bot, event } = fixtures();
+    const notice = { ...event, type: 'notice' as const, message: undefined };
+    await runtime.dispatch(bot, notice);
+    expect(resumed).not.toHaveBeenCalled();
+    await runtime.dispatch(bot, { ...event, message: { ...event.message!, text: 'reply' } });
+    expect(resumed).toHaveBeenCalledOnce();
+  });
+
   it('continues a paused temporary matcher even after the original matcher expires', async () => {
     let now = 100;
     const resumed = vi.fn();

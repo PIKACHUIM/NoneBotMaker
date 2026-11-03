@@ -10,6 +10,10 @@ export interface RuntimeEvent {
   payload?: unknown;
 }
 
+function matcherSessionKey(bot: RuntimeBot, event: RuntimeEvent, eventType: RuntimeEvent['type']): string {
+  return JSON.stringify([event.platform, bot.id, eventType, event.sessionId, event.userId]);
+}
+
 export interface RuntimeBot {
   id: string;
   platform: string;
@@ -71,6 +75,7 @@ export interface MatcherDefinition {
   id: string;
   pluginId: string;
   type?: RuntimeEvent['type'];
+  resumeType?: RuntimeEvent['type'];
   priority?: number;
   block?: boolean;
   temporary?: boolean;
@@ -355,7 +360,7 @@ export class PluginRuntime {
     }
     try {
       if (result.ignored) return result;
-      const sessionKey = JSON.stringify([event.platform, bot.id, event.type, event.sessionId, event.userId]);
+      const sessionKey = matcherSessionKey(bot, event, event.type);
       const resumed = this.options.sessions
         ? await this.options.sessions.take(sessionKey)
         : this.memorySessions.get(sessionKey) ?? null;
@@ -369,7 +374,7 @@ export class PluginRuntime {
           if (!permissions.length || (await Promise.all(permissions.map((check) => check(context)))).some(Boolean)) {
             if (resumed.receiveKey && event.message) context.state[resumed.receiveKey] = event.message;
             context.block = true;
-            await this.run(context, resumed.nextHandler, sessionKey, result);
+            await this.run(context, resumed.nextHandler, matcherSessionKey(bot, event, matcher.resumeType ?? 'message'), result);
             result.blocked = true;
             return result;
           }
@@ -392,7 +397,7 @@ export class PluginRuntime {
             if (!(await Promise.all((matcher.rules ?? []).map((check) => check(context)))).every(Boolean)) return;
             if (!this.matchers.has(key)) return;
             if (matcher.temporary) this.matchers.delete(key);
-            await this.run(context, 0, sessionKey, result);
+            await this.run(context, 0, matcherSessionKey(bot, event, matcher.resumeType ?? 'message'), result);
           } catch (error) {
             if (!(error instanceof SkipMatcher)) result.errors.push({ matcherId: key, error });
           }
