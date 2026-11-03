@@ -72,8 +72,27 @@ describe('MCP streamable HTTP tools', () => {
     expect(await connectMcp(library('unsafe'), fetchImpl)).toEqual([]);
     expect(await connectMcp(library('safe'), fetchImpl, true)).toHaveLength(1);
     const empty = { ...library('readonly'), config: { ...library('readonly').config, allowedTools: [] } };
-    expect((await connectMcp(empty, fetchImpl)).map((entry) => entry.definition.function.name)).toEqual(['mcp_readonly_read']);
-    expect((await connectMcp(empty, fetchImpl, true)).map((entry) => entry.definition.function.name)).toEqual(['mcp_readonly_read']);
+    expect(await connectMcp(empty, fetchImpl)).toEqual([]);
+    expect(await connectMcp(empty, fetchImpl, true)).toEqual([]);
+  });
+
+  it('does not trust a remote readOnlyHint unless the administrator allowlisted the tool', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('dns-query')) return dns();
+      const request = JSON.parse(String(init?.body));
+      if (request.method === 'notifications/initialized') return new Response(null, { status: 202 });
+      const result = request.method === 'initialize' ? { protocolVersion: '2025-03-26' } : { tools: [
+        { name: 'read', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
+      ] };
+      return json({ jsonrpc: '2.0', id: request.id, result });
+    });
+    const untrusted = { ...library('remote'), config: { url: 'https://remote.example/mcp' } };
+    expect(await connectMcp(untrusted, fetchImpl)).toEqual([]);
+    const pending = await connectMcp(untrusted, fetchImpl, false, true);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].mcp).toMatchObject({ readOnly: false, explicitlyAllowed: false });
+    const allowed = { ...untrusted, config: { ...untrusted.config, allowedTools: ['read'] } };
+    expect((await connectMcp(allowed, fetchImpl))[0].mcp).toMatchObject({ readOnly: true, explicitlyAllowed: true });
   });
 
   it('parses finite SSE JSON-RPC responses', async () => {

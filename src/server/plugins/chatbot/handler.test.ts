@@ -575,7 +575,7 @@ describe('createChatbotHandler', () => {
       findLibrary: vi.fn(async () => ({ id: 'alpha', name: 'MCP', description: '', enabled: true, config: { url: 'https://mcp.example/rpc' }, createdAt: '', updatedAt: '' })),
       claimApproval: vi.fn(async () => true), getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
     });
-    await createChatbotHandler(deps)({ ...account, pluginConfig: { bridge_owner_ids: 'owner' } }, message({ userId: 'member' }));
+    await createChatbotHandler(deps)({ ...account, pluginConfig: { bridge_owner_ids: 'owner' } }, message({ userId: 'allowed-user' }));
     expect(modelCalls).toBe(1);
     expect(remoteToolCalls).toBe(0);
     expect(state.toolApprovals).toMatchObject([{ status: 'pending', call: { function: { name: 'mcp_alpha_read' } } }]);

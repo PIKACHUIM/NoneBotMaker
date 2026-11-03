@@ -139,11 +139,13 @@ export async function connectMcp(record: LibraryRecord, fetchImpl: typeof fetch 
       if (typeof remote.name !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(remote.name) || !remote.inputSchema || typeof remote.inputSchema !== 'object') throw new Error('MCP tool schema is invalid.');
       if (allowed && !allowed.includes(remote.name)) continue;
       const annotations = remote.annotations && typeof remote.annotations === 'object' ? remote.annotations as JsonObject : {};
-      if (!includeApprovalCandidates && annotations.readOnlyHint !== true && !(ownerAuthorized && allowed?.includes(remote.name))) continue;
+      const explicitlyAllowed = allowed?.includes(remote.name) === true;
+      const trustedReadOnly = annotations.readOnlyHint === true && explicitlyAllowed;
+      if (!includeApprovalCandidates && !trustedReadOnly && !(ownerAuthorized && explicitlyAllowed)) continue;
       const remoteName = remote.name;
       const name = `mcp_${record.id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 24)}_${remoteName}`.slice(0, 64);
       registered.push({
-        mcp: { serviceId: record.id, remoteName, readOnly: annotations.readOnlyHint === true, explicitlyAllowed: allowed?.includes(remoteName) === true },
+        mcp: { serviceId: record.id, remoteName, readOnly: trustedReadOnly, explicitlyAllowed },
         definition: { type: 'function', function: { name, description: typeof remote.description === 'string' ? remote.description.slice(0, 2_000) : remoteName, parameters: remote.inputSchema as JsonObject } },
         execute: async (argumentsValue) => JSON.stringify(await rpc('tools/call', { name: remoteName, arguments: argumentsValue })),
       });

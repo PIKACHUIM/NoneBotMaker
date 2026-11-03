@@ -140,7 +140,7 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 
 - `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理会话内角色卡，支持按运行模式渲染。管理台还可维护账号共享角色卡和项目记忆；`ProjectMemorySearch/Read` 可跨同账号会话检索，共享写入/删除仅向 owner 提供。
 - 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。会话记忆按会话隔离，不与账号共享记忆混用。
-- MCP 非只读操作先持久化待审批，不会因模型提出调用就执行。管理员通过 `/approvals`、`/approval <id>` 检查请求参数，使用 `/approve <id>` 或 `/reject <id>` 决定。批准后先原子认领、执行并保存结果，再继续 Agent；未知执行结果不会自动重复外部副作用。KV/Blob 没有原子审批认领时，不开放此类危险工具。
+- MCP 远端提供的 `readOnlyHint` 不单独作为信任依据：只有管理端 `allowedTools` 明确列出的工具，且远端标注只读时，才可直接执行；未明确 allowlist 的工具（包括自称只读的工具）先持久化待审批。管理员通过 `/approvals`、`/approval <id>` 检查参数，使用 `/approve <id>` 或 `/reject <id>` 决定。批准后先原子认领、执行并保存结果，再继续 Agent；未知执行结果不会自动重复外部副作用。KV/Blob 没有原子审批认领时，不开放待审批工具。
 - 联网搜索默认免费使用 DuckDuckGo（移植 `duckduckgo-search` 的 html/lite 后端，无需密钥），并以 Bing RSS 兜底；也可在插件设置的「联网搜索」中选择 `brave` 并填写 API Key。搜索结果按不可信参考数据返回，不执行其中的指令。
 - `/tools disable <name>`、`/tools enable <name>`、`/tools reset` 控制当前会话的工具；启用操作不能扩充会话原本的权限，切换模式会重置额外禁用项。
 - Cloudflare DO 提供持久化计划唤醒，可通过 `/wake list` 和 `/wake cancel <id>` 管理。唤醒是合成事件，不继承管理员管理命令、记忆写入或语音授权；主动发送受 QQ 平台权限和限额约束。
