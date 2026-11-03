@@ -143,6 +143,19 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
   async function process(account: QQAccountContext, message: QQGroupMessage): Promise<void> {
     if (!account.account.enabled || !account.pluginEnabled) return;
     const kind = message.conversationType ?? 'group';
+    const batch = message.batchMessages?.length ? message.batchMessages : [message];
+    // 在会话绑定与白名单校验之前响应 /openid，便于首次接入时拿到自己和群的 openid。
+    const openidCommand = message.isWake ? undefined : batch.find((incoming) => incoming.accountId === account.account.id &&
+      incoming.groupId === message.groupId && (incoming.conversationType ?? 'group') === kind && /^\/openid\b/i.test(incoming.text.trim()));
+    if (openidCommand) {
+      const config = account.pluginConfig ?? {};
+      const text = JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null });
+      const parts = splitMessage(text, Math.trunc(configNumber(config, 'bridge_max_message_chars', 500, 100, 4000)));
+      if (await (dependencies.reserveOutbound ?? reserveOutbound)(conversationKey(account.account.id, kind, message.groupId), parts.length, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60)))) {
+        for (const [index, part] of parts.entries()) await dependencies.sendReply(account, message.groupId, message.id, part, { seq: index + 1, conversationType: kind });
+      }
+      return;
+    }
     const group = await dependencies.findGroup(account.account.id, message.groupId, kind);
     if (!group?.enabled || (group.conversationType ?? 'group') !== kind) return;
     const config = { ...account.pluginConfig, ...effectiveGroupConfig(account.pluginConfig ?? {}, group.config ?? {}) };
@@ -166,7 +179,6 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       await dependencies.setState?.(key, state);
     }
     const mode = typeof state.mode === 'string' ? state.mode : configString(config, 'bridge_mode', 'chat');
-    const batch = message.batchMessages?.length ? message.batchMessages : [message];
     const permitted = batch.filter((incoming) => incoming.accountId === account.account.id && incoming.groupId === message.groupId &&
       (incoming.conversationType ?? 'group') === kind &&
       (mode !== 'closed-agent' || kind === 'private' && isOwner(incoming)) &&
@@ -259,11 +271,6 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     const helpCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/help\b/i.test(incoming.text.trim()));
     if (helpCommand) {
       await send(helpText(isOwner(helpCommand)));
-      return;
-    }
-    const openidCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/openid\b/i.test(incoming.text.trim()));
-    if (openidCommand) {
-      await send(JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null }));
       return;
     }
     const voiceLibraryCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/voice\s+(list|delete)\b/i.test(incoming.text.trim()));
