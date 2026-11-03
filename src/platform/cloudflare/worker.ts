@@ -17,7 +17,8 @@ export default {
     const url = new URL(request.url);
     const bindings = { ...env, PLATFORM: 'cloudflare' };
     const maintenance = ensureQQGatewaySessions(bindings).catch((error) => {
-      console.error('QQ gateway maintenance failed; management remains available.', error instanceof Error ? error.message : error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('QQ gateway maintenance failed; management remains available.', message);
     });
     if (context) context.waitUntil(maintenance);
     else await maintenance;

@@ -107,7 +107,7 @@ async function stopConfiguredAccounts(bindings: RuntimeBindings): Promise<void> 
   await sendAccountCommands(bindings, '/disconnect');
 }
 
-async function sendAccountCommands(bindings: RuntimeBindings, path: '/connect' | '/disconnect'): Promise<void> {
+export async function sendAccountCommands(bindings: RuntimeBindings, path: '/connect' | '/disconnect'): Promise<void> {
   const namespace = bindings.QQ_GATEWAY_SESSIONS as QQGatewayNamespace | undefined;
   if (!namespace) throw new Error('QQ_GATEWAY_SESSIONS Durable Object binding is not configured.');
 
@@ -201,7 +201,8 @@ export class QQGatewayDurableObject {
         await this.connectAccount(body.accountId);
         return Response.json({ starting: this.accountId === body.accountId }, { status: 202 });
       } catch (error) {
-        console.error('QQ gateway connect failed.', error instanceof Error ? error.message : error);
+        console.error('QQ gateway connect failed.', errorMessage(error));
+        await this.recordGatewayState(false, errorMessage(error));
         await this.scheduleReconnect();
         return Response.json({ starting: false, retryScheduled: true }, { status: 202 });
       }
@@ -221,7 +222,10 @@ export class QQGatewayDurableObject {
       const accountId = await this.state.storage.get<string>('accountId');
       if (accountId) {
         try { await this.connectAccount(accountId); }
-        catch { await this.scheduleReconnect(); }
+        catch (error) {
+          await this.recordGatewayState(false, errorMessage(error));
+          await this.scheduleReconnect();
+        }
       }
     }
     this.processingQueue = this.processingQueue.catch(() => undefined).then(() => this.drainPendingMessages());
@@ -253,7 +257,9 @@ export class QQGatewayDurableObject {
     }
 
     const accessToken = await this.getAccessToken(account);
-    const gatewayResponse = await this.fetchImpl(GATEWAY_ENDPOINT, {
+    // 必须以裸函数调用全局fetch；以方法形式调用（this.fetchImpl）在Workers里会抛Illegal invocation。
+    const fetchImpl = this.fetchImpl;
+    const gatewayResponse = await fetchImpl(GATEWAY_ENDPOINT, {
       headers: { authorization: `QQBot ${accessToken}` },
       signal: AbortSignal.timeout(10_000),
     });
@@ -280,6 +286,7 @@ export class QQGatewayDurableObject {
       if (this.socket !== socket) return;
       this.clearHeartbeat();
       this.socket = undefined;
+      this.state.waitUntil(this.recordGatewayState(false, `closed ${event.code} ${event.reason ?? ''}`.trim()));
       if (event.code === 4914 || event.code === 4915) {
         this.state.waitUntil(this.disconnect());
         return;
@@ -339,9 +346,11 @@ export class QQGatewayDurableObject {
       this.reconnectAttempt = 0;
       this.startHeartbeat();
       console.log('QQ gateway session ready.', this.accountId);
+      await this.recordGatewayState(true);
     } else if (packet.t === 'RESUMED') {
       this.reconnectAttempt = 0;
       this.startHeartbeat();
+      await this.recordGatewayState(true);
     } else if (packet.t === 'GROUP_AT_MESSAGE_CREATE' || packet.t === 'GROUP_MESSAGE_CREATE' || packet.t === 'C2C_MESSAGE_CREATE') {
       await this.handleGroupMessage(packet);
     }
@@ -564,6 +573,19 @@ export class QQGatewayDurableObject {
     }));
     await this.schedulePendingAlarm();
     return removed;
+  }
+
+  private async recordGatewayState(connected: boolean, error?: string): Promise<void> {
+    const db = this.env.DB;
+    const accountId = this.accountId ?? await this.state.storage.get<string>('accountId');
+    if (!db || !accountId) return;
+    const at = new Date(this.now()).toISOString();
+    const value = JSON.stringify({ accountId, connected, ...(error ? { error: error.slice(0, 500) } : {}), updatedAt: at });
+    // 连接状态写入D1仅用于排障，失败不能影响gateway本身。
+    try {
+      await db.prepare('INSERT INTO records (kind, id, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+        .bind('gateway-state', accountId, value, at).run();
+    } catch { /* diagnostics are best effort */ }
   }
 
   private async recordQueueFailure(account: QQAccountContext, message: QQGroupMessage, error: unknown): Promise<void> {
@@ -828,6 +850,10 @@ export class QQGatewayDurableObject {
     this.reconnectAttempt += 1;
     await this.setGatewayAlarm(this.now() + delay);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isQQGatewayHost(hostname: string): boolean {
