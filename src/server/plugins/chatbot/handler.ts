@@ -508,7 +508,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     if (!provider && !providerId && configString(config, 'agent_base_url') && configString(config, 'agent_api_key')) provider = {
       id: 'plugin-default', name: 'Plugin default', baseUrl: configString(config, 'agent_base_url'), apiKey: configString(config, 'agent_api_key'), enabled: true, models: [], createdAt: '', updatedAt: '',
     };
-    if (!provider?.enabled) { if (approvedResult) await send(`审批已执行；模型供应商不可用。\n${approvedResult.content}`); return; }
+    if (!provider?.enabled) { if (approvedResult) await send(`审批已执行；AI供应商不可用。\n${approvedResult.content}`); return; }
     secrets.push(provider.apiKey);
     const model = group.model || configString(config, 'agent_model');
     if (!model) { if (approvedResult) { await send(`审批已执行；未配置后续模型。\n${approvedResult.content}`); return; } throw new Error('Chat model is not configured.'); }

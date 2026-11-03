@@ -107,7 +107,7 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
   conversations: { title: '会话运行管理', eyebrow: 'CHAT BRIDGE / 05', description: '检查实际运行状态，重置上下文并管理待审批工具和计划唤醒。' },
-  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、模型供应商与单价，以及 Skills、MCP 和 Rules。' },
+  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、AI供应商与单价，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
 
@@ -578,7 +578,7 @@ function OverviewPage({ plugins, accounts, groups, providers, onNavigate }: {
         <MetricTile index="01" label={tr('启用插件')} value={activePlugins} total={plugins.length} icon={<CodeOutlined />} onClick={() => onNavigate('plugins')} />
         <MetricTile index="02" label={tr('运行账号')} value={activeAccounts} total={accounts.length} icon={<RobotOutlined />} onClick={() => onNavigate('accounts')} />
         <MetricTile index="03" label={tr('启用群聊')} value={activeGroups} total={groups.length} icon={<TeamOutlined />} onClick={() => onNavigate('groups')} />
-        <MetricTile index="04" label={tr('模型供应商')} value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('integrations')} />
+        <MetricTile index="04" label={tr('AI供应商')} value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('integrations')} />
       </div>
       <div className="overview-columns">
         <Card className="section-card overview-flow" title={<SectionTitle index="A" title={tr('配置拓扑')} subtitle="CONFIGURATION GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>{tr('管理群聊')} <ArrowRightOutlined /></Button>}>
@@ -1157,7 +1157,7 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
         <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
         <div className="form-section-heading"><span>MODEL OVERRIDE</span><small>OPTIONAL</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="providerId" label={tr('模型供应商覆盖')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+          <Form.Item name="providerId" label={tr('AI供应商覆盖')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
           <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
         </div>
         <Form.Item name="reasoningEffort" label={tr('思考强度覆盖')} extra={tr('默认继承身份策略；模型默认表示不发送该参数。')}><Select options={[{ label: tr('继承身份策略'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
@@ -1282,7 +1282,7 @@ function IntegrationsPage({ providers, prices, libraries, policies, accounts, ro
   const { tr } = useI18n();
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
-    { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'providers', label: <span><ApiOutlined /> {tr('AI供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity') + roleCards.length + memories.length}</Tag></span>, children: <IdentityPanel policies={policies} providers={providers} libraries={libraries} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={onRefresh} onError={onError} /> },
     { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
@@ -1394,7 +1394,7 @@ function PolicyPanel({ type, data, providers, libraries, onRefresh, onError }: {
         <Form.Item name="description" label={tr('策略说明')}><Input.TextArea rows={2} placeholder={tr('说明该策略的适用范围')} /></Form.Item>
         {isIdentity && <>
           <div className="form-grid two-cols">
-            <Form.Item name="providerId" label={tr('模型供应商')}><Select allowClear placeholder={tr('沿用插件默认')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+            <Form.Item name="providerId" label={tr('AI供应商')}><Select allowClear placeholder={tr('沿用插件默认')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
             <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
           </div>
           <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
@@ -1453,7 +1453,7 @@ function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; 
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑供应商')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveProvider({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除供应商')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteProvider(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun="OPENAI-COMPATIBLE PROVIDERS" action={tr('新增供应商')} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<ProviderRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={tr('还没有模型供应商')} description={tr('添加 OpenAI 兼容 API，并登记可用的模型 ID。')} onCreate={() => drawer.edit()} action={tr('添加供应商')} />}
+    {data.length ? <Table<ProviderRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={tr('还没有AI供应商')} description={tr('添加 OpenAI 兼容 API，并登记可用的模型 ID。')} onCreate={() => drawer.edit()} action={tr('添加供应商')} />}
     <Drawer title={<DrawerTitle label="MODEL PROVIDER" title={editing ? tr('编辑供应商') : tr('新增供应商')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存供应商')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('供应商名称')} rules={[{ required: true, message: tr('请输入供应商名称') }]}><Input placeholder={tr('例如：团队模型网关')} /></Form.Item>
