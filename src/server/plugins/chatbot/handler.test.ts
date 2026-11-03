@@ -166,6 +166,18 @@ describe('createChatbotHandler', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('reports the sender and group openids through /openid without calling the model', async () => {
+    const { deps, fetch, sentReplies } = dependencies();
+    await createChatbotHandler(deps)(account, message({ userId: 'allowed-user', text: '/openid' }));
+    expect(JSON.parse(sentReplies[0])).toEqual({ conversationType: 'group', userOpenid: 'allowed-user', groupOpenid: 'group-openid' });
+    expect(fetch).not.toHaveBeenCalled();
+
+    const privateRun = dependencies({ findGroup: vi.fn(async () => ({ ...group, conversationType: 'private' as const, whitelistEnabled: false })) });
+    await createChatbotHandler(privateRun.deps)(account, message({ userId: 'private-user', groupId: 'private-user', conversationType: 'private', eventType: 'C2C_MESSAGE_CREATE', text: '/openid' }));
+    expect(JSON.parse(privateRun.sentReplies[0])).toEqual({ conversationType: 'private', userOpenid: 'private-user', groupOpenid: null });
+    expect(privateRun.fetch).not.toHaveBeenCalled();
+  });
+
   it('lets any conversation member reset only the current chat and gates silent/active to owners', async () => {
     let state: Record<string, unknown> = {};
     const clearContext = vi.fn(async () => undefined);

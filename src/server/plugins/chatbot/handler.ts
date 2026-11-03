@@ -130,7 +130,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }
     const state = await dependencies.getState?.(key) ?? {};
     const pendingWait = validAgentWait(state.pendingAgentWait, now());
-    const isChatCommand = /^\/(?:approve|reject|approvals|approval|tools|wake|slang|voice|reset|status|mode|memory|role|silent|active|prompt)\b/i.test(message.text.trim());
+    const isChatCommand = /^\/(?:approve|reject|approvals|approval|tools|wake|slang|voice|reset|status|mode|memory|role|silent|active|prompt|openid)\b/i.test(message.text.trim());
     const resumeWait = !message.isWake && !isChatCommand ? pendingWait ?? undefined : undefined;
     if (pendingWait?.requestMessageId === message.id) return;
     if (state.pendingAgentWait !== undefined && !pendingWait) {
@@ -228,6 +228,11 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }
     for (const incoming of batch) await log('in', message.isWake ? '' : incoming.text, message.isWake ? 'wake' : permitted.includes(incoming) ? 'received' : 'denied', { userName: incoming.userName, ...(message.isWake ? { scheduled: true, wakeReason: message.wakeReason } : {}), attachments: incoming.attachments?.map(({ type, contentType, filename, size }) => ({ type, contentType, filename, size })) }, incoming);
     if (!permitted.length) return;
+    const openidCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/openid\b/i.test(incoming.text.trim()));
+    if (openidCommand) {
+      await send(JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null }));
+      return;
+    }
     const voiceLibraryCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/voice\s+(list|delete)\b/i.test(incoming.text.trim()));
     if (voiceLibraryCommand) {
       const match = /^\/voice\s+(list|delete)(?:\s+([\s\S]*))?$/i.exec(voiceLibraryCommand.text.trim())!;
