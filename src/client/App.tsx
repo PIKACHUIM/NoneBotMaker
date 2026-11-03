@@ -46,6 +46,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MessageOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -1056,6 +1057,8 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
   const selectedAccount = accounts.find((item) => item.id === selectedAccountId);
   const selectedPlugin = plugins.find((item) => item.id === selectedAccount?.pluginId);
   const definition = pluginDefinition(selectedPlugin?.type);
+  // 私聊白名单只对私聊有意义；群聊的可达范围就是上面的群 ID 列表。
+  const visibleConversationFields = conversationFields(definition?.type).filter((field) => field.key !== 'bridge_allowed_private' || conversationType === 'private');
   const identityPolicyId = (Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.identityPolicyId;
   const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
   const effectiveProviderId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId || identityPolicy?.providerId || '';
@@ -1069,7 +1072,7 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
     form.resetFields();
     form.setFieldsValue({
       accountId: editing?.accountId,
-      externalId: editing?.externalId ?? '',
+      externalIds: editing ? conversationIdList(editing.externalId) : [''],
       conversationType: editing?.conversationType ?? 'group',
       name: editing?.name ?? '', enabled: editing?.enabled ?? true,
       dialogPolicyId: editing?.dialogPolicyId || undefined,
@@ -1090,10 +1093,11 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
     setSaving(true);
     try {
       const userIds = typeof values.whitelistText === 'string' ? values.whitelistText.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean) : values.whitelistUserIds as string[] ?? [];
+      const externalIds = conversationIdList(values.externalIds);
       await api.saveGroup({
-        accountId: String(values.accountId), externalId: String(values.externalId), name: String(values.name ?? ''),
+        accountId: String(values.accountId), externalId: externalIds.join(','), name: String(values.name ?? ''),
         conversationType: values.conversationType as GroupRecord['conversationType'],
-        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(conversationFields(definition?.type), values.config as JsonObject) },
+        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(visibleConversationFields, values.config as JsonObject) },
         dialogPolicyId: String(values.dialogPolicyId ?? ''), voicePolicyId: String(values.voicePolicyId ?? ''), identityPolicyId: String(values.identityPolicyId ?? ''),
         enabled: Boolean(values.enabled), providerId: String(values.providerId ?? ''), model: String(values.model ?? ''),
         systemPromptMode: (values.systemPromptMode as GroupRecord['systemPromptMode']) ?? 'inherit',
@@ -1145,8 +1149,23 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
           }} /></Form.Item>
           <Form.Item name="conversationType" label={tr('会话类型')} extra={tr('群聊绑定群 openid；私聊绑定用户 openid。')}><Select disabled={Boolean(editing)} options={[{ value: 'group', label: tr('群聊') }, { value: 'private', label: tr('私聊') }]} /></Form.Item>
         </div>
-        <Form.Item name="externalId" label={conversationType === 'private' ? tr('用户 openid') : tr('群 openid')} extra={tr('可填多个，用换行或逗号分隔；每个会话的历史、记忆与语音状态仍分别保存。')} rules={[{ required: true, message: tr('请输入会话 openid') }]}><Input.TextArea rows={2} placeholder={conversationType === 'private' ? 'user-openid-1, user-openid-2' : 'group-openid-1, group-openid-2'} /></Form.Item>
-        {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 openid 可随时增减。')}</p>}
+        <Form.Item label={conversationType === 'private' ? tr('允许的用户 openid') : tr('允许的群 ID')} required extra={tr('一条策略可服务多个会话；每个会话的历史、记忆与语音状态仍分别保存。')}>
+          <Form.List name="externalIds" rules={[{ validator: async (_, value: string[] | undefined) => {
+            if (!Array.isArray(value) || !value.some((item) => String(item ?? '').trim())) throw new Error(tr('请至少填写一个 openid'));
+          } }]}>
+            {(fields, { add, remove }, { errors }) => <div className="id-list">
+              {fields.map(({ key, name, ...restField }) => <div className="id-list-row" key={key}>
+                <Form.Item {...restField} name={name} rules={[{ required: true, whitespace: true, message: tr('请输入 openid') }]}>
+                  <Input placeholder={conversationType === 'private' ? 'user-openid' : 'group-openid'} />
+                </Form.Item>
+                <Button type="text" danger aria-label={tr('移除')} icon={<MinusCircleOutlined />} disabled={fields.length <= 1} onClick={() => remove(name)} />
+              </div>)}
+              <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add('')}>{conversationType === 'private' ? tr('添加用户 openid') : tr('添加群 ID')}</Button>
+              <Form.ErrorList errors={errors} />
+            </div>}
+          </Form.List>
+        </Form.Item>
+        {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
         <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
         <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
         <div className="form-grid two-cols">
@@ -1170,7 +1189,7 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>{tr('模型成本估算')}</span><small>USD / {price?.unit === 'characters' ? tr('百万字符') : tr('百万 token')}</small></div>
         <Alert className="price-estimate" type={price ? 'info' : 'warning'} showIcon message={price ? `${tr('输入成本')} $${(price.inputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)} / ${tr('输出成本')} $${(price.outputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)}` : tr('当前模型尚未登记单价，成本估算不可用。')} description={<div className="price-source">{price && <>{tr('计价来源')}：{price.name} · {price.model}<br />{tr('基础单价')}：${price.inputCostPerMillion} / ${price.outputCostPerMillion} · {tr('API 计价倍率')} × {provider?.priceMultiplier ?? 1}<br />{price.cacheInputCostPerMillion !== undefined && <>{tr('缓存输入单价')}：${price.cacheInputCostPerMillion * (provider?.priceMultiplier ?? 1)}<br /></>}{price.sourceUrl && <>{tr('来源地址')}：{price.sourceUrl}<br /></>}</>}{tr('估算使用模型单价 × API 倍率，并按所选计价单位的实际用量计算；不等于供应商账单。')} <Button type="link" href="#/admin/integrations">{tr('管理模型单价')}</Button></div>} />
-        {selectedAccountId && (conversationFields(definition?.type).length ? <SchemaFields fields={conversationFields(definition?.type)} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
+        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>

@@ -337,6 +337,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .identity-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0 0; }
 .identity-switch-hint { color: var(--muted); font-size: 11px; }
 .identity-panel .tab-panel { padding-top: 4px; }
+.id-list { display: grid; gap: 0; }
+.id-list-row { display: flex; gap: 8px; align-items: flex-start; }
+.id-list-row .ant-form-item { flex: 1; margin-bottom: 10px; }
+.id-list > .ant-btn-dashed { margin-bottom: 4px; }
 .logs-page { padding-top: 20px; }
 .chatbot-runtime-page { display: grid; gap: 14px; padding-top: 16px; }
 .runtime-control-card { border-color: var(--line); background: #172023; }

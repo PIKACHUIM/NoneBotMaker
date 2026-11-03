@@ -55,7 +55,7 @@ describe('chatbot conversation management API', () => {
     expect((await update({ action: 'initialPrompt', prompt: 'summarize next' })).status).toBe(200);
     expect((await update({ action: 'tools', disabledTools: ['chat_send'] })).status).toBe(200);
     const after = await authorized(f, '/chatbot/conversations/account-1/group-1');
-    expect(await after.json()).toMatchObject({ data: { mode: 'reserved2', silent: true, initialPromptPending: true, disabledTools: ['chat_send'] } });
+    expect(await after.json()).toMatchObject({ data: { mode: 'reserved2', silent: true, initialPromptPending: true, initialPrompt: 'summarize next', disabledTools: ['chat_send'] } });
   });
 
   it('rejects cross-account path access and invalid mutation values', async () => {

@@ -456,9 +456,10 @@ describe('Cloudflare QQ gateway Durable Object', () => {
     const post = (body: Record<string, unknown>) => durable.fetch(new Request('https://qq-gateway.internal/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accountId: bot.account.id, groupId: 'group-record', ...body }) }));
     const changed = await post({ action: 'mode', externalId: 'group-a', mode: 'reserved' });
     expect(changed.status).toBe(200);
+    expect((await post({ action: 'initialPrompt', externalId: 'group-a', prompt: 'existing prompt' })).status).toBe(200);
     const statusA = await post({ action: 'status', externalId: 'group-a' });
     const statusB = await post({ action: 'status', externalId: 'group-b' });
-    expect(await statusA.json()).toMatchObject({ data: { externalId: 'group-a', mode: 'reserved' } });
+    expect(await statusA.json()).toMatchObject({ data: { externalId: 'group-a', mode: 'reserved', initialPrompt: 'existing prompt', initialPromptPending: true } });
     expect(await statusB.json()).toMatchObject({ data: { externalId: 'group-b', mode: 'chat' } });
     const scopeA = JSON.stringify([bot.account.id, 'group', 'group-a']);
     const conversationStore = (durable as unknown as { conversationStore(): GroupConversationStore }).conversationStore();

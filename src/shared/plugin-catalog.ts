@@ -97,13 +97,9 @@ const chatbotDefinition: PluginDefinition = {
       '对应 BRIDGE_OWNER_IDS，逗号分隔。管理员即使不在白名单中也会被允许。',
       'Maps to BRIDGE_OWNER_IDS, comma-separated. Owners bypass the allowlist.',
     ], { group: bridgeGroup, default: '', multiline: false }),
-    text('bridge_allowed_groups', ['允许的群', 'Allowed groups'], [
-      '额外允许的群 openid 清单，逗号分隔；留空表示不额外限制。当前会话绑定的 openid 不会自动加入此列表。',
-      'Additional allowed group openids, comma-separated. Empty means no extra restriction; bound conversation IDs are not added automatically.',
-    ], { group: bridgeGroup, default: '' }),
     text('bridge_allowed_private', ['允许的私聊', 'Allowed private chats'], [
-      '仅对私聊生效：允许的用户 openid，逗号分隔；留空表示不额外限制。群聊以「群 openid」绑定的会话为准。',
-      'Private chats only: allowed user openids, comma-separated. Empty means no extra restriction. Group chats are scoped by the conversation openids instead.',
+      '仅对私聊生效：允许的用户 openid，逗号分隔；留空表示不额外限制。群聊以「允许的群 ID」列表为准。',
+      'Private chats only: allowed user openids, comma-separated. Empty means no extra restriction. Group chats are scoped by the allowed group ID list instead.',
     ], { group: bridgeGroup, default: '' }),
     text('bridge_mode', ['运行模式', 'Bridge mode'], [
       'chat 正常回复；reserved 可按模板运行；reserved2 仅通过工具发送；closed-agent 仅响应管理员私聊。',
