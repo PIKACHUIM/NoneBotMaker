@@ -77,4 +77,38 @@ describe('conversation log filtering', () => {
     const openidMissing = await router.request('/logs?openid=missing-openid', { headers: { Cookie: cookie } }, bindings);
     expect((await openidMissing.json() as { total: number }).total).toBe(0);
   });
+
+  it('merges received content, status and reply into a single record per event', async () => {
+    const now = Date.now();
+    const at = Date.parse('2025-01-11T12:00:00.000Z');
+    const base = { accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1', expiresAt: now + 60_000 };
+    const logs: ConversationLog[] = [
+      { ...base, id: 'in-1', direction: 'in', content: '你好', createdAt: at, eventId: 'event-1', status: 'received' },
+      { ...base, id: 'out-1', direction: 'out', content: '你好，我是机器人', createdAt: at + 1_000, eventId: 'event-1', status: 'sent', details: { seq: 1 } },
+      { ...base, id: 'in-2', direction: 'in', content: '报错的消息', createdAt: at + 5_000, eventId: 'event-2', status: 'received' },
+      { ...base, id: 'out-2', direction: 'out', content: '', createdAt: at + 6_000, eventId: 'event-2', status: 'error', details: { error: 'Remote request failed (401).' } },
+    ];
+    const bindings: RuntimeBindings = {
+      SYS_PASSWD: 'admin-password', SYS_SECRET: 'test-db-secret', LOG_RECORD: 'true', PLATFORM: 'local', KV: createKV(logs),
+    };
+    const router = createApiRouter();
+    const login = await router.request('/auth/login', {
+      method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'admin-password' }),
+    }, bindings);
+    const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? '';
+    const response = await router.request(
+      `/logs?from=${Date.parse('2025-01-11T00:00:00.000Z')}&to=${Date.parse('2025-01-12T00:00:00.000Z')}`,
+      { headers: { Cookie: cookie } }, bindings,
+    );
+    const payload = await response.json() as { items: ConversationLog[] };
+
+    expect(payload.items).toHaveLength(2);
+    const merged = payload.items.find((item) => item.eventId === 'event-1')!;
+    expect(merged.content).toBe('你好');
+    expect(merged.status).toBe('sent');
+    expect(merged.details).toMatchObject({ reply: '你好，我是机器人' });
+    const failed = payload.items.find((item) => item.eventId === 'event-2')!;
+    expect(failed.status).toBe('error');
+    expect(failed.details).toMatchObject({ error: 'Remote request failed (401).' });
+  });
 });
