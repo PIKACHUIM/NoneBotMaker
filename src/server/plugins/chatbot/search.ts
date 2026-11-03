@@ -134,7 +134,9 @@ async function duckDuckGo(query: string, limit: number, fetchImpl: typeof fetch)
 }
 
 async function bing(query: string, limit: number, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
-  const endpoint = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss&count=${limit}`;
+  // Bing RSS 在查询为中文但未指定市场时会返回无关的缓存结果，必须带上匹配的 mkt。
+  const market = /[\u3400-\u9fff]/.test(query) ? 'zh-CN' : 'en-US';
+  const endpoint = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss&count=${limit}&mkt=${market}`;
   const response = await safeFetch(endpoint, { headers: { ...BROWSER_HEADERS, accept: 'application/rss+xml,application/xml;q=0.9,*/*;q=0.8' } }, fetchImpl);
   return parseBingRss(await boundedText(response, 1024 * 1024), limit);
 }
