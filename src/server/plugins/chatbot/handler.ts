@@ -80,6 +80,34 @@ function reserveOutbound(key: string, count: number, at: number, limit: number):
   return true;
 }
 
+function helpText(owner: boolean): string {
+  const common = [
+    '可用命令：',
+    '/help 显示本菜单',
+    '/status 查看当前会话状态',
+    '/reset 清空当前会话上下文',
+    '/openid 查看对话者与群聊 openid',
+    '/role list|show <名称> 查看角色卡',
+    '/memory list|search <关键词>|show <名称> 查看会话记忆',
+    '/slang list|show <id> 查看群聊用语候选',
+    '/voice list 查看账号语音素材',
+  ];
+  if (!owner) return [...common, '模式、工具、唤醒、审批、提示等管理命令仅 owner 可用。'].join('\n');
+  return [...common,
+    '仅 owner：',
+    '/mode chat|reserved|reserved2|closed-agent 切换运行模式',
+    '/silent、/active 静默或恢复响应',
+    '/prompt <文本>|clear 设置或清除一次性提示',
+    '/tools list|disable <名称>|enable <名称>|reset 管理会话工具',
+    '/wake list、/wake cancel <id> 管理计划唤醒',
+    '/approvals、/approval <id>、/approve <id>、/reject <id> 处理工具审批',
+    '/role use <名称>|add <名称> <内容>|delete <名称> 管理角色卡',
+    '/memory add <名称> <内容>|delete <名称> 写入或删除记忆',
+    '/slang approve <id>|reject <id>|delete <id>|update <id> <json> 审核用语',
+    '/voice delete <名称> 删除语音素材',
+  ].join('\n');
+}
+
 function splitMessage(text: string, limit: number): string[] {
   let remaining = text.trim();
   const chunks: string[] = [];
@@ -130,7 +158,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }
     const state = await dependencies.getState?.(key) ?? {};
     const pendingWait = validAgentWait(state.pendingAgentWait, now());
-    const isChatCommand = /^\/(?:approve|reject|approvals|approval|tools|wake|slang|voice|reset|status|mode|memory|role|silent|active|prompt|openid)\b/i.test(message.text.trim());
+    const isChatCommand = /^\/(?:approve|reject|approvals|approval|tools|wake|slang|voice|reset|status|mode|memory|role|silent|active|prompt|openid|help)\b/i.test(message.text.trim());
     const resumeWait = !message.isWake && !isChatCommand ? pendingWait ?? undefined : undefined;
     if (pendingWait?.requestMessageId === message.id) return;
     if (state.pendingAgentWait !== undefined && !pendingWait) {
@@ -228,6 +256,11 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }
     for (const incoming of batch) await log('in', message.isWake ? '' : incoming.text, message.isWake ? 'wake' : permitted.includes(incoming) ? 'received' : 'denied', { userName: incoming.userName, ...(message.isWake ? { scheduled: true, wakeReason: message.wakeReason } : {}), attachments: incoming.attachments?.map(({ type, contentType, filename, size }) => ({ type, contentType, filename, size })) }, incoming);
     if (!permitted.length) return;
+    const helpCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/help\b/i.test(incoming.text.trim()));
+    if (helpCommand) {
+      await send(helpText(isOwner(helpCommand)));
+      return;
+    }
     const openidCommand = message.isWake ? undefined : permitted.find((incoming) => /^\/openid\b/i.test(incoming.text.trim()));
     if (openidCommand) {
       await send(JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null }));

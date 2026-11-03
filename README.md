@@ -136,7 +136,7 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 - 模型单价在「接口能力 → 模型单价」管理。预置是注明来源和日期的手动导入快照，不会自动修改已保存价格。
 - 无效的本地工作区、状态目录、控制台令牌、语音库目录及未实现的群黑话配置已经移除。旧字段仅为数据兼容保留，不再作为可编辑项。
 
-内置聊天执行链支持 JSON/流式 SSE 响应、多轮工具调用、多个 MCP 的发现与调用、Skills/Rules 提示词、历史摘要压缩和身份元数据。`chat` 正常回复；`reserved` 抑制 `[SILENT]`；`reserved2` 仍运行 Agent，但只通过发送工具发消息；`closed-agent` 仅允许管理员私聊。管理员可通过 `/status`、`/reset`、`/mode`、`/role`、`/memory` 管理当前会话。会话内任意参与者可用 `/openid` 查看自己的 user openid 与当前群聊 openid（私聊返回 `groupOpenid: null`）。
+内置聊天执行链支持 JSON/流式 SSE 响应、多轮工具调用、多个 MCP 的发现与调用、Skills/Rules 提示词、历史摘要压缩和身份元数据。`chat` 正常回复；`reserved` 抑制 `[SILENT]`；`reserved2` 仍运行 Agent，但只通过发送工具发消息；`closed-agent` 仅允许管理员私聊。管理员可通过 `/status`、`/reset`、`/mode`、`/role`、`/memory` 管理当前会话。会话内任意参与者可用 `/help` 查看按身份列出的命令菜单，用 `/openid` 查看自己的 user openid 与当前群聊 openid（私聊返回 `groupOpenid: null`）。
 
 - `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理会话内角色卡，支持按运行模式渲染。管理台还可维护账号共享角色卡和项目记忆；`ProjectMemorySearch/Read` 可跨同账号会话检索，共享写入/删除仅向 owner 提供。
 - 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。会话记忆按会话隔离，不与账号共享记忆混用。

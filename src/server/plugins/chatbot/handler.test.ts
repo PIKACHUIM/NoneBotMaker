@@ -178,6 +178,26 @@ describe('createChatbotHandler', () => {
     expect(privateRun.fetch).not.toHaveBeenCalled();
   });
 
+  it('lists member commands through /help and adds owner commands for owners', async () => {
+    const { deps, fetch, sentReplies } = dependencies();
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    await handler(configured, message({ userId: 'allowed-user', text: '/help' }));
+    const memberHelp = sentReplies.join('\n');
+    expect(memberHelp).toContain('/openid');
+    expect(memberHelp).toContain('/status');
+    expect(memberHelp).toContain('/voice list');
+    expect(memberHelp).not.toContain('/approvals');
+    const memberReplyCount = sentReplies.length;
+
+    await handler(configured, message({ userId: 'owner', text: '/help' }));
+    const ownerHelp = sentReplies.slice(memberReplyCount).join('\n');
+    expect(ownerHelp).toContain('/tools');
+    expect(ownerHelp).toContain('/approvals');
+    expect(ownerHelp).toContain('/voice delete');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('lets any conversation member reset only the current chat and gates silent/active to owners', async () => {
     let state: Record<string, unknown> = {};
     const clearContext = vi.fn(async () => undefined);
@@ -522,7 +542,7 @@ describe('createChatbotHandler', () => {
     const { deps, sentReplies } = dependencies({
       fetch: applicationFetch,
       findGroup: vi.fn(async () => ({ ...group, skillIds: ['skill'], ruleIds: ['rule'], mcpIds: ['alpha'] })),
-      findLibrary: vi.fn(async (kind, id) => ({ id, name: id, description: '', enabled: true, config: kind === 'mcps' ? { url: 'https://mcp.example/rpc', authToken: 'mcp-secret' } : { prompt: `${kind} instructions` }, createdAt: '', updatedAt: '' })),
+      findLibrary: vi.fn(async (kind, id) => ({ id, name: id, description: '', enabled: true, config: kind === 'mcps' ? { url: 'https://mcp.example/rpc', authToken: 'mcp-secret', allowedTools: ['echo'] } : { prompt: `${kind} instructions` }, createdAt: '', updatedAt: '' })),
     });
     await createChatbotHandler(deps)(account, message());
     const modelCalls = applicationFetch.mock.calls.filter(([url]) => String(url).includes('chat/completions'));
@@ -532,6 +552,34 @@ describe('createChatbotHandler', () => {
     expect(first.messages[0].content).toContain('rules instructions');
     expect(second.messages.at(-1).content).toContain('actual MCP result');
     expect(sentReplies).toEqual(['finished']);
+  });
+
+  it('requires owner approval for an MCP tool that only self-declares readOnlyHint', async () => {
+    let state: Record<string, unknown> = {};
+    let modelCalls = 0;
+    let remoteToolCalls = 0;
+    const applicationFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('mcp.example')) {
+        const rpc = JSON.parse(String(init?.body));
+        if (rpc.method === 'notifications/initialized') return new Response(null, { status: 202 });
+        const result = rpc.method === 'initialize' ? { protocolVersion: '2025-03-26' } : rpc.method === 'tools/list' ? { tools: [
+          { name: 'read', annotations: { readOnlyHint: true }, inputSchema: { type: 'object' } },
+        ] } : (remoteToolCalls += 1, { content: [{ type: 'text', text: 'remote result' }] });
+        return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
+      }
+      modelCalls += 1;
+      return Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'remote-read', type: 'function', function: { name: 'mcp_alpha_read', arguments: '{}' } }] } }] });
+    });
+    const { deps, sentReplies } = dependencies({ fetch: applicationFetch,
+      findGroup: vi.fn(async () => ({ ...group, mcpIds: ['alpha'] })),
+      findLibrary: vi.fn(async () => ({ id: 'alpha', name: 'MCP', description: '', enabled: true, config: { url: 'https://mcp.example/rpc' }, createdAt: '', updatedAt: '' })),
+      claimApproval: vi.fn(async () => true), getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
+    });
+    await createChatbotHandler(deps)({ ...account, pluginConfig: { bridge_owner_ids: 'owner' } }, message({ userId: 'member' }));
+    expect(modelCalls).toBe(1);
+    expect(remoteToolCalls).toBe(0);
+    expect(state.toolApprovals).toMatchObject([{ status: 'pending', call: { function: { name: 'mcp_alpha_read' } } }]);
+    expect(sentReplies[0]).toContain('/approve ');
   });
 
   it('stops tool iteration as soon as the charged budget is reached', async () => {
