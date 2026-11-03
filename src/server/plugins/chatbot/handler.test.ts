@@ -178,6 +178,25 @@ describe('createChatbotHandler', () => {
     expect(privateRun.fetch).not.toHaveBeenCalled();
   });
 
+  it('answers /openid in unbound or whitelist-blocked conversations', async () => {
+    const unbound = dependencies({ findGroup: vi.fn(async () => null) });
+    await createChatbotHandler(unbound.deps)(account, message({ userId: 'stranger', text: '/openid' }));
+    expect(JSON.parse(unbound.sentReplies[0])).toEqual({ conversationType: 'group', userOpenid: 'stranger', groupOpenid: 'group-openid' });
+    expect(unbound.fetch).not.toHaveBeenCalled();
+
+    const blocked = dependencies();
+    await createChatbotHandler(blocked.deps)(account, message({ userId: 'forbidden', text: '/openid' }));
+    expect(JSON.parse(blocked.sentReplies[0])).toEqual({ conversationType: 'group', userOpenid: 'forbidden', groupOpenid: 'group-openid' });
+
+    const unboundPrivate = dependencies({ findGroup: vi.fn(async () => null) });
+    await createChatbotHandler(unboundPrivate.deps)(account, message({ userId: 'private-user', groupId: 'private-user', conversationType: 'private', eventType: 'C2C_MESSAGE_CREATE', text: '/openid' }));
+    expect(JSON.parse(unboundPrivate.sentReplies[0])).toEqual({ conversationType: 'private', userOpenid: 'private-user', groupOpenid: null });
+
+    const wake = dependencies({ findGroup: vi.fn(async () => null) });
+    await createChatbotHandler(wake.deps)(account, message({ text: '/openid', isWake: true }));
+    expect(wake.sentReplies).toEqual([]);
+  });
+
   it('lists member commands through /help and adds owner commands for owners', async () => {
     const { deps, fetch, sentReplies } = dependencies();
     const handler = createChatbotHandler(deps);
