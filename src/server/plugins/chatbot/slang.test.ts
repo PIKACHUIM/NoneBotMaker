@@ -39,6 +39,24 @@ describe('conversation-scoped slang workflow', () => {
     expect(await saved.workflow.confirmedPrompt()).toContain('<term>qwerx</term>');
   });
 
+  it('uses upstream default ten-message batches, cooldown, and injected LLM extraction', async () => {
+    const saved = fixture();
+    saved.advance(300_000);
+    const extract = vi.fn(async (rows: Array<{ userId: string; context: string }>) => [{ term: 'qwerx', sourceIndex: rows.length - 1 }]);
+    const workflow = new SlangWorkflow({ ...saved.context, extract });
+    for (let index = 0; index < 9; index += 1) expect(await workflow.observeBatch(`member-${index}`, `qwerx in context ${index}`)).toEqual([]);
+    expect(extract).not.toHaveBeenCalled();
+    const first = await workflow.observeBatch('member-9', 'qwerx in context 9');
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ term: 'qwerx', hits: 10, distinctUsers: 10, status: 'pending' });
+    expect(extract).toHaveBeenCalledOnce();
+    for (let index = 10; index < 20; index += 1) await workflow.observeBatch(`member-${index}`, `qwerx again ${index}`);
+    expect(extract).toHaveBeenCalledOnce();
+    saved.advance(300_000);
+    await workflow.observeBatch('member-20', 'qwerx again');
+    expect(extract).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps a rejected decision after reload and does not reactivate it on new observations', async () => {
     const saved = fixture();
     const pending = await saved.workflow.propose('qwerx', 'sample context');

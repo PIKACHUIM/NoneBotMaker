@@ -6,6 +6,9 @@ export interface SlangWorkflowContext {
   getState(): Promise<JsonObject>;
   setState(state: JsonObject): Promise<void>;
   now?: () => number;
+  minMessages?: number;
+  cooldownSeconds?: number;
+  extract?: (rows: Array<{ userId: string; context: string }>) => Promise<Array<{ term: string; sourceIndex?: number }>>;
   research?: (candidate: { term: string; context: string }) => Promise<{ definition: string; sources: string[] }>;
 }
 
@@ -42,11 +45,14 @@ interface WorkflowData {
   scopeKey: string;
   entries: SlangCandidate[];
   windows: TermWindow[];
+  messageWindow: Observation[];
+  lastBatchAt: number;
 }
 
 const MAX_ENTRIES = 50;
 const MAX_WINDOWS = 50;
 const MAX_OBSERVATIONS = 20;
+const MAX_BATCH_MESSAGES = 100;
 const MIN_HITS = 3;
 const MIN_DISTINCT_USERS = 3;
 const OBSERVATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -97,7 +103,7 @@ function normalizedTerm(term: string): string {
 }
 
 function emptyWorkflow(scopeKey: string): WorkflowData {
-  return { scopeKey, entries: [], windows: [] };
+  return { scopeKey, entries: [], windows: [], messageWindow: [], lastBatchAt: 0 };
 }
 
 function parseCandidate(value: unknown): SlangCandidate | null {
@@ -136,6 +142,8 @@ function readWorkflow(state: JsonObject, scopeKey: string): WorkflowData {
     scopeKey,
     entries: saved.entries.map(parseCandidate).filter((entry): entry is SlangCandidate => entry !== null).slice(-MAX_ENTRIES),
     windows: saved.windows.map(parseWindow).filter((window): window is TermWindow => window !== null).slice(-MAX_WINDOWS),
+    messageWindow: (Array.isArray(saved.messageWindow) ? saved.messageWindow : []).filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.userId === 'string' && typeof item.context === 'string' && Number.isFinite(item.at)).slice(-MAX_BATCH_MESSAGES).map((item) => ({ userId: (item.userId as string).slice(0, MAX_USER_ID_CHARS), context: (item.context as string).slice(0, MAX_MESSAGE_CHARS), at: item.at as number })),
+    lastBatchAt: Number.isFinite(saved.lastBatchAt) ? saved.lastBatchAt as number : 0,
   };
 }
 
@@ -160,12 +168,16 @@ async function withScopeLock<T>(scopeKey: string, operation: () => Promise<T>): 
 
 export class SlangWorkflow {
   private readonly now: () => number;
+  private readonly minMessages: number;
+  private readonly cooldownMs: number;
 
   constructor(private readonly context: SlangWorkflowContext) {
     if (!context.scopeKey || context.scopeKey.length > 256 || UNSAFE_SCOPE_KEYS.has(context.scopeKey)) {
       throw new Error('A valid conversation scope key is required.');
     }
     this.now = context.now ?? Date.now;
+    this.minMessages = Math.max(3, Math.min(100, Math.trunc(context.minMessages ?? 10)));
+    this.cooldownMs = Math.max(30, Math.min(86_400, Math.trunc(context.cooldownSeconds ?? 300))) * 1000;
   }
 
   private async update<T>(operation: (workflow: WorkflowData, at: number) => T): Promise<T> {
@@ -173,7 +185,7 @@ export class SlangWorkflow {
       const state = await this.context.getState();
       const workflow = readWorkflow(state, this.context.scopeKey);
       const result = operation(workflow, this.now());
-      if (workflow.entries.length > MAX_ENTRIES || workflow.windows.length > MAX_WINDOWS ||
+      if (workflow.entries.length > MAX_ENTRIES || workflow.windows.length > MAX_WINDOWS || workflow.messageWindow.length > MAX_BATCH_MESSAGES ||
           encoder.encode(JSON.stringify(workflow)).byteLength > MAX_WORKFLOW_BYTES) {
         throw new Error('Slang workflow storage limit reached.');
       }
@@ -215,22 +227,87 @@ export class SlangWorkflow {
     });
   }
 
-  async propose(term: string, context = ''): Promise<SlangCandidate> {
+  async propose(term: string, context = '', stats?: { hits: number; distinctUsers: number }): Promise<SlangCandidate> {
     const safeTerm = boundedText(term, MAX_TERM_CHARS, 320, 'Term');
     const safeContext = boundedText(context, MAX_CONTEXT_CHARS, 4000, 'Context', true);
     const result = await this.update((workflow, at) => {
       const existing = findCandidate(workflow.entries, safeTerm);
-      if (existing) return { candidate: { ...existing, sources: [...existing.sources] }, created: false };
+      if (existing) {
+        if (stats && existing.status === 'pending') {
+          existing.hits += stats.hits;
+          existing.distinctUsers = Math.max(existing.distinctUsers, stats.distinctUsers);
+          existing.context = safeContext;
+          existing.updatedAt = at;
+        }
+        return { candidate: { ...existing, sources: [...existing.sources] }, created: false };
+      }
       if (workflow.entries.length >= MAX_ENTRIES) throw new Error('Slang candidate store is full.');
       const candidate: SlangCandidate = {
         id: crypto.randomUUID(), term: safeTerm, context: safeContext, definition: '', sources: [], status: 'pending',
-        hits: 1, distinctUsers: 0, createdAt: at, updatedAt: at,
+        hits: stats?.hits ?? 1, distinctUsers: stats?.distinctUsers ?? 0, createdAt: at, updatedAt: at,
       };
       workflow.entries.push(candidate);
       return { candidate: { ...candidate, sources: [] }, created: true };
     });
     if (result.created) await this.researchCandidate(result.candidate);
     return (await this.show(result.candidate.id));
+  }
+
+  async queueMessage(userId: string, text: string): Promise<void> {
+    const safeUserId = boundedText(userId, MAX_USER_ID_CHARS, 512, 'User ID');
+    const safeText = boundedText(text, MAX_MESSAGE_CHARS, 8000, 'Message');
+    if (!safeText || safeText.startsWith('/')) return;
+    await this.update((workflow, at) => {
+      workflow.messageWindow = workflow.messageWindow.filter((entry) => entry.at > at - OBSERVATION_WINDOW_MS && entry.at <= at).slice(-MAX_BATCH_MESSAGES);
+      workflow.messageWindow.push({ userId: safeUserId, context: safeText, at });
+    });
+  }
+
+  async processBatch(): Promise<SlangCandidate[]> {
+    const batch = await this.update((workflow, at) => {
+      workflow.messageWindow = workflow.messageWindow.filter((entry) => entry.at > at - OBSERVATION_WINDOW_MS && entry.at <= at).slice(-MAX_BATCH_MESSAGES);
+      if (workflow.messageWindow.length < this.minMessages || workflow.lastBatchAt > 0 && at - workflow.lastBatchAt < this.cooldownMs) return null;
+      const selected = workflow.messageWindow.splice(0, this.minMessages);
+      workflow.lastBatchAt = at;
+      return selected;
+    });
+    if (!batch?.length) return [];
+    let extracted: Array<{ term: string; sourceIndex?: number }>;
+    try {
+      if (this.context.extract) extracted = await this.context.extract(batch.map(({ userId: sender, context }) => ({ userId: sender, context })));
+      else {
+        const terms = new Map<string, { term: string; sourceIndex: number }>();
+        batch.forEach((entry, sourceIndex) => {
+          CANDIDATE_RE.lastIndex = 0;
+          for (const match of entry.context.matchAll(CANDIDATE_RE)) {
+            const term = match[0];
+            const normalized = normalizedTerm(term);
+            if (!terms.has(normalized)) terms.set(normalized, { term, sourceIndex });
+            if (terms.size >= 20) break;
+          }
+        });
+        extracted = [...terms.values()];
+      }
+    } catch { return []; }
+    if (!Array.isArray(extracted)) return [];
+    const saved: SlangCandidate[] = [];
+    const seen = new Set<string>();
+    for (const item of extracted.slice(0, 20)) {
+      if (!item || typeof item.term !== 'string') continue;
+      const term = boundedText(item.term, MAX_TERM_CHARS, 320, 'Term');
+      const normalized = normalizedTerm(term);
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      const sourceIndex = Number.isSafeInteger(item.sourceIndex) ? Math.max(0, Math.min(batch.length - 1, item.sourceIndex as number)) : 0;
+      const result = await this.propose(term, batch[sourceIndex].context, { hits: batch.length, distinctUsers: new Set(batch.map((entry) => entry.userId)).size });
+      saved.push(result);
+    }
+    return saved;
+  }
+
+  async observeBatch(userId: string, text: string): Promise<SlangCandidate[]> {
+    await this.queueMessage(userId, text);
+    return this.processBatch();
   }
 
   async observeMessage(userId: string, text: string): Promise<SlangCandidate[]> {

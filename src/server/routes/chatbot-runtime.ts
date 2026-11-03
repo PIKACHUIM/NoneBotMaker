@@ -8,10 +8,11 @@ import { createPersistentChatbotStores, createStoredChatbotHandler } from '../pl
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
 import { createMemeLibrary } from '../plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../plugins/chatbot/meme-storage';
+import { SlangWorkflow } from '../plugins/chatbot/slang';
 import { ApiError } from './management';
 
 interface ConversationControlRequest {
-  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalDecision' | 'memeList' | 'memeDelete';
+  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalDecision' | 'memeList' | 'memeDelete' | 'slangList' | 'slangCreate' | 'slangApprove' | 'slangReject' | 'slangDelete';
   mode?: string;
   silent?: boolean;
   prompt?: string | null;
@@ -21,6 +22,9 @@ interface ConversationControlRequest {
   decision?: 'approve' | 'reject';
   externalId?: string;
   memeName?: string;
+  slangId?: string;
+  slangTerm?: string;
+  slangContext?: string;
 }
 
 interface QQControlNamespace {
@@ -87,6 +91,11 @@ async function executeConsoleApproval(
 }
 
 async function localControl(bindings: RuntimeBindings, group: GroupRecord, input: ConversationControlRequest): Promise<unknown> {
+  const repository = createRepository(bindings);
+  const account = await repository.get('accounts', group.accountId);
+  const plugin = account?.pluginId ? await repository.get('plugins', String(account.pluginId)) : null;
+  const layers = await loadPolicyLayers(repository, group as unknown as JsonObject);
+  group = applyGroupPolicies(group, layers, plugin?.config as JsonObject | undefined);
   const stores = createPersistentChatbotStores(bindings);
   const externalId = input.externalId ?? primaryConversationId(group.externalId);
   if (!matchesConversationId(group.externalId, externalId)) throw new ApiError(404, 'not_found');
@@ -145,6 +154,25 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
       const library = createMemeLibrary({ store, review: async () => 'uncertain' });
       return { deleted: await library.delete(group.accountId, scope, input.memeName) };
     }
+    case 'slangList': {
+      const workflow = new SlangWorkflow({ scopeKey: scope, getState: async () => await stores.conversationStore.getState?.(scope) ?? {}, setState: async (next) => { await stores.conversationStore.setState?.(scope, next); } });
+      return { items: await workflow.list() };
+    }
+    case 'slangCreate': {
+      const workflow = new SlangWorkflow({ scopeKey: scope, getState: async () => await stores.conversationStore.getState?.(scope) ?? {}, setState: async (next) => { await stores.conversationStore.setState?.(scope, next); } });
+      if (!input.slangTerm) throw new ApiError(400, 'invalid_slangTerm');
+      return { item: await workflow.propose(input.slangTerm, input.slangContext ?? '') };
+    }
+    case 'slangApprove':
+    case 'slangReject':
+    case 'slangDelete': {
+      const workflow = new SlangWorkflow({ scopeKey: scope, getState: async () => await stores.conversationStore.getState?.(scope) ?? {}, setState: async (next) => { await stores.conversationStore.setState?.(scope, next); } });
+      if (!input.slangId) throw new ApiError(400, 'invalid_slangId');
+      if (input.action === 'slangApprove') return { item: await workflow.approve(input.slangId, true) };
+      if (input.action === 'slangReject') return { item: await workflow.reject(input.slangId, true) };
+      await workflow.delete(input.slangId, true);
+      return { deleted: true };
+    }
     case 'wakeList':
     case 'wakeCancel':
       throw new ApiError(503, 'wake_management_unavailable');
@@ -199,7 +227,7 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     try { body = await context.req.json() as Record<string, unknown>; }
     catch { throw new ApiError(400, 'invalid_json'); }
     const action = requiredValue(body.action, 'action') as ConversationControlRequest['action'];
-    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvalDecision', 'memeList', 'memeDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
+    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
     const repository = createRepository(context.env);
     const group = await repository.get('groups', groupId) as unknown as GroupRecord | null;
     if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');

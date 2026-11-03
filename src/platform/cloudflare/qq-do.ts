@@ -4,6 +4,7 @@ import { readBoolean } from '../../server/env';
 import { completeRecentTurns } from '../../server/plugins/chatbot/tools';
 import { createMemeLibrary } from '../../server/plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../../server/plugins/chatbot/meme-storage';
+import { SlangWorkflow } from '../../server/plugins/chatbot/slang';
 import { createConversationLogRepository } from '../../server/storage/conversation-log-repository';
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
 import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from '../../server/plugins/chatbot/policies';
@@ -227,7 +228,7 @@ export class QQGatewayDurableObject {
     const accountId = typeof body.accountId === 'string' ? body.accountId : '';
     const groupId = typeof body.groupId === 'string' ? body.groupId : '';
     const action = typeof body.action === 'string' ? body.action : '';
-    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete'].includes(action)) {
+    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete'].includes(action)) {
       return Response.json({ error: 'invalid_request' }, { status: 400 });
     }
     const repository = createRepository(this.env);
@@ -328,6 +329,21 @@ export class QQGatewayDurableObject {
     if (action === 'wakeCancel') {
       if (typeof body.wakeId !== 'string') return Response.json({ error: 'invalid_wakeId' }, { status: 400 });
       return Response.json({ data: { cancelled: await this.cancelWake(account, source, body.wakeId) } });
+    }
+    if (action.startsWith('slang')) {
+      if ((group.conversationType ?? 'group') !== 'group') return Response.json({ error: 'slang_group_only' }, { status: 400 });
+      const slang = new SlangWorkflow({ scopeKey: scope, getState: async () => await store.getState!(scope), setState: async (next) => { await store.setState!(scope, next); }, now: this.now,
+        minMessages: Math.trunc(configNumber(group.config, 'bridge_slang_min_messages', 10, 3, 100)), cooldownSeconds: Math.trunc(configNumber(group.config, 'bridge_slang_cooldown_seconds', 300, 30, 86400)) });
+      if (action === 'slangList') return Response.json({ data: { items: await slang.list() } });
+      if (action === 'slangCreate') {
+        if (typeof body.slangTerm !== 'string') return Response.json({ error: 'invalid_slangTerm' }, { status: 400 });
+        return Response.json({ data: { item: await slang.propose(body.slangTerm, typeof body.slangContext === 'string' ? body.slangContext : '') } });
+      }
+      if (typeof body.slangId !== 'string') return Response.json({ error: 'invalid_slangId' }, { status: 400 });
+      if (action === 'slangApprove') return Response.json({ data: { item: await slang.approve(body.slangId, true) } });
+      if (action === 'slangReject') return Response.json({ data: { item: await slang.reject(body.slangId, true) } });
+      await slang.delete(body.slangId, true);
+      return Response.json({ data: { deleted: true } });
     }
     return Response.json({ data: { items: approvals } });
   }

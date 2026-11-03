@@ -52,7 +52,7 @@ describe('declared plugin configuration', () => {
     expect((await json(response)).data).toMatchObject({
       config: {
         bridge_max_message_chars: 4000,
-        bridge_slang_enabled: 'false',
+        bridge_slang_enabled: false,
         agent_model: 42,
         bridge_allowed_groups: 'group-a, group-b',
         undeclared: 'ignored',
@@ -580,6 +580,7 @@ describe('capability policies', () => {
     expect(policyFields('voice').map((field) => field.key)).toEqual(['voice_model', 'voice_id', 'voice_speed', 'voice_max_text_chars', 'voice_max_bytes']);
     expect(policyFields('identity').map((field) => field.key)).toEqual([
       'bridge_mode', 'bridge_max_message_chars', 'bridge_max_messages_per_minute', 'bridge_group_batch_seconds',
+      'bridge_slang_enabled', 'bridge_slang_min_messages', 'bridge_slang_cooldown_seconds',
       'max_context', 'compact_rate', 'bridge_max_media_bytes', 'context_history_limit', 'memory_enabled',
     ]);
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([

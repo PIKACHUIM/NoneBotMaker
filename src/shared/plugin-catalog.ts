@@ -121,6 +121,18 @@ const chatbotDefinition: PluginDefinition = {
       '合并窗口内的连续会话消息，0–10 秒；0 表示关闭合并。',
       'Combines consecutive conversation messages within 0–10 seconds; 0 disables batching.',
     ], { group: bridgeGroup, default: 1, min: 0, max: 10, step: 0.1, scope: 'identity' }),
+    boolean('bridge_slang_enabled', ['学习群聊用语', 'Learn group slang'], [
+      '达到消息阈值后抽取候选并使用公共搜索研究；所有候选须由 owner 确认后才会进入模型上下文。',
+      'Extracts and researches candidate slang after the message threshold; an owner must confirm candidates before they enter model context.',
+    ], { group: contextGroup, default: true, scope: 'identity' }),
+    number('bridge_slang_min_messages', ['用语提取消息阈值', 'Slang extraction message threshold'], [
+      '累计多少条群消息后启动候选抽取，范围 3–100。',
+      'Number of group messages required before extracting candidates, from 3 to 100.',
+    ], { group: contextGroup, default: 10, min: 3, max: 100, step: 1, scope: 'identity' }),
+    number('bridge_slang_cooldown_seconds', ['用语研究冷却秒数', 'Slang research cooldown'], [
+      '两次候选抽取之间的冷却时间，范围 30–86400 秒。',
+      'Cooldown between candidate extraction batches, from 30 to 86400 seconds.',
+    ], { group: contextGroup, default: 300, min: 30, max: 86400, step: 30, scope: 'identity' }),
 
     number('max_context', ['上下文 token 预算', 'Context token budget'], [
       '对应 MAX_CONTEXT，4096–2000000。当前 Worker 按约 4 字符/token 近似裁剪历史。',

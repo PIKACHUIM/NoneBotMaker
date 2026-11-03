@@ -90,7 +90,7 @@ import {
 import { findModelPrice, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
-import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotWake } from './api';
+import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotWake } from './api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
@@ -856,6 +856,10 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
   const [wakes, setWakes] = useState<ChatbotWake[]>([]);
   const [memes, setMemes] = useState<ChatbotMemeSummary[]>([]);
   const [memeError, setMemeError] = useState('');
+  const [slang, setSlang] = useState<ChatbotSlangCandidate[]>([]);
+  const [slangTerm, setSlangTerm] = useState('');
+  const [slangContext, setSlangContext] = useState('');
+  const [slangError, setSlangError] = useState('');
   const [wakeError, setWakeError] = useState('');
   const [mode, setMode] = useState('chat');
   const [silent, setSilent] = useState(false);
@@ -895,6 +899,10 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
         const memeResult = await api.controlChatbotConversation<{ items: ChatbotMemeSummary[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'memeList', externalId: selectedConversation.externalId });
         setMemes(memeResult.items); setMemeError('');
       } catch (reason) { setMemes([]); setMemeError(formatError(reason)); }
+      try {
+        const slangResult = await api.controlChatbotConversation<{ items: ChatbotSlangCandidate[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'slangList', externalId: selectedConversation.externalId });
+        setSlang(slangResult.items); setSlangError('');
+      } catch (reason) { setSlang([]); setSlangError(formatError(reason)); }
     } catch (reason) { setStatus(null); onError(reason); }
   }, [selectedGroup, selectedConversation, onError]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -1551,14 +1559,15 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
     for (const field of definition?.logFields ?? []) fields.set(field.key, field);
   }
   const label = (key: string, fallback: string) => fields.has(key) ? localized(fields.get(key)!.label) : tr(fallback);
-  const fixedKeys = new Set(['id', 'createdAt', 'pluginId', 'pluginType', 'userId', 'groupExternalId', 'content', 'status', 'expiresAt']);
+  const fixedKeys = new Set(['id', 'createdAt', 'pluginId', 'pluginType', 'userId', 'groupExternalId', 'content', 'reply', 'status', 'expiresAt']);
   const columns: TableColumnsType<ConversationLog> = [
     { title: label('createdAt', '时间'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value, language) },
     { title: label('pluginId', '插件'), key: 'plugin', width: 180, render: (_, row) => <div className="model-cell">{rowPlugin(row)?.name || row.pluginType || tr('未知插件')}<small>{row.pluginType || rowPlugin(row)?.type || row.pluginId || '—'}</small></div> },
     { title: label('userId', '用户 openid'), dataIndex: 'userId', key: 'userId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
     { title: label('groupExternalId', '群 openid'), dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
-    { title: label('content', '内容'), dataIndex: 'content', key: 'content', width: 300, render: (value: unknown) => <div className="log-content"><DetailValue value={value} /></div> },
-    { title: label('status', '状态'), key: 'status', width: 120, render: (_, row) => <Tag color={row.status === 'error' || row.status === 'failed' ? 'error' : row.status === 'success' || row.status === 'sent' ? 'success' : 'default'}>{row.status ? tr(({ success: '成功', sent: '已发出', received: '已收到', error: '错误', failed: '失败', skipped: '已跳过', rejected: '已拒绝', processing: '处理中', completed: '已完成' } as Record<string, string>)[row.status] ?? row.status) : row.direction === 'in' ? tr('收到') : tr('发出')}</Tag> },
+    { title: label('content', '收到内容'), dataIndex: 'content', key: 'content', width: 260, render: (value: unknown) => <div className="log-content"><DetailValue value={value} /></div> },
+    { title: label('reply', '发送内容'), key: 'reply', width: 320, render: (_, row) => <div className="log-content"><DetailValue value={logFieldValue(row, 'details.reply')} /></div> },
+    { title: label('status', '处理状态'), key: 'status', width: 120, render: (_, row) => <Tag color={row.status === 'error' || row.status === 'failed' ? 'error' : row.status === 'success' || row.status === 'sent' ? 'success' : 'default'}>{row.status ? tr(({ success: '成功', sent: '已发出', received: '已收到', error: '错误', failed: '失败', skipped: '已跳过', rejected: '已拒绝', processing: '处理中', completed: '已完成' } as Record<string, string>)[row.status] ?? row.status) : row.direction === 'in' ? tr('收到') : tr('发出')}</Tag> },
     ...[...fields.values()].filter((field) => !fixedKeys.has(field.key)).map((field) => ({ title: localized(field.label), key: field.key, width: 180, render: (_: unknown, row: ConversationLog) => <div className="log-field-preview"><DetailValue value={logFieldValue(row, field.key)} /></div> })),
   ];
   if (enabled === false) return <section className="logs-disabled"><div className="disabled-icon"><MessageOutlined /></div><div className="eyebrow"><span className="eyebrow-line" /> OBSERVABILITY / DISABLED</div><Title level={2}>{tr('对话日志已关闭')}</Title><Paragraph>{tr('服务端未启用 LOG_RECORD。如需记录对话，请在部署环境启用该配置；现有日志保留策略为 30 天。')}</Paragraph><div className="disabled-meta"><span>LOG_RECORD</span><b>OFF</b><span>RETENTION</span><b>30 DAYS</b></div></section>;
@@ -1574,7 +1583,7 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
       <Form.Item><Button type="primary" htmlType="submit">{tr('应用筛选')}</Button></Form.Item>
       <Form.Item><Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button></Form.Item>
     </Form><div className="log-count"><span className="online-dot" /> {total} RECORDS / 30D</div></div>
-    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: Math.max(1140, columns.length * 180) }} className="data-table logs-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('完整消息与插件详情')}</h3><DetailFields values={{ content: row.content, ...Object.fromEntries(Object.entries(row).filter(([key]) => !fixedKeys.has(key))) }} labels={{ content: tr('内容'), direction: tr('方向'), accountId: tr('账号'), groupId: tr('群聊'), details: tr('插件详情'), ...Object.fromEntries((rowDefinition(row)?.logFields ?? []).map((field) => [field.key, localized(field.label)])) }} /></div> }} /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
+    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: Math.max(1140, columns.length * 180) }} className="data-table logs-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('完整消息与插件详情')}</h3><DetailFields values={{ content: row.content, ...Object.fromEntries(Object.entries(row).filter(([key]) => !fixedKeys.has(key))) }} labels={{ content: tr('收到内容'), reply: tr('发送内容'), direction: tr('方向'), accountId: tr('账号'), groupId: tr('群聊'), details: tr('插件详情'), ...Object.fromEntries((rowDefinition(row)?.logFields ?? []).map((field) => [field.key, localized(field.label)])) }} /></div> }} /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
   </section>;
 }
 

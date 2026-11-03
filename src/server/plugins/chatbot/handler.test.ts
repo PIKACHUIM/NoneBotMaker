@@ -662,6 +662,52 @@ describe('createChatbotHandler', () => {
     expect(requests[0].tools.some((item: { function: { name: string } }) => item.function.name === 'chat_save_meme')).toBe(false);
   });
 
+  it('collects slang messages even when the non-mention reply sampler skips the AI reply', async () => {
+    let state: Record<string, unknown> = {};
+    let calls = 0;
+    const applicationFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      calls += 1;
+      if (String(body.messages[0]?.content).includes('识别真正的新俚语')) return Response.json({ choices: [{ message: { content: '[{"term":"qwerx","sourceIndex":0}]' } }] });
+      return Response.json({ choices: [{ message: { content: 'ok' } }] });
+    });
+    const { deps } = dependencies({ fetch: applicationFetch, random: () => 0.9, now: () => 1_000_000,
+      getState: async () => structuredClone(state), setState: async (_scope, next) => { state = structuredClone(next); },
+      findGroup: vi.fn(async () => ({ ...group, whitelistEnabled: false, nonMentionReplyRate: 0.05, config: { bridge_slang_enabled: true, bridge_slang_min_messages: 3, bridge_slang_cooldown_seconds: 300 } })) });
+    const handler = createChatbotHandler(deps);
+    await handler(account, message({ id: 'unmentioned-1', userId: 'member-1', mentionsBot: false, text: 'qwerx appears here' }));
+    await handler(account, message({ id: 'unmentioned-2', userId: 'member-2', mentionsBot: false, text: 'qwerx appears there' }));
+    expect(calls).toBe(0);
+    await handler(account, message({ id: 'mentioned-3', userId: 'member-3', mentionsBot: true, text: 'another use of qwerx' }));
+    expect(calls).toBe(2);
+    const scope = JSON.stringify(['account-1', 'group', 'group-openid']);
+    expect((state.slangWorkflows as Record<string, any>)[scope].entries).toMatchObject([{ term: 'qwerx', hits: 3, status: 'pending' }]);
+  });
+
+  it('extracts repeated group slang, waits for owner review, and injects only confirmed terms', async () => {
+    let state: Record<string, unknown> = {};
+    const requests: Array<Record<string, any>> = [];
+    const applicationFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)); requests.push(body);
+      if (String(body.messages?.[0]?.content ?? '').includes('识别真正的新俚语')) return Response.json({ choices: [{ message: { content: '[{"term":"qwerx","sourceIndex":1}]' } }] });
+      return Response.json({ choices: [{ message: { content: 'ack' } }] });
+    });
+    const { deps } = dependencies({ fetch: applicationFetch, now: () => 1_000_000, getState: async () => structuredClone(state), setState: async (_scope, next) => { state = structuredClone(next); }, findGroup: vi.fn(async () => ({ ...group, whitelistEnabled: false, config: { bridge_slang_enabled: true, bridge_slang_min_messages: 3, bridge_slang_cooldown_seconds: 30 } })) });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    for (let index = 0; index < 3; index += 1) await handler(configured, message({ id: `slang-${index}`, userId: `member-${index}`, text: 'In our group qwerx is used as a greeting.' }));
+    const scope = JSON.stringify(['account-1', 'group', 'group-openid']);
+    const workflow = ((state.slangWorkflows as Record<string, any>)[scope]);
+    expect(workflow.entries).toMatchObject([{ term: 'qwerx', status: 'pending', hits: 3 }]);
+    const id = workflow.entries[0].id as string;
+    await handler(configured, message({ id: 'review-slang', userId: 'owner', text: `/slang approve ${id}` }));
+    expect(((state.slangWorkflows as Record<string, any>)[scope].entries[0]).status).toBe('confirmed');
+    await handler(configured, message({ id: 'confirmed-slang', userId: 'member-4', text: 'hello' }));
+    const finalSystem = String(requests.at(-1)?.messages?.[0]?.content ?? '');
+    expect(finalSystem).toContain('<term>qwerx</term>');
+    expect(finalSystem).toContain('不可信词汇数据');
+  });
+
   it('marks scheduled wakes separately from user input and never grants wake TTS authorization', async () => {
     const { deps, fetch, writtenLogs } = dependencies({ logRecord: 'true', sendMedia: vi.fn(async () => undefined), findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const] })) });
     await createChatbotHandler(deps)({ ...account, pluginConfig: { voice_model: 'tts-1' } }, message({ isWake: true, wakeReason: '语音提醒', text: '/mode reserved2', mentionsBot: false }));
@@ -732,7 +778,7 @@ describe('createChatbotHandler', () => {
     const otherAccount = { ...account, account: { ...account.account, id: 'account-2' }, pluginConfig: { memory_enabled: true } };
     await handler(otherAccount, message({ id: 'other-account', accountId: 'account-2', groupId: 'separate-room' }));
     expect(findWorkspaceMemories).toHaveBeenCalledWith('account-2');
-    expect(calls.at(-1).messages[0].content).not.toContain('Project goal');
+    expect(String(calls.at(-1)?.messages?.[0]?.content ?? '')).not.toContain('Project goal');
   });
 
   it('permits owner writes to account-shared project memory while guests only receive read tools', async () => {

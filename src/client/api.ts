@@ -17,6 +17,7 @@ export interface ChatbotConversationSummary { id: string; accountId: string; acc
 export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string }>; policyIds?: Record<string, string> }
 export interface ChatbotWake { id: string; dueAt: number; reason: string }
 export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
+export interface ChatbotSlangCandidate { id: string; term: string; context: string; definition: string; sources: string[]; status: 'pending' | 'confirmed' | 'rejected'; hits: number; distinctUsers: number; createdAt: number; updatedAt: number }
 
 export class ApiError extends Error {
   status: number;
