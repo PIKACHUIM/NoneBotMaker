@@ -29,7 +29,7 @@ describe('OpenAI compatible JSON responses', () => {
     await expect(completeOpenAICompatible(provider, request, fetchImpl)).resolves.toEqual({ content: 'hello back', toolCalls: [], promptTokens: 100, completionTokens: 3, cachedPromptTokens: 40 });
     const init = fetchImpl.mock.calls.find(([input]) => !String(input).includes('dns-query'))![1]!;
     expect(JSON.parse(String(init.body))).toEqual({ model: request.model, messages: request.messages });
-    expect(init).toMatchObject({ redirect: 'error', headers: { authorization: 'Bearer test-secret' } });
+    expect(init).toMatchObject({ redirect: 'manual', headers: { authorization: 'Bearer test-secret' } });
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
