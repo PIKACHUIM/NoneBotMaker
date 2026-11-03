@@ -76,7 +76,6 @@ import type {
   PolicyType,
   ProjectMemoryRecord,
   MemoryType,
-  RoleCardRecord,
   ProviderRecord,
 } from '../shared/types';
 import {
@@ -107,7 +106,7 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
-  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '管理会话运行模式、提示、工具和运行状态；模型、供应商、白名单与预算在群聊策略中配置。' },
+  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '管理会话运行状态、模式、静默、提示与工具；模型、供应商、白名单和预算请在群聊策略配置。' },
   integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、AI供应商与单价，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
@@ -388,7 +387,6 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   const [prices, setPrices] = useState<ModelPriceRecord[]>([]);
   const [libraries, setLibraries] = useState<LibraryData>({ skills: [], mcps: [], rules: [] });
   const [policies, setPolicies] = useState<PolicyRecord[]>([]);
-  const [roleCards, setRoleCards] = useState<RoleCardRecord[]>([]);
   const [memories, setMemories] = useState<ProjectMemoryRecord[]>([]);
   const [logs, setLogs] = useState<ConversationLog[]>([]);
   const [logsTotal, setLogsTotal] = useState(0);
@@ -448,13 +446,10 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
             const [providerData, priceData, skillData, mcpData, ruleData, policyData, accountData] = await Promise.all([
               api.listProviders(), api.listPrices(), api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'), api.listPolicies(), api.listAccounts(),
             ]);
-            const [roleData, memoryData] = await Promise.all([
-              Promise.all(accountData.map((account) => api.listRoleCards(account.id))),
-              Promise.all(accountData.map((account) => api.listProjectMemories(account.id))),
-            ]);
+            const memoryData = await Promise.all(accountData.map((account) => api.listProjectMemories(account.id)));
             if (!active) return;
             setProviders(providerData); setPrices(priceData); setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
-            setPolicies(policyData); setAccounts(accountData); setRoleCards(roleData.flat()); setMemories(memoryData.flat());
+            setPolicies(policyData); setAccounts(accountData); setMemories(memoryData.flat());
             break;
           }
           case 'logs': {
@@ -491,7 +486,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
     { key: 'plugins', icon: <CodeOutlined />, label: tr('插件管理') },
     { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
     { key: 'groups', icon: <TeamOutlined />, label: tr('群聊策略') },
-    { key: 'conversations', icon: <MessageOutlined />, label: tr('会话运行管理') },
+    { key: 'conversations', icon: <MessageOutlined />, label: tr('会话管理') },
     { key: 'integrations', icon: <ApiOutlined />, label: tr('接口能力') },
     { key: 'logs', icon: <MessageOutlined />, label: tr('对话日志') },
   ];
@@ -550,8 +545,8 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
               {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
-              {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} />}
-              {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={refresh} onError={handleError} />}
+              {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} />}
+              {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} memories={memories} onRefresh={refresh} onError={handleError} />}
               {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
             </>
           )}
@@ -860,11 +855,15 @@ function SlangReviewEditor({ candidate, onSave }: { candidate: ChatbotSlangCandi
   </Form>;
 }
 
-function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void }) {
+function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void; onNavigate: (page: AdminPage) => void }) {
   const { tr } = useI18n();
   const { message } = AntApp.useApp();
   const [conversationTargets, setConversationTargets] = useState<ChatbotConversationSummary[]>([]);
   const [selectedConversationKey, setSelectedConversationKey] = useState('');
+  const [conversationLoading, setConversationLoading] = useState(true);
+  const [conversationListError, setConversationListError] = useState('');
+  const [statusError, setStatusError] = useState('');
+  const [conversationListRevision, setConversationListRevision] = useState(0);
   const [status, setStatus] = useState<ChatbotConversationStatus | null>(null);
   const [approvals, setApprovals] = useState<ChatbotConversationStatus['pendingApprovals']>([]);
   const [wakes, setWakes] = useState<ChatbotWake[]>([]);
@@ -886,25 +885,36 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
   const selectedGroup = groups.find((item) => item.id === selectedConversation?.id);
   useEffect(() => {
     let active = true;
+    setConversationLoading(true);
+    setConversationListError('');
     api.listChatbotConversations().then((items) => {
       if (!active) return;
       setConversationTargets(items);
       const keys = items.map((item) => JSON.stringify([item.id, item.externalId]));
-      if (items.length && !keys.includes(selectedConversationKey)) setSelectedConversationKey(keys[0]);
-      if (!items.length) setSelectedConversationKey('');
-    }).catch(onError);
+      setSelectedConversationKey((current) => keys.length ? keys.includes(current) ? current : keys[0] : '');
+    }).catch((reason) => {
+      if (!active) return;
+      setConversationTargets([]);
+      setSelectedConversationKey('');
+      setConversationListError(formatError(reason));
+    }).finally(() => { if (active) setConversationLoading(false); });
     return () => { active = false; };
-  }, [groups, selectedConversationKey, onError]);
+  }, [groups, conversationListRevision]);
   const refresh = useCallback(async () => {
-    if (!selectedConversation || !selectedGroup) { setStatus(null); setApprovals([]); setWakes([]); setMemes([]); setVoices([]); return; }
+    if (!selectedConversation || !selectedGroup) {
+      setStatus(null); setApprovals([]); setWakes([]); setMemes([]); setVoices([]);
+      setStatusError(selectedConversation ? tr('所选会话策略尚未加载，请刷新会话列表。') : '');
+      return;
+    }
     try {
       const [current, pending] = await Promise.all([
         api.getChatbotConversation(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId),
         api.listChatbotApprovals(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId),
       ]);
+      setStatusError('');
       setStatus(current); setApprovals(pending.items); setMode(current.mode); setSilent(current.silent);
       setDisabledToolsText(current.disabledTools.join('\n'));
-      setInitialPrompt('');
+      setInitialPrompt(current.initialPrompt ?? '');
       try {
         const wakeResult = await api.controlChatbotConversation<{ items: ChatbotWake[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'wakeList', externalId: selectedConversation.externalId });
         setWakes(wakeResult.items); setWakeError('');
@@ -923,8 +933,12 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
         const voiceResult = await api.controlChatbotConversation<{ items: ChatbotVoiceSummary[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'voiceList', externalId: selectedConversation.externalId });
         setVoices(voiceResult.items); setVoiceError('');
       } catch (reason) { setVoices([]); setVoiceError(formatError(reason)); }
-    } catch (reason) { setStatus(null); onError(reason); }
-  }, [selectedGroup, selectedConversation, onError]);
+    } catch (reason) {
+      setStatus(null);
+      setApprovals([]);
+      setStatusError(reason instanceof ApiError && reason.status === 404 ? tr('会话策略已不存在或会话ID已变更，请刷新会话列表。') : formatError(reason));
+    }
+  }, [selectedGroup, selectedConversation, tr]);
   useEffect(() => { void refresh(); }, [refresh]);
   const runControl = async (payload: Record<string, unknown>) => {
     if (!selectedGroup || !selectedConversation) return;
@@ -1002,16 +1016,27 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
     { title: tr('操作'), key: 'actions', render: (_, item) => <Popconfirm title={tr('删除这个语音素材？')} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'voiceDelete', voiceName: item.name })}><Button size="small" danger loading={busy}>{tr('删除')}</Button></Popconfirm> },
   ];
   return <section className="data-page chatbot-runtime-page">
-    <Card className="runtime-control-card" title={tr('选择会话')} extra={<Button icon={<ReloadOutlined />} onClick={() => void refresh()}>{tr('刷新状态')}</Button>}>
-      <Select className="full-width" value={selectedConversationKey || undefined} onChange={setSelectedConversationKey} placeholder={tr('选择账号和会话')} options={conversationTargets.map((item) => ({ value: JSON.stringify([item.id, item.externalId]), label: `${item.accountName} · ${item.name || item.externalId} · ${item.conversationType === 'private' ? tr('私聊') : tr('群聊')} · ${item.externalId}` }))} />
+    <Card className="runtime-control-card" title={tr('选择会话')} extra={<Space>
+      {selectedGroup && <Button size="small" icon={<SettingOutlined />} onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button>}
+      <Button icon={<ReloadOutlined />} onClick={() => { setConversationListRevision((value) => value + 1); void refresh(); }}>{tr('刷新会话列表')}</Button>
+      {selectedConversation && <Button size="small" onClick={() => void refresh()}>{tr('刷新状态')}</Button>}
+    </Space>}>
+      <Select className="full-width" loading={conversationLoading} value={selectedConversationKey || undefined} onChange={setSelectedConversationKey} placeholder={tr('选择账号和会话')} notFoundContent={conversationLoading ? tr('正在加载会话…') : tr('没有可管理会话')} options={conversationTargets.map((item) => ({ value: JSON.stringify([item.id, item.externalId]), label: `${item.accountName} · ${item.name || item.externalId} · ${item.conversationType === 'private' ? tr('私聊') : tr('群聊')}${item.enabled ? '' : ` · ${tr('已停用')}`} · ${item.externalId}` }))} />
+      {conversationListError && <Alert className="runtime-empty-alert" type="error" showIcon message={tr('会话列表读取失败')} description={conversationListError} action={<Button size="small" onClick={() => setConversationListRevision((value) => value + 1)}>{tr('重试')}</Button>} />}
+      {!conversationLoading && !conversationListError && conversationTargets.length === 0 && <Alert className="runtime-empty-alert" type="info" showIcon message={tr('尚无可管理会话')} description={tr(groups.length ? '已存在会话策略，但没有有效的会话 ID。请在群聊策略中填写群聊或私聊 OpenID。' : accounts.length ? '会话列表来自已保存的群聊策略，不会自动发现历史聊天。请先创建策略并填写外部会话 ID。' : '请先配置平台账号，再创建群聊或私聊策略并填写外部会话 ID。')} action={<Space>
+        <Button type="primary" size="small" onClick={() => onNavigate(accounts.length ? 'groups' : 'accounts')}>{tr(accounts.length ? '添加会话策略' : '配置平台账号')}</Button>
+        <Button size="small" onClick={() => setConversationListRevision((value) => value + 1)}>{tr('刷新')}</Button>
+      </Space>} />}
+      {statusError && <Alert className="runtime-empty-alert" type="warning" showIcon message={tr('会话状态读取失败')} description={statusError} action={<Button size="small" onClick={() => { setConversationListRevision((value) => value + 1); void refresh(); }}>{tr('刷新')}</Button>} />}
       {status && <div className="runtime-status-grid">
-        <div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
+        <div><span>{tr('会话策略')}</span><strong>{status.enabled ? tr('启用') : tr('已停用')}</strong></div><div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
         <div><span>{tr('对话上下文')}</span><strong>{status.contextMessages}</strong></div><div><span>{tr('静默')}</span><strong>{status.silent ? tr('启用') : tr('停用')}</strong></div>
         <div><span>{tr('待审批工具')}</span><strong>{approvals.filter((item) => item.status === 'pending').length}</strong></div><div><span>{tr('待继续等待')}</span><strong>{status.pendingAgentWait ? tr('是') : tr('否')}</strong></div>
       </div>}
     </Card>
     {selectedGroup && status && <>
-      <Card className="runtime-control-card" title={tr('会话运行控制')}>
+      <Card className="runtime-control-card" title={tr('会话设置')}>
+        <p className="form-note">{tr('此处配置运行时设置；模型、供应商、白名单、预算、提示词和扩展策略请在群聊策略中配置。')} <Button type="link" onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button></p>
         <div className="runtime-control-row"><span>{tr('运行模式')}</span><Select value={mode} onChange={setMode} options={['chat', 'reserved', 'reserved2', 'closed-agent'].map((value) => ({ value, label: value }))} /><Button type="primary" loading={busy} onClick={() => void runControl({ action: 'mode', mode })}>{tr('保存模式')}</Button></div>
         <div className="runtime-control-row"><span>{tr('静默模式')}</span><Switch checked={silent} onChange={(value) => { setSilent(value); void runControl({ action: 'silent', silent: value }); }} checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></div>
         <label className="runtime-prompt-field"><span>{tr('一次性提示')} · {tr('只会在下一次模型请求中消费；留空后点击保存会清除。')}</span><Input.TextArea value={initialPrompt} maxLength={4000} showCount rows={3} onChange={(event) => setInitialPrompt(event.target.value)} /></label>
@@ -1206,48 +1231,6 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
   </section>;
 }
 
-function RoleCardsPanel({ data, accounts, onRefresh, onError }: { data: RoleCardRecord[]; accounts: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
-  const { tr, language } = useI18n();
-  const drawer = useDrawer();
-  const [form] = Form.useForm();
-  const [saving, setSaving] = useState(false);
-  const editing = data.find((item) => item.id === drawer.editingId);
-  useEffect(() => {
-    if (!drawer.open) return;
-    form.resetFields();
-    form.setFieldsValue({ accountId: editing?.accountId ?? accounts[0]?.id, name: editing?.name ?? '', description: editing?.description ?? '', mode: editing?.mode ?? 'all', content: editing?.content ?? '' });
-  }, [drawer.open, editing, accounts, form]);
-  const save = async (values: { accountId: string; name: string; description?: string; mode?: string; content: string }) => {
-    setSaving(true);
-    try {
-      await api.saveRoleCard({ accountId: values.accountId, name: values.name, description: values.description ?? '', mode: values.mode || undefined, content: values.content }, editing?.id);
-      drawer.close(); onRefresh();
-    } catch (reason) { onError(reason); }
-    finally { setSaving(false); }
-  };
-  const columns: TableColumnsType<RoleCardRecord> = [
-    { title: tr('角色卡'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><BookOutlined /></span><span><strong>{name}</strong><small>{accounts.find((account) => account.id === row.accountId)?.name ?? row.accountId}</small></span></div> },
-    { title: tr('说明'), dataIndex: 'description', key: 'description', render: (value?: string) => value || '—' },
-    { title: tr('适用模式'), dataIndex: 'mode', key: 'mode', render: (value?: string) => value || 'all' },
-    { title: tr('内容长度'), dataIndex: 'content', key: 'content', render: (value: string) => value.length },
-    { title: tr('更新时间'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
-    { title: '', key: 'actions', render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} aria-label={`${tr('编辑')} ${row.name}`} onClick={() => drawer.edit(row.id)} /><Button size="small" onClick={() => void api.saveRoleCard({ accountId: row.accountId, name: `${row.name}-copy`, description: row.description ?? '', content: row.content, mode: row.mode }).then(onRefresh).catch(onError)}>{tr('复制')}</Button><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void api.deleteRoleCard(row.accountId, row.id).then(onRefresh).catch(onError)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
-  ];
-  return <div className="tab-panel"><PageToolbar count={data.length} noun="ROLE CARDS" action={tr('新增角色卡')} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<RoleCardRecord> rowKey="id" dataSource={data} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('角色卡预览')}</h3><DetailValue value={row.content} /></div> }} /> : <EmptyTable title={tr('还没有角色卡')} description={tr('建立可复用的会话角色卡，按适用模式注入到 Agent 提示词。')} onCreate={() => drawer.edit()} action={tr('新增角色卡')} />}
-    <Drawer title={<DrawerTitle label="CHAT ROLES" title={editing ? tr('编辑角色卡') : tr('新增角色卡')} />} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('返回')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
-      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <Form.Item name="accountId" label={tr('所属账号')} rules={[{ required: true, message: tr('请选择账号') }]}><Select disabled={Boolean(editing)} options={accounts.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input maxLength={64} /></Form.Item>
-        <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-        <Form.Item name="mode" label={tr('适用模式')}><Select options={[{ value: 'all', label: tr('所有模式') }, ...['chat', 'reserved', 'reserved2', 'closed-agent'].map((mode) => ({ value: mode, label: mode }))]} /></Form.Item>
-        <Form.Item name="content" label={tr('角色提示词')} rules={[{ required: true, message: tr('请输入角色内容') }]}><Input.TextArea rows={10} showCount maxLength={24000} /></Form.Item>
-        <p className="form-note">{tr('可在内容中使用 [chat]、[reserved]、[reserved2]、[closed-agent] 标记模式专属段落。')}</p>
-      </Form>
-    </Drawer>
-  </div>;
-}
-
 function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: ProjectMemoryRecord[]; accounts: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr, language } = useI18n();
   const drawer = useDrawer();
@@ -1293,13 +1276,13 @@ function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: Pr
   </div>;
 }
 
-function IntegrationsPage({ providers, prices, libraries, policies, accounts, roleCards, memories, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; accounts: BotAccountRecord[]; roleCards: RoleCardRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+function IntegrationsPage({ providers, prices, libraries, policies, accounts, memories, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; accounts: BotAccountRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
     { key: 'providers', label: <span><ApiOutlined /> {tr('AI供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity') + roleCards.length + memories.length}</Tag></span>, children: <IdentityPanel policies={policies} providers={providers} libraries={libraries} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity') + memories.length}</Tag></span>, children: <IdentityPanel policies={policies} providers={providers} libraries={libraries} accounts={accounts} memories={memories} onRefresh={onRefresh} onError={onError} /> },
     { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     { key: 'voice', label: <span><MessageOutlined /> {tr('语音策略')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
@@ -1307,24 +1290,22 @@ function IntegrationsPage({ providers, prices, libraries, policies, accounts, ro
   </section>;
 }
 
-function IdentityPanel({ policies, providers, libraries, accounts, roleCards, memories, onRefresh, onError }: {
-  policies: PolicyRecord[]; providers: ProviderRecord[]; libraries: LibraryData; accounts: BotAccountRecord[]; roleCards: RoleCardRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+function IdentityPanel({ policies, providers, libraries, accounts, memories, onRefresh, onError }: {
+  policies: PolicyRecord[]; providers: ProviderRecord[]; libraries: LibraryData; accounts: BotAccountRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
   const { tr } = useI18n();
-  const [view, setView] = useState<'policies' | 'roles' | 'memories'>('policies');
+  const [view, setView] = useState<'policies' | 'memories'>('policies');
   const identityCount = policies.filter((item) => item.type === 'identity').length;
-  const change = (value: string | number) => setView(value as 'policies' | 'roles' | 'memories');
+  const change = (value: string | number) => setView(value as 'policies' | 'memories');
   return <div className="identity-panel">
     <div className="identity-switch">
       <Segmented size="small" value={view} onChange={change} aria-label={tr('身份策略视图')} options={[
         { value: 'policies', label: `${tr('身份策略')} ${identityCount}` },
-        { value: 'roles', label: `${tr('角色卡')} ${roleCards.length}` },
         { value: 'memories', label: `${tr('项目记忆')} ${memories.length}` },
       ]} />
-      <span className="identity-switch-hint">{tr('三者在系统提示词中依次叠加：身份策略 → 角色卡 → 项目记忆。')}</span>
+      <span className="identity-switch-hint">{tr('项目记忆会叠加在身份策略的系统提示词之后，不会相互覆盖。')}</span>
     </div>
     {view === 'policies' && <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} />}
-    {view === 'roles' && <RoleCardsPanel data={roleCards} accounts={accounts} onRefresh={onRefresh} onError={onError} />}
     {view === 'memories' && <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} />}
   </div>;
 }
@@ -1413,7 +1394,7 @@ function PolicyPanel({ type, data, providers, libraries, onRefresh, onError }: {
             <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
           </div>
           <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
-          <Form.Item name="systemPrompt" label={tr('系统提示词')} extra={tr('角色卡与项目记忆会在该提示词之后叠加注入，不会相互覆盖。')}><Input.TextArea rows={5} placeholder={tr('描述 AI 的角色、边界与回复风格')} /></Form.Item>
+          <Form.Item name="systemPrompt" label={tr('系统提示词')} extra={tr('项目记忆会叠加在该提示词之后，不会相互覆盖。')}><Input.TextArea rows={5} placeholder={tr('描述 AI 的角色、边界与回复风格')} /></Form.Item>
           <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
           <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
           <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>

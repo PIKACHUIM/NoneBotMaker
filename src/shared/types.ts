@@ -2,7 +2,7 @@ export const CHATBOT_PLUGIN_TYPE = 'elysia-best/plugin-chatbot' as const;
 export const DEFAULT_NON_MENTION_REPLY_RATE = 0.05;
 export const LOG_RETENTION_DAYS = 30;
 
-export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'role_cards' | 'memories' | 'policies';
+export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'memories' | 'policies';
 export type JsonObject = Record<string, unknown>;
 
 /** Reusable capability policies that conversations can reference instead of duplicating fields. */
@@ -175,23 +175,6 @@ export interface LibraryRecord {
 }
 
 export type LibraryKind = 'skills' | 'mcps' | 'rules';
-
-export interface RoleCardSection {
-  heading: string;
-  mode: string;
-}
-
-export interface RoleCardRecord {
-  id: string;
-  accountId: string;
-  name: string;
-  description?: string;
-  content: string;
-  mode?: string;
-  sections?: RoleCardSection[];
-  createdAt: string;
-  updatedAt: string;
-}
 
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
 

@@ -124,10 +124,6 @@ function renderedRole(content: string, mode: string): { content: string; section
   return { content: output.join('\n').trim(), sections };
 }
 
-export function renderRoleCardContent(content: string, mode: string): string {
-  return renderedRole(content, mode).content;
-}
-
 function metadata(entry: MemoryEntry): JsonObject {
   const { content, ...info } = entry;
   return { ...info, chars: content.length };

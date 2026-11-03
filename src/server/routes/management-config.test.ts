@@ -471,62 +471,7 @@ describe('structured MCP configuration', () => {
   });
 });
 
-describe('shared role cards and project memories', () => {
-  it('validates role-card names and UTF-8 content size while preserving mode sections', async () => {
-    const setup = configuredApp();
-    const created = await writeRequest(setup, '/role_cards', {
-      id: 'role-1', accountId: 'account-1', name: '角色 1', description: 'Shared role', content: 'Prompt',
-      mode: 'closed-agent', sections: [{ heading: 'Persona', mode: 'closed-agent' }],
-    });
-    expect(created.status).toBe(201);
-    expect((await json(created)).data).toMatchObject({
-      accountId: 'account-1', name: '角色 1', mode: 'closed-agent',
-      sections: [{ heading: 'Persona', mode: 'closed-agent' }],
-    });
-    expect((await writeRequest(setup, '/role_cards', {
-      id: 'role-max', accountId: 'account-1', name: 'Max size', content: '界'.repeat(8192),
-    })).status).toBe(201);
-
-    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: 'x'.repeat(65), content: '' })).status).toBe(400);
-    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: '../unsafe', content: '' })).status).toBe(400);
-    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: 'Unsafe\n', content: '' })).status).toBe(400);
-    expect((await writeRequest(setup, '/role_cards', {
-      accountId: 'account-1', name: 'Oversized', content: '界'.repeat(8193),
-    })).status).toBe(400);
-    expect((await writeRequest(setup, '/role_cards', {
-      accountId: 'account-1', name: 'Bad sections', content: 'Prompt', sections: [{ heading: 'Missing mode' }],
-    })).status).toBe(400);
-    expect((await writeRequest(setup, '/role_cards', { accountId: '', name: 'No owner', content: 'Prompt' })).status).toBe(400);
-  });
-
-  it('scopes role-card CRUD by account and prevents deleting referenced accounts', async () => {
-    const setup = configuredApp();
-    seed(setup.values, 'accounts', {
-      id: 'account-2', pluginId: 'plugin-1', protocol: 'qq', name: 'Bot 2', enabled: true, credentials: {}, config: {},
-    });
-    const created = await writeRequest(setup, '/role_cards', {
-      id: 'role-1', accountId: 'account-1', name: 'Assistant', content: 'Original',
-    });
-    expect(created.status).toBe(201);
-    expect((await writeRequest(setup, '/role_cards', {
-      id: 'role-2', accountId: 'account-2', name: 'Assistant', content: 'Other account',
-    })).status).toBe(201);
-
-    expect((await setup.app.request('/role_cards', {}, setup.bindings)).status).toBe(400);
-    const listed = await setup.app.request('/role_cards?accountId=account-1', {}, setup.bindings);
-    expect(await listed.json()).toMatchObject({ data: [{ id: 'role-1' }] });
-    expect((await setup.app.request('/role_cards/role-2?accountId=account-1', {}, setup.bindings)).status).toBe(404);
-    expect((await writeRequest(setup, '/role_cards/role-2?accountId=account-1', { name: 'Taken' }, 'PATCH')).status).toBe(404);
-    expect((await setup.app.request('/role_cards/role-2?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(404);
-
-    const renamed = await writeRequest(setup, '/role_cards/role-1?accountId=account-1', { name: 'Renamed' }, 'PATCH');
-    expect(renamed.status).toBe(200);
-    expect((await json(renamed)).data).toMatchObject({ name: 'Renamed', accountId: 'account-1' });
-    expect((await setup.app.request('/accounts/account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(409);
-    expect((await setup.app.request('/role_cards/role-1?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(200);
-    expect((await setup.app.request('/role_cards/role-1?accountId=account-1', {}, setup.bindings)).status).toBe(404);
-  });
-
+describe('shared project memories', () => {
   it('validates memory fields, account references, and account-scoped search', async () => {
     const setup = configuredApp();
     seed(setup.values, 'accounts', {

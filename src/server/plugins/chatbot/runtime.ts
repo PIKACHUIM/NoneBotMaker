@@ -5,7 +5,6 @@ import type {
   LibraryRecord,
   ModelPriceRecord,
   ProjectMemoryRecord,
-  RoleCardRecord,
   GroupRecord,
   JsonObject,
   KVNamespaceLike,
@@ -316,7 +315,6 @@ export function createStoredChatbotHandler(
       const library = await records.get(kind, id);
       return library ? await decryptSecrets(library as JsonObject, bindings) as unknown as LibraryRecord : null;
     },
-    findWorkspaceRoleCards: async (accountId) => (await records.list('role_cards')).filter((record) => record.accountId === accountId) as unknown as RoleCardRecord[],
     findWorkspaceMemories: async (accountId) => (await records.list('memories')).filter((record) => record.accountId === accountId) as unknown as ProjectMemoryRecord[],
     saveWorkspaceMemory: async (accountId, memory) => {
       const name = memory.name.normalize('NFKC').trim();

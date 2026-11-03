@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
-import type { BotAccountRecord, JsonObject, PolicyType, RecordKind, RoleCardSection, RuntimeBindings } from '../../shared/types';
+import type { BotAccountRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings } from '../../shared/types';
 import { missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationIdList } from '../../shared/plugin-catalog';
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
@@ -8,9 +8,8 @@ import { loadPolicyLayers, resolveGroupConfig } from '../plugins/chatbot/policie
 import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
-const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'role_cards', 'memories', 'policies'];
-const ACCOUNT_SCOPED_KINDS = new Set<RecordKind>(['role_cards', 'memories']);
-const MAX_ROLE_CARD_CONTENT_BYTES = 24 * 1024;
+const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'memories', 'policies'];
+const ACCOUNT_SCOPED_KINDS = new Set<RecordKind>(['memories']);
 const MAX_CONVERSATION_IDS = 100;
 
 export class ApiError extends Error {
@@ -40,18 +39,6 @@ function nonEmptyStringField(source: JsonObject, key: string): string {
   const value = stringField(source, key);
   if (!value.trim()) throw new ApiError(400, `invalid_${key}`);
   return value;
-}
-
-function roleCardSectionsField(value: unknown): RoleCardSection[] {
-  if (!Array.isArray(value) || value.some((section) =>
-    typeof section !== 'object' || section === null || Array.isArray(section) ||
-    typeof (section as JsonObject).heading !== 'string' || typeof (section as JsonObject).mode !== 'string')) {
-    throw new ApiError(400, 'invalid_sections');
-  }
-  return value.map((section) => ({
-    heading: (section as JsonObject).heading as string,
-    mode: (section as JsonObject).mode as string,
-  }));
 }
 
 function booleanField(source: JsonObject, key: string, fallback: boolean): boolean {
@@ -219,25 +206,6 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
         ...(data.cacheInputCostPerMillion === undefined || data.cacheInputCostPerMillion === null ? {} : { cacheInputCostPerMillion: numberField(data, 'cacheInputCostPerMillion', 0, 0) }),
         ...(data.sourceUrl === undefined ? {} : { sourceUrl: httpUrl(stringField(data, 'sourceUrl'), 'sourceUrl') }),
-      };
-    }
-    case 'role_cards': {
-      const name = nonEmptyStringField(data, 'name');
-      if ([...name].length > 64 || name !== name.trim() || !/^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u.test(name)) {
-        throw new ApiError(400, 'invalid_name');
-      }
-      const content = stringField(data, 'content');
-      if (new TextEncoder().encode(content).byteLength > MAX_ROLE_CARD_CONTENT_BYTES) {
-        throw new ApiError(400, 'invalid_content');
-      }
-      return {
-        ...common,
-        accountId: nonEmptyStringField(data, 'accountId'),
-        name,
-        ...(data.description === undefined ? {} : { description: stringField(data, 'description') }),
-        content,
-        ...(data.mode === undefined ? {} : { mode: stringField(data, 'mode') }),
-        ...(data.sections === undefined ? {} : { sections: roleCardSectionsField(data.sections) }),
       };
     }
     case 'memories': {
@@ -443,7 +411,7 @@ async function assertNotReferenced(repository: RecordRepository, kind: RecordKin
   const checks: Array<[RecordKind, string, string]> = [];
   if (kind === 'plugins') checks.push(['accounts', 'pluginId', id]);
   if (kind === 'accounts') {
-    checks.push(['groups', 'accountId', id], ['role_cards', 'accountId', id], ['memories', 'accountId', id]);
+    checks.push(['groups', 'accountId', id], ['memories', 'accountId', id]);
   }
   if (kind === 'providers') checks.push(['groups', 'providerId', id], ['policies', 'providerId', id]);
   if (kind === 'skills') checks.push(['groups', 'skillIds', id], ['policies', 'skillIds', id]);

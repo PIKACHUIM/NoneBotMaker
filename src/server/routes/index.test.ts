@@ -54,7 +54,7 @@ describe('admin route protections', () => {
     expect(crossOrigin.status).toBe(403);
   });
 
-  it.each(['role_cards', 'memories'])('requires a session and same-origin mutations for shared records: %s', async (kind) => {
+  it.each(['memories'])('requires a session and same-origin mutations for shared records: %s', async (kind) => {
     const router = createApiRouter();
     const bindings = { SYS_SECRET: 'test-secret' };
     const read = await router.request(`/${kind}?accountId=account-1`, {}, bindings);

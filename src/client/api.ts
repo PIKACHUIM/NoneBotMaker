@@ -10,7 +10,6 @@ import type {
   PolicyRecord,
   ProjectMemoryRecord,
   ProviderRecord,
-  RoleCardRecord,
 } from '../shared/types';
 
 export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
@@ -137,16 +136,6 @@ export const api = {
   },
   async listGroups() {
     return records<GroupRecord>(await request('/api/groups'));
-  },
-  async listRoleCards(accountId: string) {
-    const params = new URLSearchParams({ accountId });
-    return records<RoleCardRecord>(await request(collectionPath('/api/role_cards', params)));
-  },
-  async saveRoleCard(data: Partial<RoleCardRecord> & Pick<RoleCardRecord, 'accountId' | 'name' | 'content'>, id?: string) {
-    return record<RoleCardRecord>(await request(collectionPath(id ? `/api/role_cards/${encodeURIComponent(id)}` : '/api/role_cards', new URLSearchParams({ accountId: data.accountId })), { method: id ? 'PUT' : 'POST', ...jsonBody(data) }));
-  },
-  async deleteRoleCard(accountId: string, id: string) {
-    return request(collectionPath(`/api/role_cards/${encodeURIComponent(id)}`, new URLSearchParams({ accountId })), { method: 'DELETE' });
   },
   async listProjectMemories(accountId: string, query?: string) {
     const params = new URLSearchParams({ accountId });
