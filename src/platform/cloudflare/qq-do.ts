@@ -18,7 +18,7 @@ const MAX_CONTEXT_ENTRIES = 1000;
 const MAX_RECENT_MESSAGE_IDS = 512;
 const DEDUPE_RETENTION_MS = 10 * 60_000;
 const GROUP_AND_C2C_INTENT = 1 << 25;
-const GATEWAY_BUILD = 'build-2026-11-03-manual-redirect';
+const GATEWAY_BUILD = 'build-2026-11-03-v1-endpoint';
 
 interface DurableStorageData {
   get<T = unknown>(key: string): Promise<T | undefined>;

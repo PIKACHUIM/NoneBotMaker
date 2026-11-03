@@ -1,5 +1,20 @@
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
+/**
+ * OpenAI兼容服务通常要求 /v1 前缀。只填主机（或误填完整接口地址）时自动补全，
+ * 已带版本段或自定义路径的保持原样，避免把 /api/v1 之类写成 /api/v1/v1。
+ */
+export function openAiEndpoint(baseUrl: string, endpoint: string): string {
+  const url = new URL(baseUrl);
+  const suffix = `/${endpoint.replace(/^\/+/, '')}`;
+  let pathname = url.pathname.replace(/\/+$/, '');
+  if (pathname.toLowerCase().endsWith(suffix.toLowerCase())) pathname = pathname.slice(0, -suffix.length);
+  pathname = pathname.replace(/\/chat\/completions$/i, '');
+  if (!pathname) pathname = '/v1';
+  url.pathname = `${pathname}${suffix}`;
+  return url.toString();
+}
+
 export function publicHttpsUrl(value: string): URL {
   const url = new URL(value);
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');

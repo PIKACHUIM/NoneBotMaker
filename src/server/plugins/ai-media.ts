@@ -1,5 +1,5 @@
 import type { ProviderRecord } from '../../shared/types';
-import { boundedBytes, publicHttpsUrl, safeFetch } from './chatbot/network';
+import { boundedBytes, openAiEndpoint, publicHttpsUrl, safeFetch } from './chatbot/network';
 
 export interface SpeechRequest {
   model: string;
@@ -41,8 +41,7 @@ export async function createSpeech(
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_UPLOAD_BYTES) throw new Error('Invalid speech media limit.');
   const inputCharacters = Array.from(input).length;
   if (!inputCharacters || inputCharacters > maxTextChars) throw new Error('Speech text exceeds the configured limit.');
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/audio/speech`;
-  const response = await safeFetch(url.toString(), {
+  const response = await safeFetch(openAiEndpoint(provider.baseUrl, 'audio/speech'), {
     method: 'POST',
     headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json', accept: 'audio/mpeg' },
     body: JSON.stringify({ model, input, voice, speed, response_format: 'mp3' }),

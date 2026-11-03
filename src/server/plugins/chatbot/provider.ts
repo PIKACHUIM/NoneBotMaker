@@ -1,5 +1,5 @@
 import type { ProviderChatRequest, ProviderRecord, ToolCall } from '../../../shared/types';
-import { boundedText, publicHttpsUrl, safeFetch } from './network';
+import { boundedText, openAiEndpoint, publicHttpsUrl, safeFetch } from './network';
 
 export interface ProviderChatResult {
   content: string;
@@ -25,7 +25,7 @@ export async function completeOpenAICompatible(
   if (!provider.enabled || !provider.apiKey) throw new Error('Chat provider is unavailable.');
   const baseUrl = publicHttpsUrl(provider.baseUrl);
   if (baseUrl.search || baseUrl.hash) throw new Error('Chat provider URL must not contain query parameters.');
-  const response = await safeFetch(`${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+  const response = await safeFetch(openAiEndpoint(provider.baseUrl, 'chat/completions'), {
     method: 'POST',
     headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({

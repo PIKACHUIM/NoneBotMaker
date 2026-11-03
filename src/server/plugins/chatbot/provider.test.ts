@@ -33,6 +33,13 @@ describe('OpenAI compatible JSON responses', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('appends /v1 when the provider base URL has no path', async () => {
+    const fetchImpl = mockFetch(json({ choices: [{ message: { content: 'ok' } }] }));
+    await completeOpenAICompatible({ ...provider, baseUrl: 'https://api.vendor.example' }, request, fetchImpl);
+    const [input] = fetchImpl.mock.calls.find(([input]) => !String(input).includes('dns-query'))!;
+    expect(String(input)).toBe('https://api.vendor.example/v1/chat/completions');
+  });
+
   it('supports JSON fallback when streaming was requested and estimates missing usage', async () => {
     const toolCalls = [{ id: 'call', type: 'function', function: { name: 'echo', arguments: '{}' } }];
     const result = await streamed(json({ choices: [{ message: { content: null, tool_calls: toolCalls } }] }));
