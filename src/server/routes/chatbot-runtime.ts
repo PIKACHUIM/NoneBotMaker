@@ -116,7 +116,7 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
     case 'status': {
       const mode = typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat');
       const context = await stores.conversationStore.getRecent(scope, 1000);
-      return { groupId: group.id, accountId: group.accountId, externalId, conversationType: group.conversationType ?? 'group', mode, silent: state.silent === true, contextMessages: context.length, initialPromptPending: typeof state.initialPrompt === 'string', disabledTools: [...configIdSet(state.disabledTools)], pendingApprovals: safeApprovalSummary(state), pendingWait: Boolean(state.pendingAgentWait) };
+      return { groupId: group.id, accountId: group.accountId, externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled, connected: false, mode, silent: state.silent === true, model: group.model, providerId: group.providerId, contextMessages: context.length, initialPromptPending: typeof state.initialPrompt === 'string', ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}), disabledTools: [...configIdSet(state.disabledTools)], pendingApprovals: safeApprovalSummary(state), pendingAgentWait: Boolean(state.pendingAgentWait) };
     }
     case 'reset':
       if (!stores.conversationStore.clear) throw new ApiError(503, 'conversation_reset_unavailable');

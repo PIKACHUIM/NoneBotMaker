@@ -265,6 +265,7 @@ export class QQGatewayDurableObject {
         connected: this.socket?.readyState === WebSocket.OPEN, mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
         silent: state.silent === true, model: group.model, providerId: group.providerId,
         contextMessages: (await store.getRecent(scope, 1000)).length, initialPromptPending: typeof state.initialPrompt === 'string',
+        ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}),
         disabledTools: [...configIdSet(state.disabledTools)], pendingAgentWait: Boolean(state.pendingAgentWait),
         pendingApprovals: approvals, policyIds: { dialog: group.dialogPolicyId ?? '', voice: group.voicePolicyId ?? '', identity: group.identityPolicyId ?? '' },
       } });

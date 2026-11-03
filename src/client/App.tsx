@@ -88,7 +88,7 @@ import {
   pluginDefinitions,
   policyFields,
 } from '../shared/plugin-catalog';
-import { findModelPrice, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
+import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
 import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake } from './api';
@@ -107,7 +107,7 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
-  conversations: { title: '会话运行管理', eyebrow: 'CHAT BRIDGE / 05', description: '检查实际运行状态，重置上下文并管理待审批工具和计划唤醒。' },
+  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '管理会话运行模式、提示、工具和运行状态；模型、供应商、白名单与预算在群聊策略中配置。' },
   integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、AI供应商与单价，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
@@ -549,7 +549,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
-              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} prices={prices} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
+              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
               {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} />}
               {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={refresh} onError={handleError} />}
               {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
@@ -1044,8 +1044,8 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
   </section>;
 }
 
-function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, policies, onRefresh, onError }: {
-  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+function GroupsPage({ groups, plugins, accounts, providers, libraries, policies, onRefresh, onError }: {
+  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; libraries: LibraryData; policies: PolicyRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
   const { tr } = useI18n();
   const drawer = useDrawer();
@@ -1062,9 +1062,7 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
   const identityPolicyId = (Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.identityPolicyId;
   const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
   const effectiveProviderId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId || identityPolicy?.providerId || '';
-  const effectiveModel = (Form.useWatch('model', { form, preserve: true }) as string | undefined) || editing?.model || identityPolicy?.model || '';
   const provider = providers.find((item) => item.id === effectiveProviderId);
-  const price = findModelPrice(prices, effectiveModel);
   const promptMode = (Form.useWatch('systemPromptMode', { form, preserve: true }) as GroupRecord['systemPromptMode'] | undefined) ?? editing?.systemPromptMode ?? 'inherit';
   useEffect(() => {
     if (!drawer.open) return;
@@ -1166,6 +1164,7 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
           </Form.List>
         </Form.Item>
         {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
+        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
         <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
         <div className="form-grid two-cols">
@@ -1187,9 +1186,6 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, p
         </div>
         <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
-        <div className="form-section-heading"><span>{tr('模型成本估算')}</span><small>USD / {price?.unit === 'characters' ? tr('百万字符') : tr('百万 token')}</small></div>
-        <Alert className="price-estimate" type={price ? 'info' : 'warning'} showIcon message={price ? `${tr('输入成本')} $${(price.inputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)} / ${tr('输出成本')} $${(price.outputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)}` : tr('当前模型尚未登记单价，成本估算不可用。')} description={<div className="price-source">{price && <>{tr('计价来源')}：{price.name} · {price.model}<br />{tr('基础单价')}：${price.inputCostPerMillion} / ${price.outputCostPerMillion} · {tr('API 计价倍率')} × {provider?.priceMultiplier ?? 1}<br />{price.cacheInputCostPerMillion !== undefined && <>{tr('缓存输入单价')}：${price.cacheInputCostPerMillion * (provider?.priceMultiplier ?? 1)}<br /></>}{price.sourceUrl && <>{tr('来源地址')}：{price.sourceUrl}<br /></>}</>}{tr('估算使用模型单价 × API 倍率，并按所选计价单位的实际用量计算；不等于供应商账单。')} <Button type="link" href="#/admin/integrations">{tr('管理模型单价')}</Button></div>} />
-        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>

@@ -44,11 +44,19 @@ describe('chatbot conversation management API', () => {
     expect(await list.json()).toMatchObject({ data: [{ id: 'group-1', accountId: 'account-1', externalId: 'group-openid', mode: 'chat' }] });
   });
 
+  it('returns an empty conversation list when no group policies are registered', async () => {
+    const f = fixture();
+    f.values.delete('nonebotmaker:records:groups:group-1');
+    const list = await authorized(f, '/chatbot/conversations');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ data: [] });
+  });
+
   it('reads and updates silent, mode, initial prompt and tool policies by conversation scope', async () => {
     const f = fixture();
     const status = await authorized(f, '/chatbot/conversations/account-1/group-1');
     expect(status.status).toBe(200);
-    expect(await status.json()).toMatchObject({ data: { mode: 'chat', silent: false, contextMessages: 0 } });
+    expect(await status.json()).toMatchObject({ data: { enabled: true, mode: 'chat', silent: false, contextMessages: 0, initialPromptPending: false } });
     const update = (body: unknown) => authorized(f, '/chatbot/conversations/account-1/group-1/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect((await update({ action: 'silent', silent: true })).status).toBe(200);
     expect((await update({ action: 'mode', mode: 'reserved2' })).status).toBe(200);
