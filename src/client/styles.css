@@ -346,6 +346,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .runtime-control-card { border-color: var(--line); background: #172023; }
 .runtime-control-card .ant-card-head { min-height: 46px; border-bottom-color: var(--line); }
 .runtime-control-card .ant-card-head-title { color: var(--text); font-size: 12px; }
+.runtime-empty-alert { margin-top: 14px; }
 .runtime-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
 .runtime-status-grid > div { display: grid; gap: 6px; min-width: 0; padding: 12px; border: 1px solid var(--line-soft); background: #141c1f; }
 .runtime-status-grid span { color: var(--muted); font: 9px var(--mono); }
