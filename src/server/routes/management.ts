@@ -1,16 +1,20 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
-import type { BotAccountRecord, JsonObject, RecordKind, RuntimeBindings } from '../../shared/types';
-import { effectiveGroupConfig, missingRequiredField, normalizeFieldValues, pluginDefinition } from '../../shared/plugin-catalog';
+import type { BotAccountRecord, JsonObject, PolicyType, RecordKind, RoleCardSection, RuntimeBindings } from '../../shared/types';
+import { missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationIdList } from '../../shared/plugin-catalog';
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
+import { loadPolicyLayers, resolveGroupConfig } from '../plugins/chatbot/policies';
 import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
-const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules'];
+const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'role_cards', 'memories', 'policies'];
+const ACCOUNT_SCOPED_KINDS = new Set<RecordKind>(['role_cards', 'memories']);
+const MAX_ROLE_CARD_CONTENT_BYTES = 24 * 1024;
+const MAX_CONVERSATION_IDS = 100;
 
 export class ApiError extends Error {
-  constructor(readonly status: 400 | 404 | 409 | 502 | 503, readonly code: string) {
+  constructor(readonly status: 400 | 403 | 404 | 409 | 502 | 503, readonly code: string) {
     super(code);
     this.name = 'ApiError';
   }
@@ -30,6 +34,24 @@ function stringField(source: JsonObject, key: string, fallback?: string): string
   if (value === undefined && fallback !== undefined) return fallback;
   if (typeof value !== 'string') throw new ApiError(400, `invalid_${key}`);
   return value;
+}
+
+function nonEmptyStringField(source: JsonObject, key: string): string {
+  const value = stringField(source, key);
+  if (!value.trim()) throw new ApiError(400, `invalid_${key}`);
+  return value;
+}
+
+function roleCardSectionsField(value: unknown): RoleCardSection[] {
+  if (!Array.isArray(value) || value.some((section) =>
+    typeof section !== 'object' || section === null || Array.isArray(section) ||
+    typeof (section as JsonObject).heading !== 'string' || typeof (section as JsonObject).mode !== 'string')) {
+    throw new ApiError(400, 'invalid_sections');
+  }
+  return value.map((section) => ({
+    heading: (section as JsonObject).heading as string,
+    mode: (section as JsonObject).mode as string,
+  }));
 }
 
 function booleanField(source: JsonObject, key: string, fallback: boolean): boolean {
@@ -130,15 +152,23 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
       if (!['default', 'low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
       const conversationType = stringField(data, 'conversationType', 'group');
       if (!['group', 'private'].includes(conversationType)) throw new ApiError(400, 'invalid_conversationType');
+      const systemPromptMode = stringField(data, 'systemPromptMode', 'inherit');
+      if (!['inherit', 'append', 'override'].includes(systemPromptMode)) throw new ApiError(400, 'invalid_systemPromptMode');
+      const externalIds = conversationIdList(stringField(data, 'externalId').trim());
+      if (externalIds.length > MAX_CONVERSATION_IDS) throw new ApiError(400, 'invalid_externalId');
       return {
         ...common,
         accountId: stringField(data, 'accountId'),
-        externalId: stringField(data, 'externalId').trim(),
+        externalId: externalIds.join(','),
         conversationType,
         config: objectField(data, 'config'),
         name: stringField(data, 'name'),
         enabled: booleanField(data, 'enabled', true),
-        providerId: stringField(data, 'providerId'),
+        dialogPolicyId: stringField(data, 'dialogPolicyId', ''),
+        voicePolicyId: stringField(data, 'voicePolicyId', ''),
+        identityPolicyId: stringField(data, 'identityPolicyId', ''),
+        systemPromptMode,
+        providerId: stringField(data, 'providerId', ''),
         model: stringField(data, 'model', ''),
         systemPrompt: stringField(data, 'systemPrompt', ''),
         reasoningEffort,
@@ -189,6 +219,66 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
         ...(data.cacheInputCostPerMillion === undefined || data.cacheInputCostPerMillion === null ? {} : { cacheInputCostPerMillion: numberField(data, 'cacheInputCostPerMillion', 0, 0) }),
         ...(data.sourceUrl === undefined ? {} : { sourceUrl: httpUrl(stringField(data, 'sourceUrl'), 'sourceUrl') }),
+      };
+    }
+    case 'role_cards': {
+      const name = nonEmptyStringField(data, 'name');
+      if ([...name].length > 64 || name !== name.trim() || !/^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u.test(name)) {
+        throw new ApiError(400, 'invalid_name');
+      }
+      const content = stringField(data, 'content');
+      if (new TextEncoder().encode(content).byteLength > MAX_ROLE_CARD_CONTENT_BYTES) {
+        throw new ApiError(400, 'invalid_content');
+      }
+      return {
+        ...common,
+        accountId: nonEmptyStringField(data, 'accountId'),
+        name,
+        ...(data.description === undefined ? {} : { description: stringField(data, 'description') }),
+        content,
+        ...(data.mode === undefined ? {} : { mode: stringField(data, 'mode') }),
+        ...(data.sections === undefined ? {} : { sections: roleCardSectionsField(data.sections) }),
+      };
+    }
+    case 'memories': {
+      const type = stringField(data, 'type');
+      if (!['user', 'feedback', 'project', 'reference'].includes(type)) throw new ApiError(400, 'invalid_type');
+      return {
+        ...common,
+        accountId: nonEmptyStringField(data, 'accountId'),
+        type,
+        name: nonEmptyStringField(data, 'name'),
+        title: nonEmptyStringField(data, 'title'),
+        desc: stringField(data, 'desc'),
+        content: nonEmptyStringField(data, 'content'),
+        time: nonEmptyStringField(data, 'time'),
+      };
+    }
+    case 'policies': {
+      const type = stringField(data, 'type', 'dialog');
+      if (!['dialog', 'voice', 'identity'].includes(type)) throw new ApiError(400, 'invalid_type');
+      const policyType = type as PolicyType;
+      const config = objectField(data, 'config');
+      const base = {
+        ...common,
+        type: policyType,
+        name: stringField(data, 'name'),
+        description: stringField(data, 'description', ''),
+        enabled: booleanField(data, 'enabled', true),
+        config: { ...config, ...normalizeFieldValues(policyFields(policyType), config) },
+      };
+      if (policyType !== 'identity') return base;
+      const reasoningEffort = stringField(data, 'reasoningEffort', 'default');
+      if (!['default', 'low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
+      return {
+        ...base,
+        providerId: stringField(data, 'providerId', ''),
+        model: stringField(data, 'model', ''),
+        systemPrompt: stringField(data, 'systemPrompt', ''),
+        reasoningEffort,
+        skillIds: stringArrayField(data, 'skillIds'),
+        mcpIds: stringArrayField(data, 'mcpIds'),
+        ruleIds: stringArrayField(data, 'ruleIds'),
       };
     }
     case 'skills':
@@ -283,7 +373,8 @@ async function readableConfig(config: JsonObject | undefined, bindings: RuntimeB
 
 async function normalizeGroupConfig(repository: RecordRepository, record: StoredRecord, bindings: RuntimeBindings, previous?: StoredRecord): Promise<void> {
   if (!record.externalId) throw new ApiError(400, 'invalid_externalId');
-  if (previous && (record.accountId !== previous.accountId || record.externalId !== previous.externalId ||
+  // 会话 openid 列表可随时增减；账号与会话类型决定运行身份，创建后不可变更。
+  if (previous && (record.accountId !== previous.accountId ||
     record.conversationType !== (previous.conversationType ?? 'group'))) {
     throw new ApiError(409, 'group_binding_locked');
   }
@@ -296,11 +387,30 @@ async function normalizeGroupConfig(repository: RecordRepository, record: Stored
     ...config,
     ...normalizeFieldValues(definition.groupFields, { ...pluginConfig, ...config }),
   } : config;
+  const ids = new Set(conversationIdList(record.externalId));
   const duplicate = (await repository.list('groups')).some((group) => group.id !== record.id &&
-    group.accountId === record.accountId && group.externalId === record.externalId &&
-    (group.conversationType ?? 'group') === record.conversationType);
+    group.accountId === record.accountId &&
+    (group.conversationType ?? 'group') === record.conversationType &&
+    conversationIdList(group.externalId).some((id) => ids.has(id)));
   if (duplicate) throw new ApiError(409, 'duplicate_conversation');
 }
+
+function accountScope(kind: RecordKind, getAccountId: (key: string) => string | undefined): string | undefined {
+  if (!ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
+  const accountId = getAccountId('accountId');
+  if (!accountId?.trim()) throw new ApiError(400, 'missing_accountId');
+  return accountId;
+}
+
+function assertAccountScope(record: StoredRecord, accountId: string | undefined): void {
+  if (accountId !== undefined && record.accountId !== accountId) throw new ApiError(404, 'not_found');
+}
+
+const GROUP_POLICY_FIELDS: Array<['dialogPolicyId' | 'voicePolicyId' | 'identityPolicyId', PolicyType]> = [
+  ['dialogPolicyId', 'dialog'],
+  ['voicePolicyId', 'voice'],
+  ['identityPolicyId', 'identity'],
+];
 
 async function assertReferences(repository: RecordRepository, kind: RecordKind, record: StoredRecord): Promise<void> {
   const requireRecord = async (relatedKind: RecordKind, id: string) => {
@@ -308,23 +418,38 @@ async function assertReferences(repository: RecordRepository, kind: RecordKind, 
   };
   if (kind === 'accounts') {
     await requireRecord('plugins', record.pluginId as string);
+  } else if (ACCOUNT_SCOPED_KINDS.has(kind)) {
+    await requireRecord('accounts', record.accountId as string);
   } else if (kind === 'groups') {
     await requireRecord('accounts', record.accountId as string);
-    await requireRecord('providers', record.providerId as string);
+    if (record.providerId) await requireRecord('providers', record.providerId as string);
     for (const id of record.skillIds as string[]) await requireRecord('skills', id);
     for (const id of record.mcpIds as string[]) await requireRecord('mcps', id);
     for (const id of record.ruleIds as string[]) await requireRecord('rules', id);
+    for (const [field, expected] of GROUP_POLICY_FIELDS) {
+      if (!record[field]) continue;
+      const policy = await repository.get('policies', record[field] as string);
+      if (!policy || policy.type !== expected) throw new ApiError(400, `invalid_${field}`);
+    }
+  } else if (kind === 'policies' && record.type === 'identity') {
+    if (record.providerId) await requireRecord('providers', record.providerId as string);
+    for (const id of record.skillIds as string[] ?? []) await requireRecord('skills', id);
+    for (const id of record.mcpIds as string[] ?? []) await requireRecord('mcps', id);
+    for (const id of record.ruleIds as string[] ?? []) await requireRecord('rules', id);
   }
 }
 
 async function assertNotReferenced(repository: RecordRepository, kind: RecordKind, id: string): Promise<void> {
   const checks: Array<[RecordKind, string, string]> = [];
   if (kind === 'plugins') checks.push(['accounts', 'pluginId', id]);
-  if (kind === 'accounts') checks.push(['groups', 'accountId', id]);
-  if (kind === 'providers') checks.push(['groups', 'providerId', id]);
-  if (kind === 'skills') checks.push(['groups', 'skillIds', id]);
-  if (kind === 'mcps') checks.push(['groups', 'mcpIds', id]);
-  if (kind === 'rules') checks.push(['groups', 'ruleIds', id]);
+  if (kind === 'accounts') {
+    checks.push(['groups', 'accountId', id], ['role_cards', 'accountId', id], ['memories', 'accountId', id]);
+  }
+  if (kind === 'providers') checks.push(['groups', 'providerId', id], ['policies', 'providerId', id]);
+  if (kind === 'skills') checks.push(['groups', 'skillIds', id], ['policies', 'skillIds', id]);
+  if (kind === 'mcps') checks.push(['groups', 'mcpIds', id], ['policies', 'mcpIds', id]);
+  if (kind === 'rules') checks.push(['groups', 'ruleIds', id], ['policies', 'ruleIds', id]);
+  if (kind === 'policies') checks.push(...GROUP_POLICY_FIELDS.map(([field]) => ['groups', field, id] as [RecordKind, string, string]));
   for (const [relatedKind, field, target] of checks) {
     const records = await repository.list(relatedKind);
     if (records.some((record) => Array.isArray(record[field])
@@ -354,10 +479,33 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
     const plugin = account ? await repository.get('plugins', account.pluginId as string) : null;
     const config = await readableConfig(record.config as JsonObject | undefined, bindings);
     const pluginConfig = await readableConfig(plugin?.config as JsonObject | undefined, bindings);
+    const policies = await loadPolicyLayers(repository, record);
     record = {
       ...groupCostDefaults(record),
       conversationType: record.conversationType ?? 'group',
-      config: { ...config, ...effectiveGroupConfig(pluginConfig, config) },
+      systemPromptMode: record.systemPromptMode ?? 'inherit',
+      dialogPolicyId: record.dialogPolicyId ?? '',
+      voicePolicyId: record.voicePolicyId ?? '',
+      identityPolicyId: record.identityPolicyId ?? '',
+      config: { ...config, ...resolveGroupConfig({ config }, policies, pluginConfig) },
+    };
+  } else if (kind === 'policies') {
+    const config = record.config as JsonObject | undefined;
+    const type = ['dialog', 'voice', 'identity'].includes(record.type as string) ? record.type as PolicyType : 'dialog';
+    record = {
+      ...record,
+      enabled: record.enabled !== false,
+      description: typeof record.description === 'string' ? record.description : '',
+      config: { ...config, ...normalizeFieldValues(policyFields(type), config) },
+      ...(type === 'identity' ? {
+        providerId: typeof record.providerId === 'string' ? record.providerId : '',
+        model: typeof record.model === 'string' ? record.model : '',
+        systemPrompt: typeof record.systemPrompt === 'string' ? record.systemPrompt : '',
+        reasoningEffort: typeof record.reasoningEffort === 'string' ? record.reasoningEffort : 'default',
+        skillIds: Array.isArray(record.skillIds) ? record.skillIds : [],
+        mcpIds: Array.isArray(record.mcpIds) ? record.mcpIds : [],
+        ruleIds: Array.isArray(record.ruleIds) ? record.ruleIds : [],
+      } : {}),
     };
   } else if (kind === 'plugins') {
     record = { ...record, config: await readableConfig(record.config as JsonObject | undefined, bindings) };
@@ -398,9 +546,14 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
   api.get('/:kind', async (context) => {
     const kind = context.req.param('kind');
     assertKind(kind);
+    const scopedAccountId = accountScope(kind, (key) => context.req.query(key));
     setCostConsistencyHeader(context, kind);
     const repository = await recordRepository(context);
-    const records = await repository.list(kind);
+    const query = kind === 'memories' ? context.req.query('q')?.trim().toLowerCase() : undefined;
+    const records = (await repository.list(kind)).filter((record) =>
+      (scopedAccountId === undefined || record.accountId === scopedAccountId) &&
+      (!query || ['type', 'name', 'title', 'desc', 'content', 'time'].some((key) =>
+        typeof record[key] === 'string' && (record[key] as string).toLowerCase().includes(query))));
     context.header('X-Storage-Consistency', repository.consistency);
     return context.json({ data: await Promise.all(records.map((record) => visibleRecord(repository, kind, record, context.env))) });
   });
@@ -427,10 +580,12 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
   api.get('/:kind/:id', async (context) => {
     const kind = context.req.param('kind');
     assertKind(kind);
+    const scopedAccountId = accountScope(kind, (key) => context.req.query(key));
     setCostConsistencyHeader(context, kind);
     const repository = await recordRepository(context);
     const record = await repository.get(kind, context.req.param('id'));
     if (!record) throw new ApiError(404, 'not_found');
+    assertAccountScope(record, scopedAccountId);
     context.header('X-Storage-Consistency', repository.consistency);
     return context.json({ data: await visibleRecord(repository, kind, record, context.env) });
   });
@@ -438,10 +593,12 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
   api.on(['PUT', 'PATCH'], '/:kind/:id', async (context) => {
     const { kind, id } = context.req.param();
     assertKind(kind);
+    const scopedAccountId = accountScope(kind, (key) => context.req.query(key));
     setCostConsistencyHeader(context, kind);
     const repository = await recordRepository(context);
     const previous = await repository.get(kind, id);
     if (!previous) throw new ApiError(404, 'not_found');
+    assertAccountScope(previous, scopedAccountId);
     const data = await requestBody(context);
     const now = new Date().toISOString();
     const visiblePrevious = await visibleRecord(repository, kind, previous, context.env);
@@ -462,6 +619,7 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
       }
     }
     const record = normalizedRecord(kind, merged, id, previous.createdAt, now);
+    assertAccountScope(record, scopedAccountId);
     await assertReferences(repository, kind, record);
     if (kind === 'accounts') await normalizeAccountCredentials(repository, record, previous, context.env);
     if (kind === 'groups') await normalizeGroupConfig(repository, record, context.env, previous);
@@ -474,9 +632,12 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
   api.delete('/:kind/:id', async (context) => {
     const { kind, id } = context.req.param();
     assertKind(kind);
+    const scopedAccountId = accountScope(kind, (key) => context.req.query(key));
     setCostConsistencyHeader(context, kind);
     const repository = await recordRepository(context);
-    if (!(await repository.get(kind, id))) throw new ApiError(404, 'not_found');
+    const record = await repository.get(kind, id);
+    if (!record) throw new ApiError(404, 'not_found');
+    assertAccountScope(record, scopedAccountId);
     await assertNotReferenced(repository, kind, id);
     await repository.delete(kind, id);
     context.header('X-Storage-Consistency', repository.consistency);

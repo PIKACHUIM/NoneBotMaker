@@ -441,6 +441,35 @@ describe('Cloudflare QQ gateway Durable Object', () => {
     ).rejects.toThrow('only supported on Cloudflare');
   });
 
+  it('exposes authenticated-worker-only conversation controls and isolates each bound external openid', async () => {
+    const bot = account('console-control');
+    bot.account.id = 'account-console';
+    bot.pluginConfig = { bridge_owner_ids: 'owner-openid' };
+    const values = new Map<string, string>([
+      ['nonebotmaker:records:groups:group-record', JSON.stringify({ id: 'group-record', accountId: bot.account.id, externalId: 'group-a,group-b', conversationType: 'group', name: 'Group', enabled: true, providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', nonMentionReplyRate: 1, whitelistEnabled: false, whitelistUserIds: [], dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0, skillIds: [], mcpIds: [], ruleIds: [], config: { bridge_owner_ids: 'owner-openid' }, createdAt: '', updatedAt: '' })],
+      ['nonebotmaker:records:plugins:plugin-1', JSON.stringify({ id: 'plugin-1', type: 'elysia-best/plugin-chatbot', enabled: true, config: {}, createdAt: '', updatedAt: '' })],
+    ]);
+    const KV = { get: async (key: string) => values.get(key) ?? null, put: async (key: string, value: string) => { values.set(key, value); }, delete: async (key: string) => { values.delete(key); }, list: async ({ prefix = '' } = {}) => ({ keys: [...values.keys()].filter((key) => key.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };
+    const env = { PLATFORM: 'cloudflare', API_METHOD: 'webhook', SYS_SECRET: 'conversation-control-test', KV } as unknown as RuntimeBindings;
+    const durableState = state();
+    const durable = new QQGatewayDurableObject(durableState as unknown as ConstructorParameters<typeof QQGatewayDurableObject>[0], env, { resolveAccount: async () => bot });
+    const post = (body: Record<string, unknown>) => durable.fetch(new Request('https://qq-gateway.internal/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accountId: bot.account.id, groupId: 'group-record', ...body }) }));
+    const changed = await post({ action: 'mode', externalId: 'group-a', mode: 'reserved' });
+    expect(changed.status).toBe(200);
+    const statusA = await post({ action: 'status', externalId: 'group-a' });
+    const statusB = await post({ action: 'status', externalId: 'group-b' });
+    expect(await statusA.json()).toMatchObject({ data: { externalId: 'group-a', mode: 'reserved' } });
+    expect(await statusB.json()).toMatchObject({ data: { externalId: 'group-b', mode: 'chat' } });
+    const scopeA = JSON.stringify([bot.account.id, 'group', 'group-a']);
+    const conversationStore = (durable as unknown as { conversationStore(): GroupConversationStore }).conversationStore();
+    await conversationStore.setState!(scopeA, { toolApprovals: [{ id: 'approval-a', call: { id: 'call-a', type: 'function', function: { name: 'mcp_write', arguments: '{"value":"safe"}' } }, requestedBy: 'member', requestedAt: 1000, expiresAt: Date.now() + 60_000, status: 'pending' }] });
+    const decision = await post({ action: 'approvalDecision', externalId: 'group-a', approvalId: 'approval-a', decision: 'reject' });
+    expect(decision.status).toBe(200);
+    expect(await decision.json()).toMatchObject({ data: { decision: 'reject', actingOwnerId: 'owner-openid', messages: ['工具请求已拒绝。'] } });
+    expect((await conversationStore.getState!(scopeA)).toolApprovals).toMatchObject([{ status: 'rejected' }]);
+    expect((await post({ action: 'status', externalId: 'other-account-group' })).status).toBe(404);
+  });
+
   it('requires the configured Durable Object binding in Cloudflare websocket mode', async () => {
     await expect(
       ensureQQGatewaySessions({ API_METHOD: 'websocket', PLATFORM: 'cloudflare' }),

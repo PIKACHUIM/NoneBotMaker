@@ -57,10 +57,45 @@ async function setup() {
     config: { bridge_group_batch_seconds: 0, bridge_owner_ids: 'alice', bridge_mode: 'chat', max_context: 4096, ...config },
     nonMentionReplyRate: 1,
   }) as unknown as GroupRecord;
-  return { database, DB, bindings, api, token, save, createBot, createGroup };
+  return { database, DB, bindings, api, token, save, createBot, createGroup, plugin, provider };
 }
 
 describe('management to chatbot persistent integration', () => {
+  it('resolves capability policies into model, prompt, dialog settings and extensions', async () => {
+    const { bindings, createBot, save, provider } = await setup();
+    const accountRecord = await createBot('1001');
+    await save('skills', { id: 'skill-policy', name: 'Policy skill', description: '', enabled: true, config: { prompt: 'POLICY SKILL PROMPT' } });
+    await save('prices', { name: 'Policy model price', model: 'policy-model', currency: 'USD', inputCostPerMillion: 1, outputCostPerMillion: 2, enabled: true });
+    const identity = await save('policies', {
+      type: 'identity', name: 'Identity policy', providerId: provider.id, model: 'policy-model',
+      systemPrompt: 'POLICY PROMPT', reasoningEffort: 'low', skillIds: ['skill-policy'],
+    });
+    const dialog = await save('policies', { type: 'dialog', name: 'Dialog policy', config: { agent_max_output_tokens: 2048 } });
+    await save('groups', {
+      accountId: accountRecord.id, externalId: 'room-openid, room-openid-2', name: 'Room',
+      identityPolicyId: identity.id, dialogPolicyId: dialog.id,
+      providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default',
+      config: { bridge_owner_ids: 'alice', bridge_group_batch_seconds: 0, max_context: 4096 },
+      nonMentionReplyRate: 1,
+    });
+
+    const account = await resolveQQAccountById(accountRecord.id as string, bindings);
+    const calls: Array<Record<string, unknown>> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (String(input).startsWith('https://cloudflare-dns.com/')) return Response.json({ Status: 0, Answer: [{ type: 1, data: '8.8.8.8' }] });
+      calls.push(JSON.parse(String(init?.body)));
+      return Response.json({ choices: [{ message: { content: 'policy reply' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    };
+    const handler = createStoredChatbotHandler(bindings, { ...createPersistentChatbotStores(bindings), sendReply: vi.fn(async () => undefined), fetch: fetchImpl });
+    await handler(account!, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'policy-message', accountId: account!.account.id, botId: account!.appId, groupId: 'room-openid-2', userId: 'alice', text: 'hello', mentionsBot: true, receivedAt: Date.now() });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: 'policy-model', reasoning_effort: 'low', max_completion_tokens: 2048 });
+    const system = (calls[0].messages as Array<{ role: string; content: string }>).find((entry) => entry.role === 'system');
+    expect(system?.content).toContain('POLICY PROMPT');
+    expect(system?.content).toContain('POLICY SKILL PROMPT');
+  });
+
   it('resolves two-field accounts, bills model price times API multiplier and exposes plugin details', async () => {
     const { database, bindings, createBot, createGroup } = await setup();
     const accountRecord = await createBot('1001');

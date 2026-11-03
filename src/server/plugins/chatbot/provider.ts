@@ -1,5 +1,5 @@
 import type { ProviderChatRequest, ProviderRecord, ToolCall } from '../../../shared/types';
-import { boundedText, publicHttpsUrl, safeFetch } from './network';
+import { boundedText, openAiEndpoint, publicHttpsUrl, safeFetch } from './network';
 
 export interface ProviderChatResult {
   content: string;
@@ -25,7 +25,7 @@ export async function completeOpenAICompatible(
   if (!provider.enabled || !provider.apiKey) throw new Error('Chat provider is unavailable.');
   const baseUrl = publicHttpsUrl(provider.baseUrl);
   if (baseUrl.search || baseUrl.hash) throw new Error('Chat provider URL must not contain query parameters.');
-  const response = await safeFetch(`${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+  const response = await safeFetch(openAiEndpoint(provider.baseUrl, 'chat/completions'), {
     method: 'POST',
     headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -58,11 +58,12 @@ export async function completeOpenAICompatible(
   }
   if (!content && !toolCalls.length) throw new Error('Chat provider response is empty.');
   const promptTokens = tokenCount(result.usage?.prompt_tokens, estimateTokens({ messages: request.messages, tools: request.tools }));
+  const finish = finishReason(result.choices[0].finish_reason);
   return {
     content, toolCalls, promptTokens,
     completionTokens: tokenCount(result.usage?.completion_tokens, estimateTokens({ content, toolCalls })),
     cachedPromptTokens: Math.min(promptTokens, tokenCount(result.usage?.prompt_tokens_details?.cached_tokens, 0)),
-    ...(result.choices[0].finish_reason != null ? { finishReason: finishReason(result.choices[0].finish_reason) } : {}),
+    ...(finish ? { finishReason: finish } : {}),
   };
 }
 
@@ -73,11 +74,12 @@ function parseResponse(text: string): ProviderResponse {
   return value as ProviderResponse;
 }
 
-function finishReason(value: unknown): string {
-  if (typeof value !== 'string' || !['stop', 'length', 'tool_calls', 'content_filter'].includes(value)) {
-    throw new Error('Chat provider finish reason is invalid.');
-  }
-  return value;
+// 各家网关的 finish_reason 取值不统一（空串、大写、自定义值都可能出现），
+// 它只是提示信息，不能因为取值陌生就丢掉整条回复。
+function finishReason(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && normalized.length <= 64 ? normalized : undefined;
 }
 
 async function readCompletionStream(response: Response): Promise<ProviderResponse> {

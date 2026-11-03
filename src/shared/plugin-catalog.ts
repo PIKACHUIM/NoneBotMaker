@@ -1,4 +1,4 @@
-import { CHATBOT_PLUGIN_TYPE, type JsonObject, type Language, type LocalizedText, type PluginDefinition, type PluginFieldDefinition } from './types';
+import { CHATBOT_PLUGIN_TYPE, type GroupRecord, type JsonObject, type Language, type LocalizedText, type PluginDefinition, type PluginFieldDefinition, type PolicyRecord, type PolicyScope, type PolicyType, type ReasoningEffort } from './types';
 
 const field = (
   key: string,
@@ -62,98 +62,111 @@ const chatbotDefinition: PluginDefinition = {
     boolean('agent_stream', ['流式模型响应', 'Streaming model response'], [
       '按流式协议读取模型文本、工具调用和用量。须由所选 AI API 支持；聊天平台仍按完整分段发送。',
       'Reads model text, tool calls and usage through streaming. Requires API support; the chat platform still receives complete message parts.',
-    ], { group: agentGroup, default: false }),
+    ], { group: agentGroup, default: false, scope: 'dialog' }),
     number('agent_max_rounds', ['工具调用轮数上限', 'Maximum tool rounds'], [
       '每次回复最多进行的模型与工具调用轮数，1–25。',
       'Maximum model and tool rounds for each reply, from 1 to 25.',
-    ], { group: agentGroup, default: 5, min: 1, max: 25, step: 1 }),
+    ], { group: agentGroup, default: 5, min: 1, max: 25, step: 1, scope: 'dialog' }),
     number('agent_max_output_tokens', ['单次输出 token 上限', 'Maximum output tokens'], [
       '每次模型请求允许的最大输出 token 数。',
       'Maximum output tokens allowed for each model request.',
-    ], { group: agentGroup, default: 4096, min: 1, max: 131072, step: 1 }),
+    ], { group: agentGroup, default: 4096, min: 1, max: 131072, step: 1, scope: 'dialog' }),
     number('agent_temperature', ['回复随机性', 'Temperature'], [
       '控制回复的随机性，0–2；是否支持取决于所选模型。',
       'Controls randomness from 0 to 2; support depends on the selected model.',
-    ], { group: agentGroup, default: 0.7, min: 0, max: 2, step: 0.1 }),
+    ], { group: agentGroup, default: 0.7, min: 0, max: 2, step: 0.1, scope: 'dialog' }),
     text('bridge_owner_ids', ['管理员 ID', 'Owner IDs'], [
-      '对应 BRIDGE_OWNER_IDS，逗号分隔。管理员即使不在群白名单中也会被允许。',
-      'Maps to BRIDGE_OWNER_IDS, comma-separated. Owners bypass the group allowlist.',
+      '对应 BRIDGE_OWNER_IDS，逗号分隔。管理员即使不在白名单中也会被允许。',
+      'Maps to BRIDGE_OWNER_IDS, comma-separated. Owners bypass the allowlist.',
     ], { group: bridgeGroup, default: '', multiline: false }),
     text('bridge_allowed_groups', ['允许的群', 'Allowed groups'], [
-      '对应 BRIDGE_ALLOWED_GROUPS，逗号分隔的群 openid。留空表示不额外限制。',
-      'Maps to BRIDGE_ALLOWED_GROUPS, comma-separated group openids. Empty means no extra restriction.',
+      '额外允许的群 openid 清单，逗号分隔；留空表示不额外限制。当前会话绑定的 openid 不会自动加入此列表。',
+      'Additional allowed group openids, comma-separated. Empty means no extra restriction; bound conversation IDs are not added automatically.',
     ], { group: bridgeGroup, default: '' }),
     text('bridge_allowed_private', ['允许的私聊', 'Allowed private chats'], [
-      '允许的私聊用户 openid，逗号分隔；留空表示不额外限制。',
-      'Allowed private-chat user openids, comma-separated. Empty means no extra restriction.',
+      '仅对私聊生效：允许的用户 openid，逗号分隔；留空表示不额外限制。群聊以「群 openid」绑定的会话为准。',
+      'Private chats only: allowed user openids, comma-separated. Empty means no extra restriction. Group chats are scoped by the conversation openids instead.',
     ], { group: bridgeGroup, default: '' }),
     text('bridge_mode', ['运行模式', 'Bridge mode'], [
-      'chat 正常回复；reserved 允许静默；reserved2 仅通过工具发送；closed-agent 仅响应管理员。',
-      'chat replies normally; reserved allows silence; reserved2 sends only through tools; closed-agent responds only to owners.',
+      'chat 正常回复；reserved 可按模板运行；reserved2 仅通过工具发送；closed-agent 仅响应管理员私聊。',
+      'chat replies normally; reserved can use a simulation prompt; reserved2 sends only through tools; closed-agent responds only to owner DMs.',
     ], {
       group: bridgeGroup,
       default: 'chat',
+      scope: 'identity',
       options: [
         { value: 'chat', label: { zh: 'chat / 正常回复', en: 'chat / normal' } },
-        { value: 'reserved', label: { zh: 'reserved / 允许静默', en: 'reserved / allow silence' } },
+        { value: 'reserved', label: { zh: 'reserved / 预留模式', en: 'reserved / simulated mode' } },
         { value: 'reserved2', label: { zh: 'reserved2 / 仅工具发送', en: 'reserved2 / tool send only' } },
-        { value: 'closed-agent', label: { zh: 'closed-agent / 仅 owner', en: 'closed-agent / owner only' } },
+        { value: 'closed-agent', label: { zh: 'closed-agent / 仅 owner 私聊', en: 'closed-agent / owner DMs only' } },
       ],
     }),
+    text('bridge_reserved_prompt', ['reserved 模拟提示', 'Reserved simulation prompt'], [
+      '仅在当前会话为 reserved 模式时追加到系统指令。',
+      'Added to system instructions only while this conversation uses reserved mode.',
+    ], { group: bridgeGroup, default: '', multiline: true }),
+    text('bridge_reserved2_prompt', ['reserved2 模拟提示', 'Reserved2 simulation prompt'], [
+      '仅在当前会话为 reserved2 模式时追加到系统指令。',
+      'Added to system instructions only while this conversation uses reserved2 mode.',
+    ], { group: bridgeGroup, default: '', multiline: true }),
     number('bridge_max_message_chars', ['单条消息字符上限', 'Max message chars'], [
       '对应 BRIDGE_MAX_MESSAGE_CHARS，100–4000。超长回复会分段发送。',
       'Maps to BRIDGE_MAX_MESSAGE_CHARS, 100–4000. Long replies are split into parts.',
-    ], { group: bridgeGroup, default: 500, min: 100, max: 4000, step: 1 }),
+    ], { group: bridgeGroup, default: 500, min: 100, max: 4000, step: 1, scope: 'identity' }),
     number('bridge_max_messages_per_minute', ['每分钟最多消息数', 'Messages per minute'], [
       '对应 BRIDGE_MAX_MESSAGES_PER_MINUTE，1–60。当前 Worker 按实例内存近似限流。',
       'Maps to BRIDGE_MAX_MESSAGES_PER_MINUTE, 1–60. The Worker applies an in-isolate memory-based limit.',
-    ], { group: bridgeGroup, default: 6, min: 1, max: 60, step: 1 }),
+    ], { group: bridgeGroup, default: 6, min: 1, max: 60, step: 1, scope: 'identity' }),
     number('bridge_group_batch_seconds', ['群消息合并窗口', 'Group batch window'], [
       '合并窗口内的连续会话消息，0–10 秒；0 表示关闭合并。',
       'Combines consecutive conversation messages within 0–10 seconds; 0 disables batching.',
-    ], { group: bridgeGroup, default: 1, min: 0, max: 10, step: 0.1 }),
+    ], { group: bridgeGroup, default: 1, min: 0, max: 10, step: 0.1, scope: 'identity' }),
 
     number('max_context', ['上下文 token 预算', 'Context token budget'], [
       '对应 MAX_CONTEXT，4096–2000000。当前 Worker 按约 4 字符/token 近似裁剪历史。',
       'Maps to MAX_CONTEXT, 4096–2000000. The Worker trims history using roughly 4 chars per token.',
-    ], { group: contextGroup, default: 262144, min: 4096, max: 2_000_000, step: 1 }),
+    ], { group: contextGroup, default: 262144, min: 4096, max: 2_000_000, step: 1, scope: 'identity' }),
     number('compact_rate', ['上下文压缩比例', 'Context compact rate'], [
       '对应 COMPACT_RATE，0.1–0.99。当前 Worker 使用 max_context × compact_rate 作为近似预算。',
       'Maps to COMPACT_RATE, 0.1–0.99. The Worker uses max_context × compact_rate as an approximate budget.',
-    ], { group: contextGroup, default: 0.8, min: 0.1, max: 0.99, step: 0.01 }),
+    ], { group: contextGroup, default: 0.8, min: 0.1, max: 0.99, step: 0.01, scope: 'identity' }),
     number('bridge_max_media_bytes', ['媒体大小上限', 'Max media bytes'], [
       '单个图片、音频、视频或文件附件的大小上限，1024–33554432 字节。',
       'Maximum bytes for each image, audio, video, or file attachment, from 1024 to 33554432.',
-    ], { group: contextGroup, default: 8 * 1024 * 1024, min: 1024, max: 32 * 1024 * 1024, step: 1024 }),
+    ], { group: contextGroup, default: 8 * 1024 * 1024, min: 1024, max: 32 * 1024 * 1024, step: 1024, scope: 'identity' }),
 
+    text('timezone', ['会话时区', 'Conversation time zone'], [
+      '输入 IANA 时区名称，例如 Asia/Shanghai、America/New_York；留空使用 UTC。',
+      'Enter an IANA time-zone name such as Asia/Shanghai or America/New_York; empty uses UTC.',
+    ], { group: contextGroup, default: 'UTC' }),
     number('context_history_limit', ['历史消息条数', 'History message limit'], [
       '每次模型请求保留的历史消息条数；0 表示不使用历史。',
       'Number of historical messages retained for each request; 0 disables history.',
-    ], { group: contextGroup, default: 50, min: 0, max: 500, step: 1 }),
+    ], { group: contextGroup, default: 50, min: 0, max: 500, step: 1, scope: 'identity' }),
     boolean('memory_enabled', ['启用会话记忆', 'Enable conversation memory'], [
       '为当前群聊或私聊保存可选的长期记忆。不同会话之间不共享。',
       'Stores optional long-term memory for this conversation without sharing across conversations.',
-    ], { group: contextGroup, default: false }),
+    ], { group: contextGroup, default: false, scope: 'identity' }),
     text('voice_model', ['语音合成模型', 'Speech model'], [
       '使用本会话供应商的语音合成接口；留空不开放 chat_tts。须配置对应供应商的语音能力与价格。',
       'Uses this conversation’s provider speech endpoint. Empty disables chat_tts; configure provider speech capability and pricing.',
-    ], { group: voiceGroup, default: '' }),
+    ], { group: voiceGroup, default: '', scope: 'voice' }),
     text('voice_id', ['语音音色', 'Voice'], [
       '供应商支持的音色 ID，默认 alloy；请确认所选模型支持该音色。',
       'Provider-supported voice ID, default alloy. Verify support for the selected model.',
-    ], { group: voiceGroup, default: 'alloy' }),
+    ], { group: voiceGroup, default: 'alloy', scope: 'voice' }),
     number('voice_speed', ['语音语速', 'Speech speed'], [
       '语音合成速度，0.25–4；实际支持范围以供应商接口为准。',
       'Speech speed from 0.25 to 4; actual support depends on the provider.',
-    ], { group: voiceGroup, default: 1, min: 0.25, max: 4, step: 0.05 }),
+    ], { group: voiceGroup, default: 1, min: 0.25, max: 4, step: 0.05, scope: 'voice' }),
     number('voice_max_text_chars', ['语音文本上限', 'Speech text limit'], [
       '单次语音合成的最大字符数，1–4096。',
       'Maximum characters per speech request, from 1 to 4096.',
-    ], { group: voiceGroup, default: 500, min: 1, max: 4096, step: 1 }),
+    ], { group: voiceGroup, default: 500, min: 1, max: 4096, step: 1, scope: 'voice' }),
     number('voice_max_bytes', ['语音大小上限', 'Speech size limit'], [
       '生成语音的大小上限，最多 5 MiB，符合 QQ 富媒体发送限制。',
       'Maximum generated speech size, up to 5 MiB to fit the QQ rich-media limit.',
-    ], { group: voiceGroup, default: 5 * 1024 * 1024, min: 1024, max: 5 * 1024 * 1024, step: 1024 }),
+    ], { group: voiceGroup, default: 5 * 1024 * 1024, min: 1024, max: 5 * 1024 * 1024, step: 1024, scope: 'voice' }),
   ],
   credentialFields: [
     {
@@ -247,13 +260,112 @@ export function normalizeFieldValues(fields: PluginFieldDefinition[], input: Jso
 }
 
 export function effectiveGroupConfig(pluginConfig: JsonObject | undefined, groupConfig: JsonObject | undefined, type: string = CHATBOT_PLUGIN_TYPE): JsonObject {
+  return effectivePolicyConfig(pluginConfig, {}, groupConfig, type);
+}
+
+/** Policies referenced by a single conversation; missing entries mean "not selected". */
+export interface GroupPolicyLayers {
+  dialog?: PolicyRecord;
+  voice?: PolicyRecord;
+  identity?: PolicyRecord;
+}
+
+/**
+ * Fields owned by one capability policy scope. Fields without a scope belong to the
+ * conversation record itself (allowlists, reserved prompts, time zone).
+ */
+export function scopedGroupFields(scope: PolicyScope, type: string = CHATBOT_PLUGIN_TYPE): PluginFieldDefinition[] {
   const fields = pluginDefinition(type)?.groupFields ?? [];
-  const inherited: JsonObject = {};
+  return fields.filter((field) => (field.scope ?? 'conversation') === scope);
+}
+
+export function conversationFields(type: string = CHATBOT_PLUGIN_TYPE): PluginFieldDefinition[] {
+  return scopedGroupFields('conversation', type);
+}
+
+export function policyFields(policyType: PolicyType, type: string = CHATBOT_PLUGIN_TYPE): PluginFieldDefinition[] {
+  return scopedGroupFields(policyType, type);
+}
+
+/**
+ * Effective conversation configuration.
+ * Precedence: plugin defaults < selected capability policies < per-conversation settings.
+ * Legacy records keep their stored per-conversation values only while no policy owns that scope.
+ */
+export function effectivePolicyConfig(
+  pluginConfig: JsonObject | undefined,
+  policies: GroupPolicyLayers,
+  groupConfig: JsonObject | undefined,
+  type: string = CHATBOT_PLUGIN_TYPE,
+): JsonObject {
+  const fields = pluginDefinition(type)?.groupFields ?? [];
+  const merged: JsonObject = {};
   for (const field of fields) {
-    const value = groupConfig?.[field.key] ?? pluginConfig?.[field.key];
-    if (value !== undefined) inherited[field.key] = value;
+    const value = pluginConfig?.[field.key];
+    if (value !== undefined) merged[field.key] = value;
   }
-  return normalizeFieldValues(fields, inherited);
+  for (const [scope, policy] of [['identity', policies.identity], ['dialog', policies.dialog], ['voice', policies.voice]] as const) {
+    if (!policy?.config) continue;
+    for (const field of fields) {
+      if (field.scope !== scope) continue;
+      const value = policy.config[field.key];
+      if (value !== undefined) merged[field.key] = value;
+    }
+  }
+  for (const field of fields) {
+    const value = groupConfig?.[field.key];
+    if (value === undefined) continue;
+    const scope = field.scope ?? 'conversation';
+    if (scope === 'conversation' || !policies[scope]) merged[field.key] = value;
+  }
+  return normalizeFieldValues(fields, merged);
+}
+
+function mergeIds(...lists: Array<string[] | undefined>): string[] {
+  const merged: string[] = [];
+  for (const list of lists) {
+    for (const id of list ?? []) {
+      const value = typeof id === 'string' ? id.trim() : '';
+      if (value && !merged.includes(value)) merged.push(value);
+    }
+  }
+  return merged;
+}
+
+export interface ResolvedGroupIdentity {
+  providerId: string;
+  model: string;
+  systemPrompt: string;
+  reasoningEffort: ReasoningEffort;
+  skillIds: string[];
+  mcpIds: string[];
+  ruleIds: string[];
+}
+
+/** Applies the identity policy with per-conversation overrides and additive extension ids. */
+export function resolveGroupIdentity(
+  group: Pick<GroupRecord, 'providerId' | 'model' | 'systemPrompt' | 'reasoningEffort' | 'skillIds' | 'mcpIds' | 'ruleIds' | 'systemPromptMode'>,
+  identity?: PolicyRecord,
+): ResolvedGroupIdentity {
+  const mode = group.systemPromptMode ?? 'inherit';
+  const localPrompt = typeof group.systemPrompt === 'string' ? group.systemPrompt : '';
+  const policyPrompt = typeof identity?.systemPrompt === 'string' ? identity.systemPrompt : '';
+  let systemPrompt = localPrompt;
+  if (identity) {
+    if (mode === 'append') systemPrompt = [policyPrompt, localPrompt].filter((value) => value.trim() !== '').join('\n\n');
+    else if (mode === 'override') systemPrompt = localPrompt;
+    else systemPrompt = localPrompt.trim() !== '' ? localPrompt : policyPrompt;
+  }
+  const localReasoning = group.reasoningEffort ?? 'default';
+  return {
+    providerId: group.providerId || identity?.providerId || '',
+    model: group.model || identity?.model || '',
+    systemPrompt,
+    reasoningEffort: localReasoning !== 'default' ? localReasoning : identity?.reasoningEffort ?? 'default',
+    skillIds: mergeIds(identity?.skillIds, group.skillIds),
+    mcpIds: mergeIds(identity?.mcpIds, group.mcpIds),
+    ruleIds: mergeIds(identity?.ruleIds, group.ruleIds),
+  };
 }
 
 export function missingRequiredField(fields: PluginFieldDefinition[], values: JsonObject): PluginFieldDefinition | undefined {
@@ -291,4 +403,25 @@ export function configIdSet(value: unknown): Set<string> {
   if (typeof value === 'number' && Number.isFinite(value)) return new Set([String(value)]);
   if (typeof value !== 'string') return new Set();
   return new Set(value.split(/[\s,，]+/).map((item) => item.trim()).filter(Boolean));
+}
+
+/** Splits a stored conversation openid list (comma, space or newline separated) into unique ids. */
+export function conversationIdList(value: unknown): string[] {
+  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item).trim()).filter(Boolean))];
+  if (typeof value !== 'string') return [];
+  return [...new Set(value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean))];
+}
+
+/** Canonical stored form of a conversation openid list. */
+export function conversationIdText(value: unknown): string {
+  return conversationIdList(value).join(',');
+}
+
+export function matchesConversationId(value: unknown, id: string): boolean {
+  return conversationIdList(value).includes(id);
+}
+
+/** First openid of a conversation record, used when a single id must be picked. */
+export function primaryConversationId(value: unknown): string {
+  return conversationIdList(value)[0] ?? '';
 }

@@ -30,6 +30,15 @@ describe('provider model discovery', () => {
     await expect(discoverProviderModels(provider, fetchMock as typeof fetch)).resolves.toEqual(['gpt-4o']);
   });
 
+  it('appends /v1 when the base URL has no path', async () => {
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      expect(String(input)).toBe('https://api.example.com/v1/models');
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }));
+    });
+
+    await expect(discoverProviderModels({ ...provider, baseUrl: 'https://api.example.com' }, fetchMock as typeof fetch)).resolves.toEqual(['gpt-4o']);
+  });
+
   it('allows model discovery requests up to 20 seconds', async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout');
     try {

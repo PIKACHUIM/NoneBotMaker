@@ -71,22 +71,31 @@ import type {
   ModelPriceRecord,
   PluginFieldDefinition,
   PluginRecord,
+  PolicyRecord,
+  PolicyType,
+  ProjectMemoryRecord,
+  MemoryType,
+  RoleCardRecord,
   ProviderRecord,
 } from '../shared/types';
 import {
+  conversationFields,
+  conversationIdList,
   defaultFieldValues,
   normalizeFieldValues,
   pluginDefinition,
   pluginDefinitions,
+  policyFields,
 } from '../shared/plugin-catalog';
 import { findModelPrice, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
+import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotWake } from './api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
 
-type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'integrations' | 'logs';
+type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'conversations' | 'integrations' | 'logs';
 type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'setup' } | { kind: 'admin'; page: AdminPage };
 type LibraryData = Record<LibraryKind, LibraryRecord[]>;
 type LogFilters = { q?: string; pluginId?: string; openid?: string; accountId?: string; groupId?: string; from?: string; to?: string };
@@ -96,8 +105,9 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '查看 Bot 实例、群聊与扩展能力的当前配置。' },
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
-  groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '逐群设置模型、回复策略、白名单与扩展能力。' },
-  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 OpenAI 兼容模型供应商，以及 Skills、MCP 和 Rules。' },
+  groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
+  conversations: { title: '会话运行管理', eyebrow: 'CHAT BRIDGE / 05', description: '检查实际运行状态，重置上下文并管理待审批工具和计划唤醒。' },
+  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、模型供应商与单价，以及 Skills、MCP 和 Rules。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
 
@@ -108,7 +118,7 @@ function currentRoute(): Route {
     if (path === '/login') return { kind: 'login' };
     if (path.startsWith('/admin')) {
       const page = path.split('/')[2] as AdminPage | undefined;
-      const valid: AdminPage[] = ['overview', 'plugins', 'accounts', 'groups', 'integrations', 'logs'];
+      const valid: AdminPage[] = ['overview', 'plugins', 'accounts', 'groups', 'conversations', 'integrations', 'logs'];
       return { kind: 'admin', page: valid.includes(page as AdminPage) ? page as AdminPage : 'overview' };
     }
     return { kind: 'home' };
@@ -136,6 +146,12 @@ function parseTimestamp(value?: string) {
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : undefined;
 }
+
+function policyName(policies: PolicyRecord[], type: PolicyType, id?: string): string {
+  return policies.find((item) => item.type === type && item.id === id)?.name ?? '';
+}
+
+const policyTypeNames: Record<PolicyType, string> = { dialog: '对话策略', voice: '语音策略', identity: '身份策略' };
 
 function StatusTag({ enabled }: { enabled: boolean }) {
   const { tr } = useI18n();
@@ -370,6 +386,9 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   const [providers, setProviders] = useState<ProviderRecord[]>([]);
   const [prices, setPrices] = useState<ModelPriceRecord[]>([]);
   const [libraries, setLibraries] = useState<LibraryData>({ skills: [], mcps: [], rules: [] });
+  const [policies, setPolicies] = useState<PolicyRecord[]>([]);
+  const [roleCards, setRoleCards] = useState<RoleCardRecord[]>([]);
+  const [memories, setMemories] = useState<ProjectMemoryRecord[]>([]);
   const [logs, setLogs] = useState<ConversationLog[]>([]);
   const [logsTotal, setLogsTotal] = useState(0);
   const [logsEnabled, setLogsEnabled] = useState<boolean | null>(null);
@@ -408,21 +427,33 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
             break;
           }
           case 'groups': {
-            const [groupData, accountData, pluginData, providerData, priceData, skillData, mcpData, ruleData] = await Promise.all([
+            const [groupData, accountData, pluginData, providerData, priceData, skillData, mcpData, ruleData, policyData] = await Promise.all([
               api.listGroups(), api.listAccounts(), api.listPlugins(), api.listProviders(), api.listPrices(),
-              api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'),
+              api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'), api.listPolicies(),
             ]);
             if (!active) return;
             setGroups(groupData); setAccounts(accountData); setPlugins(pluginData); setProviders(providerData); setPrices(priceData);
             setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
+            setPolicies(policyData);
+            break;
+          }
+          case 'conversations': {
+            const [groupData, accountData] = await Promise.all([api.listGroups(), api.listAccounts()]);
+            if (!active) return;
+            setGroups(groupData); setAccounts(accountData);
             break;
           }
           case 'integrations': {
-            const [providerData, priceData, skillData, mcpData, ruleData] = await Promise.all([
-              api.listProviders(), api.listPrices(), api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'),
+            const [providerData, priceData, skillData, mcpData, ruleData, policyData, accountData] = await Promise.all([
+              api.listProviders(), api.listPrices(), api.listLibraries('skills'), api.listLibraries('mcps'), api.listLibraries('rules'), api.listPolicies(), api.listAccounts(),
+            ]);
+            const [roleData, memoryData] = await Promise.all([
+              Promise.all(accountData.map((account) => api.listRoleCards(account.id))),
+              Promise.all(accountData.map((account) => api.listProjectMemories(account.id))),
             ]);
             if (!active) return;
             setProviders(providerData); setPrices(priceData); setLibraries({ skills: skillData, mcps: mcpData, rules: ruleData });
+            setPolicies(policyData); setAccounts(accountData); setRoleCards(roleData.flat()); setMemories(memoryData.flat());
             break;
           }
           case 'logs': {
@@ -459,6 +490,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
     { key: 'plugins', icon: <CodeOutlined />, label: tr('插件管理') },
     { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
     { key: 'groups', icon: <TeamOutlined />, label: tr('群聊策略') },
+    { key: 'conversations', icon: <MessageOutlined />, label: tr('会话运行管理') },
     { key: 'integrations', icon: <ApiOutlined />, label: tr('接口能力') },
     { key: 'logs', icon: <MessageOutlined />, label: tr('对话日志') },
   ];
@@ -516,8 +548,9 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
-              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} prices={prices} libraries={libraries} onRefresh={refresh} onError={handleError} />}
-              {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} onRefresh={refresh} onError={handleError} />}
+              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} prices={prices} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
+              {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} />}
+              {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={refresh} onError={handleError} />}
               {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
             </>
           )}
@@ -813,23 +846,142 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   </section>;
 }
 
-function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, onRefresh, onError }: {
-  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
+function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void }) {
+  const { tr } = useI18n();
+  const { message } = AntApp.useApp();
+  const [conversationTargets, setConversationTargets] = useState<ChatbotConversationSummary[]>([]);
+  const [selectedConversationKey, setSelectedConversationKey] = useState('');
+  const [status, setStatus] = useState<ChatbotConversationStatus | null>(null);
+  const [approvals, setApprovals] = useState<ChatbotConversationStatus['pendingApprovals']>([]);
+  const [wakes, setWakes] = useState<ChatbotWake[]>([]);
+  const [memes, setMemes] = useState<ChatbotMemeSummary[]>([]);
+  const [memeError, setMemeError] = useState('');
+  const [wakeError, setWakeError] = useState('');
+  const [mode, setMode] = useState('chat');
+  const [silent, setSilent] = useState(false);
+  const [initialPrompt, setInitialPrompt] = useState('');
+  const [disabledToolsText, setDisabledToolsText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const selectedConversation = conversationTargets.find((item) => JSON.stringify([item.id, item.externalId]) === selectedConversationKey);
+  const selectedGroup = groups.find((item) => item.id === selectedConversation?.id);
+  useEffect(() => {
+    let active = true;
+    api.listChatbotConversations().then((items) => {
+      if (!active) return;
+      setConversationTargets(items);
+      const keys = items.map((item) => JSON.stringify([item.id, item.externalId]));
+      if (items.length && !keys.includes(selectedConversationKey)) setSelectedConversationKey(keys[0]);
+      if (!items.length) setSelectedConversationKey('');
+    }).catch(onError);
+    return () => { active = false; };
+  }, [groups, selectedConversationKey, onError]);
+  const refresh = useCallback(async () => {
+    if (!selectedConversation || !selectedGroup) { setStatus(null); setApprovals([]); setWakes([]); setMemes([]); return; }
+    try {
+      const [current, pending] = await Promise.all([
+        api.getChatbotConversation(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId),
+        api.listChatbotApprovals(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId),
+      ]);
+      setStatus(current); setApprovals(pending.items); setMode(current.mode); setSilent(current.silent);
+      setDisabledToolsText(current.disabledTools.join('\n'));
+      setInitialPrompt('');
+      try {
+        const wakeResult = await api.controlChatbotConversation<{ items: ChatbotWake[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'wakeList', externalId: selectedConversation.externalId });
+        setWakes(wakeResult.items); setWakeError('');
+      } catch (reason) {
+        setWakes([]); setWakeError(formatError(reason));
+      }
+      try {
+        const memeResult = await api.controlChatbotConversation<{ items: ChatbotMemeSummary[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'memeList', externalId: selectedConversation.externalId });
+        setMemes(memeResult.items); setMemeError('');
+      } catch (reason) { setMemes([]); setMemeError(formatError(reason)); }
+    } catch (reason) { setStatus(null); onError(reason); }
+  }, [selectedGroup, selectedConversation, onError]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const runControl = async (payload: Record<string, unknown>) => {
+    if (!selectedGroup || !selectedConversation) return;
+    setBusy(true);
+    try {
+      const result = await api.controlChatbotConversation<unknown>(selectedGroup.accountId, selectedGroup.id, { ...payload, externalId: selectedConversation.externalId });
+      if (payload.action === 'approvalDecision' && result && typeof result === 'object' && Array.isArray((result as { messages?: unknown }).messages)) {
+        const output = ((result as { messages: unknown[] }).messages).filter((item): item is string => typeof item === 'string');
+        if (output.length) message.info(output.join('\n'));
+      }
+      await refresh();
+      return result;
+    } catch (reason) { onError(reason); return undefined; }
+    finally { setBusy(false); }
+  };
+  const approvalColumns: TableColumnsType<ChatbotConversationStatus['pendingApprovals'][number]> = [
+    { title: tr('审批 ID'), dataIndex: 'id', key: 'id', ellipsis: true },
+    { title: tr('工具'), dataIndex: 'tool', key: 'tool' },
+    { title: tr('请求者'), dataIndex: 'requestedBy', key: 'requestedBy' },
+    { title: tr('状态'), dataIndex: 'status', key: 'status', render: (value: string) => <Tag>{tr(value === 'pending' ? '待审批' : value)}</Tag> },
+    { title: tr('操作'), key: 'actions', render: (_, row) => row.status === 'pending' ? <Space><Popconfirm title={tr('批准后会在当前会话继续执行该工具，并产生模型/API调用。继续？')} okText={tr('批准')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'approve' })}><Button size="small" type="primary" loading={busy}>{tr('批准')}</Button></Popconfirm><Popconfirm title={tr('拒绝此工具请求？')} okText={tr('拒绝')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'reject' })}><Button size="small" danger loading={busy}>{tr('拒绝')}</Button></Popconfirm></Space> : <span className="muted">—</span> },
+  ];
+  const wakeColumns: TableColumnsType<ChatbotWake> = [
+    { title: tr('计划唤醒'), dataIndex: 'reason', key: 'reason' },
+    { title: tr('执行时间'), dataIndex: 'dueAt', key: 'dueAt', render: (value: number) => prettyDate(value) },
+    { title: tr('操作'), key: 'actions', render: (_, row) => <Popconfirm title={tr('确定取消此计划唤醒？')} okText={tr('取消唤醒')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'wakeCancel', wakeId: row.id })}><Button size="small" danger>{tr('取消唤醒')}</Button></Popconfirm> },
+  ];
+  const memeColumns: TableColumnsType<ChatbotMemeSummary> = [
+    { title: tr('素材名称'), dataIndex: 'name', key: 'name' },
+    { title: tr('图片类型'), dataIndex: 'contentType', key: 'contentType' },
+    { title: tr('大小'), dataIndex: 'size', key: 'size', render: (size: number) => `${(size / 1024).toFixed(1)} KB` },
+    { title: tr('创建者'), dataIndex: 'createdBy', key: 'createdBy' },
+    { title: tr('操作'), key: 'actions', render: (_, item) => <Popconfirm title={tr('删除这个表情素材？')} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'memeDelete', memeName: item.name })}><Button size="small" danger loading={busy}>{tr('删除')}</Button></Popconfirm> },
+  ];
+  return <section className="data-page chatbot-runtime-page">
+    <Card className="runtime-control-card" title={tr('选择会话')} extra={<Button icon={<ReloadOutlined />} onClick={() => void refresh()}>{tr('刷新状态')}</Button>}>
+      <Select className="full-width" value={selectedConversationKey || undefined} onChange={setSelectedConversationKey} placeholder={tr('选择账号和会话')} options={conversationTargets.map((item) => ({ value: JSON.stringify([item.id, item.externalId]), label: `${item.accountName} · ${item.name || item.externalId} · ${item.conversationType === 'private' ? tr('私聊') : tr('群聊')} · ${item.externalId}` }))} />
+      {status && <div className="runtime-status-grid">
+        <div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
+        <div><span>{tr('对话上下文')}</span><strong>{status.contextMessages}</strong></div><div><span>{tr('静默')}</span><strong>{status.silent ? tr('启用') : tr('停用')}</strong></div>
+        <div><span>{tr('待审批工具')}</span><strong>{approvals.filter((item) => item.status === 'pending').length}</strong></div><div><span>{tr('待继续等待')}</span><strong>{status.pendingAgentWait ? tr('是') : tr('否')}</strong></div>
+      </div>}
+    </Card>
+    {selectedGroup && status && <>
+      <Card className="runtime-control-card" title={tr('会话运行控制')}>
+        <div className="runtime-control-row"><span>{tr('运行模式')}</span><Select value={mode} onChange={setMode} options={['chat', 'reserved', 'reserved2', 'closed-agent'].map((value) => ({ value, label: value }))} /><Button type="primary" loading={busy} onClick={() => void runControl({ action: 'mode', mode })}>{tr('保存模式')}</Button></div>
+        <div className="runtime-control-row"><span>{tr('静默模式')}</span><Switch checked={silent} onChange={(value) => { setSilent(value); void runControl({ action: 'silent', silent: value }); }} checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></div>
+        <label className="runtime-prompt-field"><span>{tr('一次性提示')} · {tr('只会在下一次模型请求中消费；留空后点击保存会清除。')}</span><Input.TextArea value={initialPrompt} maxLength={4000} showCount rows={3} onChange={(event) => setInitialPrompt(event.target.value)} /></label>
+        <Space><Button loading={busy} onClick={() => void runControl({ action: 'initialPrompt', prompt: initialPrompt })}>{tr('保存一次性提示')}</Button><Button loading={busy} onClick={() => { setInitialPrompt(''); void runControl({ action: 'initialPrompt', prompt: null }); }}>{tr('清除提示')}</Button></Space>
+        <label className="runtime-prompt-field"><span>{tr('额外禁用工具')} · {tr('每行填写一个工具名；只会减少会话策略允许的工具，不能在此提升权限。')}</span><Input.TextArea value={disabledToolsText} rows={3} onChange={(event) => setDisabledToolsText(event.target.value)} /></label>
+        <Space><Button loading={busy} onClick={() => void runControl({ action: 'tools', disabledTools: disabledToolsText.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean) })}>{tr('保存工具设置')}</Button><Popconfirm title={tr('清空当前会话上下文？')} okText={tr('清空')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'reset' })}><Button danger loading={busy}>{tr('重置会话上下文')}</Button></Popconfirm></Space>
+      </Card>
+      <Card className="runtime-control-card" title={tr('待审批操作')} extra={<Text type="secondary">{tr('危险 MCP 操作仍需在目标 QQ 会话中由 owner 批准。')}</Text>}>
+        <Table<ChatbotConversationStatus['pendingApprovals'][number]> rowKey="id" columns={approvalColumns} dataSource={approvals} pagination={false} locale={{ emptyText: tr('当前没有待审批操作') }} />
+      </Card>
+      <Card className="runtime-control-card" title={tr('计划唤醒')} extra={<Button size="small" onClick={() => void refresh()}>{tr('刷新')}</Button>}>
+        {wakeError ? <Alert type="info" showIcon message={wakeError} description={tr('计划唤醒查询仅在提供持久唤醒存储的平台可用。')} /> : <Table<ChatbotWake> rowKey="id" columns={wakeColumns} dataSource={wakes} pagination={false} locale={{ emptyText: tr('当前会话没有计划唤醒') }} />}
+      </Card>
+      <Card className="runtime-control-card" title={tr('已审核表情素材')}>
+        {memeError ? <Alert type="info" showIcon message={memeError} description={tr('当前平台未配置持久素材存储。')} /> : <Table<ChatbotMemeSummary> rowKey="name" columns={memeColumns} dataSource={memes} pagination={false} locale={{ emptyText: tr('当前会话还没有已审核表情。') }} />}
+      </Card>
+    </>}
+  </section>;
+}
+
+function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, policies, onRefresh, onError }: {
+  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
   const { tr } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = groups.find((item) => item.id === drawer.editingId);
-  const providerId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) ?? editing?.providerId;
-  const provider = providers.find((item) => item.id === providerId);
   const selectedAccountId = (Form.useWatch('accountId', { form, preserve: true }) as string | undefined) ?? editing?.accountId;
-  const selectedModel = (Form.useWatch('model', { form, preserve: true }) as string | undefined) ?? editing?.model;
   const conversationType = (Form.useWatch('conversationType', { form, preserve: true }) as GroupRecord['conversationType']) ?? editing?.conversationType ?? 'group';
   const selectedAccount = accounts.find((item) => item.id === selectedAccountId);
   const selectedPlugin = plugins.find((item) => item.id === selectedAccount?.pluginId);
   const definition = pluginDefinition(selectedPlugin?.type);
-  const price = findModelPrice(prices, selectedModel ?? '');
+  const identityPolicyId = (Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.identityPolicyId;
+  const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
+  const effectiveProviderId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId || identityPolicy?.providerId || '';
+  const effectiveModel = (Form.useWatch('model', { form, preserve: true }) as string | undefined) || editing?.model || identityPolicy?.model || '';
+  const provider = providers.find((item) => item.id === effectiveProviderId);
+  const price = findModelPrice(prices, effectiveModel);
+  const promptMode = (Form.useWatch('systemPromptMode', { form, preserve: true }) as GroupRecord['systemPromptMode'] | undefined) ?? editing?.systemPromptMode ?? 'inherit';
   useEffect(() => {
     if (!drawer.open) return;
     const currentPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === editing?.accountId)?.pluginId);
@@ -839,14 +991,18 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, o
       externalId: editing?.externalId ?? '',
       conversationType: editing?.conversationType ?? 'group',
       name: editing?.name ?? '', enabled: editing?.enabled ?? true,
-      providerId: editing?.providerId, model: editing?.model ?? undefined,
+      dialogPolicyId: editing?.dialogPolicyId || undefined,
+      voicePolicyId: editing?.voicePolicyId || undefined,
+      identityPolicyId: editing?.identityPolicyId || undefined,
+      providerId: editing?.providerId || undefined, model: editing?.model || undefined,
+      systemPromptMode: editing?.systemPromptMode ?? 'inherit',
       systemPrompt: editing?.systemPrompt ?? '', reasoningEffort: editing?.reasoningEffort ?? 'default',
       nonMentionReplyRate: editing?.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE,
       whitelistEnabled: editing?.whitelistEnabled ?? false,
       whitelistText: editing?.whitelistUserIds.join('\n') ?? '',
       dailyCostLimit: editing?.dailyCostLimit ?? 0, monthlyCostLimit: editing?.monthlyCostLimit ?? 0, totalCostLimit: editing?.totalCostLimit ?? 0,
       skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
-      config: editableFieldValues(pluginDefinition(currentPlugin?.type)?.groupFields ?? [], editing?.config),
+      config: editableFieldValues(conversationFields(pluginDefinition(currentPlugin?.type)?.type), editing?.config),
     });
   }, [drawer.open, editing, form, plugins, accounts]);
   const save = async (values: Record<string, unknown>) => {
@@ -856,8 +1012,10 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, o
       await api.saveGroup({
         accountId: String(values.accountId), externalId: String(values.externalId), name: String(values.name ?? ''),
         conversationType: values.conversationType as GroupRecord['conversationType'],
-        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(definition?.groupFields ?? [], values.config as JsonObject) },
+        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(conversationFields(definition?.type), values.config as JsonObject) },
+        dialogPolicyId: String(values.dialogPolicyId ?? ''), voicePolicyId: String(values.voicePolicyId ?? ''), identityPolicyId: String(values.identityPolicyId ?? ''),
         enabled: Boolean(values.enabled), providerId: String(values.providerId ?? ''), model: String(values.model ?? ''),
+        systemPromptMode: (values.systemPromptMode as GroupRecord['systemPromptMode']) ?? 'inherit',
         systemPrompt: String(values.systemPrompt ?? ''), reasoningEffort: values.reasoningEffort as GroupRecord['reasoningEffort'],
         nonMentionReplyRate: Number(values.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE),
         whitelistEnabled: Boolean(values.whitelistEnabled), whitelistUserIds: userIds,
@@ -869,16 +1027,32 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, o
     finally { setSaving(false); }
   };
   const columns: TableColumnsType<GroupRecord> = [
-    { title: tr('群聊'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><TeamOutlined /></span><span><strong>{name || row.externalId}</strong><small>{row.externalId} / {row.id}</small></span></div> },
+    { title: tr('群聊'), dataIndex: 'name', key: 'name', render: (name: string, row) => {
+      const ids = conversationIdList(row.externalId);
+      return <div className="table-identity"><span className="identity-icon"><TeamOutlined /></span><span><strong>{name || ids[0] || row.id}</strong><small>{ids[0] ?? ''}{ids.length > 1 ? ` +${ids.length - 1}` : ''} / {row.id}</small></span></div>;
+    } },
     { title: tr('会话类型'), dataIndex: 'conversationType', key: 'conversationType', render: (value: string) => <Tag>{value === 'private' ? tr('私聊') : tr('群聊')}</Tag> },
     { title: tr('账号'), dataIndex: 'accountId', key: 'accountId', render: (id: string) => accounts.find((item) => item.id === id)?.name ?? id },
-    { title: tr('模型'), dataIndex: 'model', key: 'model', render: (model: string, row) => <span className="model-cell">{model || tr('未配置')}<small>{providers.find((item) => item.id === row.providerId)?.name ?? ''}</small></span> },
+    { title: tr('模型'), dataIndex: 'model', key: 'model', render: (model: string, row) => {
+      const identity = policies.find((item) => item.type === 'identity' && item.id === row.identityPolicyId);
+      const resolved = model || identity?.model || '';
+      return <span className="model-cell">{resolved || tr('未配置')}<small>{providers.find((item) => item.id === (row.providerId || identity?.providerId))?.name ?? ''}</small></span>;
+    } },
+    { title: tr('策略'), key: 'policies', render: (_, row) => {
+      const names = [
+        policyName(policies, 'identity', row.identityPolicyId),
+        policyName(policies, 'dialog', row.dialogPolicyId),
+        policyName(policies, 'voice', row.voicePolicyId),
+      ].filter(Boolean);
+      return names.length ? <div className="model-tags">{names.map((name) => <Tag key={name}>{name}</Tag>)}</div> : <span className="muted">{tr('未选择')}</span>;
+    } },
     { title: tr('非 @ 回复率'), dataIndex: 'nonMentionReplyRate', key: 'nonMentionReplyRate', render: (value: number) => <span className="table-mono">{((value ?? DEFAULT_NON_MENTION_REPLY_RATE) * 100).toFixed(0)}%</span> },
     { title: tr('白名单'), dataIndex: 'whitelistEnabled', key: 'whitelistEnabled', render: (enabled: boolean, row) => <span>{enabled ? `${tr('启用')} / ${row.whitelistUserIds.length}` : tr('未启用')}</span> },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name || row.externalId}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveGroup({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name || row.externalId}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteGroup(row.id).then(onRefresh).catch(onError)}><Button aria-label={tr('删除')} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   const choices = (kind: LibraryKind) => libraries[kind].map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id }));
+  const policyOptions = (type: PolicyType) => policies.filter((item) => item.type === type).map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id }));
   return <section className="data-page"><PageToolbar count={groups.length} noun="GROUP POLICIES" action={tr('新增群聊策略')} onCreate={() => drawer.edit()} />
     {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有群聊策略')} description={tr('新增群聊并为其绑定 AI 模型、回复策略和工具。')} onCreate={() => drawer.edit()} action={tr('新增群聊策略')} />}
     <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? tr('编辑群聊策略') : tr('新增群聊策略')} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
@@ -889,24 +1063,33 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, o
             form.setFieldValue('config', editableFieldValues(pluginDefinition(nextPlugin?.type)?.groupFields ?? [], accountId === editing?.accountId ? editing.config : {}));
           }} /></Form.Item>
           <Form.Item name="conversationType" label={tr('会话类型')} extra={tr('群聊绑定群 openid；私聊绑定用户 openid。')}><Select disabled={Boolean(editing)} options={[{ value: 'group', label: tr('群聊') }, { value: 'private', label: tr('私聊') }]} /></Form.Item>
-          <Form.Item name="externalId" label={conversationType === 'private' ? tr('用户 openid') : tr('群 openid')} rules={[{ required: true, message: tr('请输入会话 openid') }]}><Input disabled={Boolean(editing)} placeholder="openid" /></Form.Item>
         </div>
-        {editing && <p className="form-note">{tr('已创建会话的账号、类型和 openid 不可变更；需要重新绑定时请新建策略。')}</p>}
+        <Form.Item name="externalId" label={conversationType === 'private' ? tr('用户 openid') : tr('群 openid')} extra={tr('可填多个，用换行或逗号分隔；每个会话的历史、记忆与语音状态仍分别保存。')} rules={[{ required: true, message: tr('请输入会话 openid') }]}><Input.TextArea rows={2} placeholder={conversationType === 'private' ? 'user-openid-1, user-openid-2' : 'group-openid-1, group-openid-2'} /></Form.Item>
+        {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 openid 可随时增减。')}</p>}
         <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
-        <div className="form-section-heading"><span>AI MODEL</span><small>PER-GROUP ROUTING</small></div>
+        <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="providerId" label={tr('模型供应商')} rules={[{ required: true, message: tr('请选择模型供应商') }]}><Select placeholder={tr('选择供应商')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-          <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
+          <Form.Item name="identityPolicyId" label={tr('身份策略')} extra={tr('提供模型、提示词、Skills/MCP/Rules 与会话上下文默认值。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
+          <Form.Item name="dialogPolicyId" label={tr('对话策略')} extra={tr('提供流式响应、工具轮数、输出上限与回复随机性。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
+          <Form.Item name="voicePolicyId" label={tr('语音策略')} extra={tr('提供语音合成模型、音色与语音大小限制。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
         </div>
-        <Form.Item name="systemPrompt" label={tr('系统提示词')}><Input.TextArea rows={5} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
+        <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
+        <div className="form-section-heading"><span>MODEL OVERRIDE</span><small>OPTIONAL</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
+          <Form.Item name="providerId" label={tr('模型供应商覆盖')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+          <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
+        </div>
+        <Form.Item name="reasoningEffort" label={tr('思考强度覆盖')} extra={tr('默认继承身份策略；模型默认表示不发送该参数。')}><Select options={[{ label: tr('继承身份策略'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
+        <div className="form-section-heading"><span>PROMPT OVERRIDE</span><small>INHERIT / APPEND / REPLACE</small></div>
+        <div className="form-grid two-cols">
+          <Form.Item name="systemPromptMode" label={tr('提示词处理方式')} extra={promptMode === 'append' ? tr('身份策略提示词在前，本会话提示词在后。') : promptMode === 'override' ? tr('仅使用本会话提示词。') : tr('未选择身份策略时使用本会话提示词。')}><Select options={[{ value: 'inherit', label: tr('继承') }, { value: 'append', label: tr('附加') }, { value: 'override', label: tr('覆盖') }]} /></Form.Item>
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
         </div>
+        <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>{tr('模型成本估算')}</span><small>USD / {price?.unit === 'characters' ? tr('百万字符') : tr('百万 token')}</small></div>
         <Alert className="price-estimate" type={price ? 'info' : 'warning'} showIcon message={price ? `${tr('输入成本')} $${(price.inputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)} / ${tr('输出成本')} $${(price.outputCostPerMillion * (provider?.priceMultiplier ?? 1)).toFixed(4)}` : tr('当前模型尚未登记单价，成本估算不可用。')} description={<div className="price-source">{price && <>{tr('计价来源')}：{price.name} · {price.model}<br />{tr('基础单价')}：${price.inputCostPerMillion} / ${price.outputCostPerMillion} · {tr('API 计价倍率')} × {provider?.priceMultiplier ?? 1}<br />{price.cacheInputCostPerMillion !== undefined && <>{tr('缓存输入单价')}：${price.cacheInputCostPerMillion * (provider?.priceMultiplier ?? 1)}<br /></>}{price.sourceUrl && <>{tr('来源地址')}：{price.sourceUrl}<br /></>}</>}{tr('估算使用模型单价 × API 倍率，并按所选计价单位的实际用量计算；不等于供应商账单。')} <Button type="link" href="#/admin/integrations">{tr('管理模型单价')}</Button></div>} />
-        {selectedAccountId && (definition?.groupFields.length ? <SchemaFields fields={definition.groupFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
+        {selectedAccountId && (conversationFields(definition?.type).length ? <SchemaFields fields={conversationFields(definition?.type)} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
@@ -917,24 +1100,213 @@ function GroupsPage({ groups, plugins, accounts, providers, prices, libraries, o
         <div className="form-section-heading"><span>ACCESS CONTROL</span><small>OPTIONAL WHITELIST</small></div>
         <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('使用空格或逗号分隔。白名单关闭时此列表不会生效。')}><Input.TextArea rows={3} placeholder="user-id-1, user-id-2" /></Form.Item>
-        <div className="form-section-heading"><span>EXTENSIONS</span><small>SKILLS / MCP / RULES</small></div>
-        <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
-        <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
-        <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
+        <div className="form-section-heading"><span>EXTENSIONS</span><small>ADDED ON TOP OF THE IDENTITY POLICY</small></div>
+        <Form.Item name="skillIds" label="Skills" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
+        <Form.Item name="mcpIds" label="MCP" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
+        <Form.Item name="ruleIds" label="Rules" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
         <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
     </Drawer>
   </section>;
 }
 
-function IntegrationsPage({ providers, prices, libraries, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void }) {
+function RoleCardsPanel({ data, accounts, onRefresh, onError }: { data: RoleCardRecord[]; accounts: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr, language } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const editing = data.find((item) => item.id === drawer.editingId);
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({ accountId: editing?.accountId ?? accounts[0]?.id, name: editing?.name ?? '', description: editing?.description ?? '', mode: editing?.mode ?? 'all', content: editing?.content ?? '' });
+  }, [drawer.open, editing, accounts, form]);
+  const save = async (values: { accountId: string; name: string; description?: string; mode?: string; content: string }) => {
+    setSaving(true);
+    try {
+      await api.saveRoleCard({ accountId: values.accountId, name: values.name, description: values.description ?? '', mode: values.mode || undefined, content: values.content }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const columns: TableColumnsType<RoleCardRecord> = [
+    { title: tr('角色卡'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><BookOutlined /></span><span><strong>{name}</strong><small>{accounts.find((account) => account.id === row.accountId)?.name ?? row.accountId}</small></span></div> },
+    { title: tr('说明'), dataIndex: 'description', key: 'description', render: (value?: string) => value || '—' },
+    { title: tr('适用模式'), dataIndex: 'mode', key: 'mode', render: (value?: string) => value || 'all' },
+    { title: tr('内容长度'), dataIndex: 'content', key: 'content', render: (value: string) => value.length },
+    { title: tr('更新时间'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
+    { title: '', key: 'actions', render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} aria-label={`${tr('编辑')} ${row.name}`} onClick={() => drawer.edit(row.id)} /><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void api.deleteRoleCard(row.accountId, row.id).then(onRefresh).catch(onError)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  return <div className="tab-panel"><PageToolbar count={data.length} noun="ROLE CARDS" action={tr('新增角色卡')} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<RoleCardRecord> rowKey="id" dataSource={data} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" /> : <EmptyTable title={tr('还没有角色卡')} description={tr('建立可复用的会话角色卡，按适用模式注入到 Agent 提示词。')} onCreate={() => drawer.edit()} action={tr('新增角色卡')} />}
+    <Drawer title={<DrawerTitle label="CHAT ROLES" title={editing ? tr('编辑角色卡') : tr('新增角色卡')} />} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('返回')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="accountId" label={tr('所属账号')} rules={[{ required: true, message: tr('请选择账号') }]}><Select disabled={Boolean(editing)} options={accounts.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input maxLength={64} /></Form.Item>
+        <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
+        <Form.Item name="mode" label={tr('适用模式')}><Select options={[{ value: 'all', label: tr('所有模式') }, ...['chat', 'reserved', 'reserved2', 'closed-agent'].map((mode) => ({ value: mode, label: mode }))]} /></Form.Item>
+        <Form.Item name="content" label={tr('角色提示词')} rules={[{ required: true, message: tr('请输入角色内容') }]}><Input.TextArea rows={10} showCount maxLength={24000} /></Form.Item>
+        <p className="form-note">{tr('可在内容中使用 [chat]、[reserved]、[reserved2]、[closed-agent] 标记模式专属段落。')}</p>
+      </Form>
+    </Drawer>
+  </div>;
+}
+
+function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: ProjectMemoryRecord[]; accounts: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { tr, language } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState('');
+  const editing = data.find((item) => item.id === drawer.editingId);
+  const visible = data.filter((item) => !query || `${item.name} ${item.title} ${item.desc} ${item.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({ accountId: editing?.accountId ?? accounts[0]?.id, type: editing?.type ?? 'project', name: editing?.name ?? '', title: editing?.title ?? '', desc: editing?.desc ?? '', content: editing?.content ?? '', time: editing?.time ?? new Date().toISOString() });
+  }, [drawer.open, editing, accounts, form]);
+  const save = async (values: { accountId: string; type: MemoryType; name: string; title: string; desc?: string; content: string; time: string }) => {
+    setSaving(true);
+    try {
+      await api.saveProjectMemory({ accountId: values.accountId, type: values.type, name: values.name, title: values.title, desc: values.desc ?? '', content: values.content, time: values.time }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const columns: TableColumnsType<ProjectMemoryRecord> = [
+    { title: tr('项目记忆'), dataIndex: 'title', key: 'title', render: (title: string, row) => <div className="table-identity"><span className="identity-icon"><DatabaseOutlined /></span><span><strong>{title}</strong><small>{accounts.find((account) => account.id === row.accountId)?.name ?? row.accountId} · {row.name}</small></span></div> },
+    { title: tr('类型'), dataIndex: 'type', key: 'type', render: (value: MemoryType) => tr(({ user: '用户偏好', feedback: '反馈', project: '项目', reference: '参考资料' } as Record<MemoryType, string>)[value]) },
+    { title: tr('说明'), dataIndex: 'desc', key: 'desc', ellipsis: true },
+    { title: tr('更新时间'), dataIndex: 'time', key: 'time', render: (value: string) => prettyDate(value, language) },
+    { title: '', key: 'actions', render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} aria-label={`${tr('编辑')} ${row.name}`} onClick={() => drawer.edit(row.id)} /><Popconfirm title={`${tr('删除')}“${row.title}”？`} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void api.deleteProjectMemory(row.accountId, row.id).then(onRefresh).catch(onError)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  return <div className="tab-panel"><PageToolbar count={visible.length} noun="PROJECT MEMORIES" action={tr('新增记忆')} onCreate={() => drawer.edit()} />
+    <Input allowClear value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr('搜索记忆名称、标题或正文')} aria-label={tr('搜索记忆')} className="memory-search" />
+    {visible.length ? <Table<ProjectMemoryRecord> rowKey="id" dataSource={visible} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" /> : <EmptyTable title={tr('还没有项目记忆')} description={tr('按账号存储可由所选会话检索的共享记忆。')} onCreate={() => drawer.edit()} action={tr('新增记忆')} />}
+    <Drawer title={<DrawerTitle label="PROJECT MEMORY" title={editing ? tr('编辑记忆') : tr('新增记忆')} />} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('返回')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="accountId" label={tr('所属账号')} rules={[{ required: true, message: tr('请选择账号') }]}><Select disabled={Boolean(editing)} options={accounts.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name="type" label={tr('类型')} rules={[{ required: true }]}><Select options={[{ value: 'user', label: tr('用户偏好') }, { value: 'feedback', label: tr('反馈') }, { value: 'project', label: tr('项目') }, { value: 'reference', label: tr('参考资料') }]} /></Form.Item>
+        <Form.Item name="name" label={tr('记忆名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input maxLength={64} /></Form.Item>
+        <Form.Item name="title" label={tr('标题')} rules={[{ required: true, message: tr('请输入标题') }]}><Input maxLength={120} /></Form.Item>
+        <Form.Item name="desc" label={tr('说明')}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
+        <Form.Item name="content" label={tr('记忆内容')} rules={[{ required: true, message: tr('请输入内容') }]}><Input.TextArea rows={8} showCount maxLength={20000} /></Form.Item>
+        <Form.Item name="time" label={tr('记录时间')} rules={[{ required: true }]}><Input /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
+}
+
+function IntegrationsPage({ providers, prices, libraries, policies, accounts, roleCards, memories, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; accounts: BotAccountRecord[]; roleCards: RoleCardRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
+  const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
+    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity')}</Tag></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'voice', label: <span><MessageOutlined /> {tr('语音策略')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'role-cards', label: <span><BookOutlined /> {tr('角色卡')} <Tag>{roleCards.length}</Tag></span>, children: <RoleCardsPanel data={roleCards} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'memories', label: <span><DatabaseOutlined /> {tr('项目记忆')} <Tag>{memories.length}</Tag></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
     { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
+}
+
+function policySummary(type: PolicyType, policy: PolicyRecord, providers: ProviderRecord[]): string {
+  const config = policy.config ?? {};
+  const value = (key: string, fallback: string) => (typeof config[key] === 'string' ? config[key] as string : fallback);
+  const count = (key: string, fallback: number) => (typeof config[key] === 'number' ? config[key] as number : fallback);
+  if (type === 'dialog') {
+    return [config.agent_stream === true ? 'stream' : 'buffered', `${count('agent_max_rounds', 5)} rounds`, `${count('agent_max_output_tokens', 4096)} tok`, `T ${count('agent_temperature', 0.7)}`].join(' · ');
+  }
+  if (type === 'voice') {
+    return [value('voice_model', '—'), value('voice_id', 'alloy'), `${count('voice_speed', 1)}x`, `${count('voice_max_text_chars', 500)} chars`].join(' · ');
+  }
+  const provider = providers.find((item) => item.id === policy.providerId);
+  return [policy.model || '—', provider?.name ?? '', policy.reasoningEffort && policy.reasoningEffort !== 'default' ? policy.reasoningEffort : 'model default',
+    `Skills ${policy.skillIds?.length ?? 0} / MCP ${policy.mcpIds?.length ?? 0} / Rules ${policy.ruleIds?.length ?? 0}`].filter(Boolean).join(' · ');
+}
+
+function PolicyPanel({ type, data, providers, libraries, onRefresh, onError }: {
+  type: PolicyType; data: PolicyRecord[]; providers: ProviderRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
+}) {
+  const { language, tr } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const fields = useMemo(() => policyFields(type), [type]);
+  const rows = data.filter((item) => item.type === type);
+  const editing = rows.find((item) => item.id === drawer.editingId);
+  const isIdentity = type === 'identity';
+  const providerId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId;
+  const provider = providers.find((item) => item.id === providerId);
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      name: editing?.name ?? '',
+      description: editing?.description ?? '',
+      enabled: editing?.enabled ?? true,
+      providerId: editing?.providerId || undefined,
+      model: editing?.model || undefined,
+      reasoningEffort: editing?.reasoningEffort ?? 'default',
+      systemPrompt: editing?.systemPrompt ?? '',
+      skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
+      config: editableFieldValues(fields, editing?.config),
+    });
+  }, [drawer.open, editing, form, fields]);
+  const save = async (values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      await api.savePolicy({
+        type,
+        name: String(values.name ?? ''),
+        description: String(values.description ?? ''),
+        enabled: Boolean(values.enabled),
+        config: { ...(editing?.config ?? {}), ...normalizeFieldValues(fields, values.config as JsonObject) },
+        ...(isIdentity ? {
+          providerId: String(values.providerId ?? ''),
+          model: String(values.model ?? ''),
+          systemPrompt: String(values.systemPrompt ?? ''),
+          reasoningEffort: values.reasoningEffort as PolicyRecord['reasoningEffort'],
+          skillIds: values.skillIds as string[] ?? [], mcpIds: values.mcpIds as string[] ?? [], ruleIds: values.ruleIds as string[] ?? [],
+        } : {}),
+      }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const choices = (kind: LibraryKind) => libraries[kind].map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id }));
+  const columns: TableColumnsType<PolicyRecord> = [
+    { title: tr('名称'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><ThunderboltOutlined /></span><span><strong>{name}</strong><small>{row.description || row.id}</small></span></div> },
+    { title: tr('概要'), key: 'summary', render: (_, row) => <span className="table-mono">{policySummary(type, row, providers)}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.savePolicy({ type: row.type, name: row.name, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除策略')}“${row.name}”？`} description={tr('仍被群聊引用的策略无法删除。')} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePolicy(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  return <div className="tab-panel"><PageToolbar count={rows.length} noun="CAPABILITY POLICIES" action={tr('新增策略')} onCreate={() => drawer.edit()} />
+    {rows.length ? <Table<PolicyRecord> rowKey="id" columns={columns} dataSource={rows} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 820 }} className="data-table" /> : <EmptyTable title={tr('还没有策略')} description={`${tr('创建可复用的')}${tr(policyTypeNames[type])}${tr('，再在群聊策略中引用。')}`} onCreate={() => drawer.edit()} action={tr('创建策略')} />}
+    <Drawer title={<DrawerTitle label="CAPABILITY POLICY" title={`${editing ? tr('编辑策略') : tr('新增策略')} · ${tr(policyTypeNames[type])}`} />} width={620} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="name" label={tr('策略名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input placeholder={tr('例如：群聊默认身份')} /></Form.Item>
+        <Form.Item name="description" label={tr('策略说明')}><Input.TextArea rows={2} placeholder={tr('说明该策略的适用范围')} /></Form.Item>
+        {isIdentity && <>
+          <div className="form-grid two-cols">
+            <Form.Item name="providerId" label={tr('模型供应商')}><Select allowClear placeholder={tr('沿用插件默认')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+            <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
+          </div>
+          <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
+          <Form.Item name="systemPrompt" label={tr('系统提示词')}><Input.TextArea rows={5} placeholder={tr('描述 AI 的角色、边界与回复风格')} /></Form.Item>
+          <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
+          <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
+          <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
+        </>}
+        <SchemaFields fields={fields} path="config" editing={Boolean(editing)} />
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
 }
 
 function ProvidersPanel({ data, onRefresh, onError }: { data: ProviderRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {

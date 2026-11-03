@@ -29,8 +29,15 @@ describe('OpenAI compatible JSON responses', () => {
     await expect(completeOpenAICompatible(provider, request, fetchImpl)).resolves.toEqual({ content: 'hello back', toolCalls: [], promptTokens: 100, completionTokens: 3, cachedPromptTokens: 40 });
     const init = fetchImpl.mock.calls.find(([input]) => !String(input).includes('dns-query'))![1]!;
     expect(JSON.parse(String(init.body))).toEqual({ model: request.model, messages: request.messages });
-    expect(init).toMatchObject({ redirect: 'error', headers: { authorization: 'Bearer test-secret' } });
+    expect(init).toMatchObject({ redirect: 'manual', headers: { authorization: 'Bearer test-secret' } });
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('appends /v1 when the provider base URL has no path', async () => {
+    const fetchImpl = mockFetch(json({ choices: [{ message: { content: 'ok' } }] }));
+    await completeOpenAICompatible({ ...provider, baseUrl: 'https://api.vendor.example' }, request, fetchImpl);
+    const [input] = fetchImpl.mock.calls.find(([input]) => !String(input).includes('dns-query'))!;
+    expect(String(input)).toBe('https://api.vendor.example/v1/chat/completions');
   });
 
   it('supports JSON fallback when streaming was requested and estimates missing usage', async () => {

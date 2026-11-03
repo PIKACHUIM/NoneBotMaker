@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { JsonObject, ProviderRecord, RuntimeBindings } from '../../shared/types';
 import { decryptSecrets } from '../storage/secrets';
 import { createRepository, StorageUnavailableError } from '../storage/repository';
+import { openAiEndpoint } from '../plugins/chatbot/network';
 import { ApiError } from './management';
 
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -31,9 +32,7 @@ function modelEndpoint(baseUrl: string): URL {
     throw new ApiError(400, 'invalid_provider_url');
   }
 
-  const pathname = url.pathname.replace(/\/+$/, '');
-  url.pathname = pathname.toLowerCase().endsWith('/models') ? pathname : `${pathname}/models`;
-  return url;
+  return new URL(openAiEndpoint(url.toString(), 'models'));
 }
 
 async function readLimitedBody(response: Response): Promise<string> {

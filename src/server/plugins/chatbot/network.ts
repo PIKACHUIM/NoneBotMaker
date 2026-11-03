@@ -1,5 +1,20 @@
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
+/**
+ * OpenAI兼容服务通常要求 /v1 前缀。只填主机（或误填完整接口地址）时自动补全，
+ * 已带版本段或自定义路径的保持原样，避免把 /api/v1 之类写成 /api/v1/v1。
+ */
+export function openAiEndpoint(baseUrl: string, endpoint: string): string {
+  const url = new URL(baseUrl);
+  const suffix = `/${endpoint.replace(/^\/+/, '')}`;
+  let pathname = url.pathname.replace(/\/+$/, '');
+  if (pathname.toLowerCase().endsWith(suffix.toLowerCase())) pathname = pathname.slice(0, -suffix.length);
+  pathname = pathname.replace(/\/chat\/completions$/i, '');
+  if (!pathname) pathname = '/v1';
+  url.pathname = `${pathname}${suffix}`;
+  return url.toString();
+}
+
 export function publicHttpsUrl(value: string): URL {
   const url = new URL(value);
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
@@ -27,7 +42,7 @@ async function verifyPublicDns(url: URL, fetchImpl: typeof fetch): Promise<void>
   // 边缘运行时缺少通用 DNS API，先拒绝解析结果中的非公网地址。
   const answers = await Promise.all(['A', 'AAAA'].map(async (type) => {
     const response = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(url.hostname)}&type=${type}`, {
-      headers: { accept: 'application/dns-json' }, redirect: 'error', signal: AbortSignal.timeout(5_000),
+      headers: { accept: 'application/dns-json' }, redirect: 'manual', signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) throw new Error('Public DNS verification failed.');
     const result = JSON.parse(await boundedText(response, 64 * 1024)) as { Status?: number; Answer?: Array<{ type: number; data: string }> };
@@ -72,7 +87,8 @@ export async function boundedText(response: Response, limit = MAX_RESPONSE_BYTES
 export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl: typeof fetch = fetch): Promise<Response> {
   const url = publicHttpsUrl(value);
   await verifyPublicDns(url, fetchImpl);
-  const response = await fetchImpl(url.toString(), { ...init, redirect: 'error', signal: AbortSignal.timeout(20_000) });
+  // Workers边缘不支持redirect:'error'，只支持follow/manual；3xx手动判定为失败。
+  const response = await fetchImpl(url.toString(), { ...init, redirect: 'manual', signal: AbortSignal.timeout(20_000) });
   if (response.redirected || response.status >= 300 && response.status < 400) throw new Error('Redirects are not allowed.');
   if (!response.ok) throw new Error(`Remote request failed (${response.status}).`);
   return response;

@@ -2,8 +2,14 @@ export const CHATBOT_PLUGIN_TYPE = 'elysia-best/plugin-chatbot' as const;
 export const DEFAULT_NON_MENTION_REPLY_RATE = 0.05;
 export const LOG_RETENTION_DAYS = 30;
 
-export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules';
+export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'role_cards' | 'memories' | 'policies';
 export type JsonObject = Record<string, unknown>;
+
+/** Reusable capability policies that conversations can reference instead of duplicating fields. */
+export type PolicyType = 'dialog' | 'voice' | 'identity';
+export type PolicyScope = PolicyType | 'conversation';
+export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high';
+export type SystemPromptMode = 'inherit' | 'append' | 'override';
 
 export type Language = 'zh' | 'en';
 export interface LocalizedText {
@@ -20,6 +26,8 @@ export interface PluginFieldDefinition {
   description: LocalizedText;
   placeholder?: LocalizedText;
   group?: LocalizedText;
+  /** Which capability policy owns this field; omitted means the conversation record owns it. */
+  scope?: PolicyType;
   options?: Array<{ value: string; label: LocalizedText }>;
   required?: boolean;
   secret?: boolean;
@@ -80,10 +88,18 @@ export interface GroupRecord {
   config?: JsonObject;
   name: string;
   enabled: boolean;
+  /** Capability policies referenced by this conversation; empty means "not selected". */
+  dialogPolicyId?: string;
+  voicePolicyId?: string;
+  identityPolicyId?: string;
+  /** How the conversation prompt combines with the identity policy prompt. */
+  systemPromptMode?: SystemPromptMode;
+  /** Empty means "inherit from the identity policy". */
   providerId: string;
+  /** Empty means "inherit from the identity policy". */
   model: string;
   systemPrompt: string;
-  reasoningEffort: 'default' | 'low' | 'medium' | 'high';
+  reasoningEffort: ReasoningEffort;
   nonMentionReplyRate: number;
   whitelistEnabled: boolean;
   whitelistUserIds: string[];
@@ -93,9 +109,29 @@ export interface GroupRecord {
   dailyCostLimit: number;
   monthlyCostLimit: number;
   totalCostLimit: number;
+  /** Additional ids on top of the identity policy. */
   skillIds: string[];
   mcpIds: string[];
   ruleIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PolicyRecord {
+  id: string;
+  type: PolicyType;
+  name: string;
+  description: string;
+  enabled: boolean;
+  /** Identity policies only: default provider and model for attached conversations. */
+  providerId?: string;
+  model?: string;
+  systemPrompt?: string;
+  reasoningEffort?: ReasoningEffort;
+  skillIds?: string[];
+  mcpIds?: string[];
+  ruleIds?: string[];
+  config: JsonObject;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +175,39 @@ export interface LibraryRecord {
 }
 
 export type LibraryKind = 'skills' | 'mcps' | 'rules';
+
+export interface RoleCardSection {
+  heading: string;
+  mode: string;
+}
+
+export interface RoleCardRecord {
+  id: string;
+  accountId: string;
+  name: string;
+  description?: string;
+  content: string;
+  mode?: string;
+  sections?: RoleCardSection[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+
+export interface ProjectMemoryRecord {
+  id: string;
+  accountId: string;
+  type: MemoryType;
+  name: string;
+  title: string;
+  desc: string;
+  content: string;
+  time: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ConversationDirection = 'in' | 'out';
 
 export interface ConversationLog {

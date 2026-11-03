@@ -14,8 +14,9 @@ import { registerLogRoutes } from './logs';
 import { registerProviderModelRoutes } from './provider-models';
 import { registerLogCleanupRoute } from './log-cleanup';
 import { registerSetupRoutes } from './setup';
+import { registerChatbotRuntimeRoutes } from './chatbot-runtime';
 
-const MANAGED_PATH = /(?:^|\/)(plugins|accounts|groups|providers|prices|skills|mcps|rules|logs)(?:\/|$)/;
+const MANAGED_PATH = /(?:^|\/)(plugins|accounts|groups|providers|prices|skills|mcps|rules|role_cards|memories|policies|chatbot|logs)(?:\/|$)/;
 const AUTH_PATH = /^\/(?:api\/)?auth(?:\/|$)/;
 const QQ_WEBHOOK_PATH = /(?:^|\/)webhook\/qq\/?$/;
 const LOG_CLEANUP_PATH = /(?:^|\/)internal\/logs\/purge\/?$/;
@@ -97,6 +98,7 @@ export function createApiRouter() {
   registerLogRoutes(api);
   registerLogCleanupRoute(api);
   registerProviderModelRoutes(api);
+  registerChatbotRuntimeRoutes(api);
   registerManagementRoutes(api);
   return api;
 }

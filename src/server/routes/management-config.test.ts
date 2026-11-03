@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import type { JsonObject, KVNamespaceLike, RuntimeBindings } from '../../shared/types';
-import { defaultFieldValues, effectiveGroupConfig, normalizeFieldValues, pluginDefinition } from '../../shared/plugin-catalog';
+import type { JsonObject, KVNamespaceLike, PolicyRecord, RuntimeBindings } from '../../shared/types';
+import { defaultFieldValues, effectiveGroupConfig, normalizeFieldValues, pluginDefinition, policyFields, resolveGroupIdentity } from '../../shared/plugin-catalog';
 import { findModelPrice, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { decryptSecrets, encryptSecrets } from '../storage/secrets';
 import { ApiError, registerManagementRoutes } from './management';
@@ -290,13 +290,27 @@ describe('legacy credentials and conversation identity', () => {
     expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'other-account-group', accountId: 'account-2' })).status).toBe(201);
   });
 
-  it.each([{ externalId: 'other' }, { conversationType: 'private' }, { accountId: 'account-2' }])('locks existing conversation identity: %j', async (change) => {
+  it.each([{ conversationType: 'private' }, { accountId: 'account-2' }])('locks existing conversation identity: %j', async (change) => {
     const setup = configuredApp();
     seed(setup.values, 'accounts', { id: 'account-2', pluginId: 'plugin-1', protocol: 'qq', credentials: {}, config: {} });
     seed(setup.values, 'groups', baseGroup);
     const response = await writeRequest(setup, '/groups/group-1', change, 'PATCH');
     expect(response.status).toBe(409);
     expect(await json(response)).toEqual({ error: 'group_binding_locked' });
+  });
+
+  it('normalizes multiple conversation openids and lets them be edited later', async () => {
+    const setup = configuredApp();
+    const created = await writeRequest(setup, '/groups', { ...baseGroup, externalId: ' group-a, group-b\ngroup-c ' });
+    expect(created.status).toBe(201);
+    expect((await json(created)).data).toMatchObject({ externalId: 'group-a,group-b,group-c' });
+
+    const edited = await writeRequest(setup, '/groups/group-1', { externalId: 'group-a, group-d' }, 'PATCH');
+    expect(edited.status).toBe(200);
+    expect((await json(edited)).data).toMatchObject({ externalId: 'group-a,group-d' });
+
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'group-x, group-d' })).status).toBe(409);
+    expect((await writeRequest(setup, '/groups/group-1', { externalId: ' , ' }, 'PATCH')).status).toBe(400);
   });
 
   it.each([{ credentials: { appId: 'different' } }, { pluginId: 'plugin-2' }])('locks account identity when conversations are bound: %j', async (change) => {
@@ -454,5 +468,179 @@ describe('structured MCP configuration', () => {
   it.each(['file:///tmp/tools', 'javascript:alert(1)', 'https://user:password@mcp.example'])('rejects unsafe MCP URLs: %s', async (url) => {
     const setup = createApp();
     expect((await writeRequest(setup, '/mcps', { name: 'MCP', config: { url } })).status).toBe(400);
+  });
+});
+
+describe('shared role cards and project memories', () => {
+  it('validates role-card names and UTF-8 content size while preserving mode sections', async () => {
+    const setup = configuredApp();
+    const created = await writeRequest(setup, '/role_cards', {
+      id: 'role-1', accountId: 'account-1', name: '角色 1', description: 'Shared role', content: 'Prompt',
+      mode: 'closed-agent', sections: [{ heading: 'Persona', mode: 'closed-agent' }],
+    });
+    expect(created.status).toBe(201);
+    expect((await json(created)).data).toMatchObject({
+      accountId: 'account-1', name: '角色 1', mode: 'closed-agent',
+      sections: [{ heading: 'Persona', mode: 'closed-agent' }],
+    });
+    expect((await writeRequest(setup, '/role_cards', {
+      id: 'role-max', accountId: 'account-1', name: 'Max size', content: '界'.repeat(8192),
+    })).status).toBe(201);
+
+    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: 'x'.repeat(65), content: '' })).status).toBe(400);
+    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: '../unsafe', content: '' })).status).toBe(400);
+    expect((await writeRequest(setup, '/role_cards', { accountId: 'account-1', name: 'Unsafe\n', content: '' })).status).toBe(400);
+    expect((await writeRequest(setup, '/role_cards', {
+      accountId: 'account-1', name: 'Oversized', content: '界'.repeat(8193),
+    })).status).toBe(400);
+    expect((await writeRequest(setup, '/role_cards', {
+      accountId: 'account-1', name: 'Bad sections', content: 'Prompt', sections: [{ heading: 'Missing mode' }],
+    })).status).toBe(400);
+    expect((await writeRequest(setup, '/role_cards', { accountId: '', name: 'No owner', content: 'Prompt' })).status).toBe(400);
+  });
+
+  it('scopes role-card CRUD by account and prevents deleting referenced accounts', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'accounts', {
+      id: 'account-2', pluginId: 'plugin-1', protocol: 'qq', name: 'Bot 2', enabled: true, credentials: {}, config: {},
+    });
+    const created = await writeRequest(setup, '/role_cards', {
+      id: 'role-1', accountId: 'account-1', name: 'Assistant', content: 'Original',
+    });
+    expect(created.status).toBe(201);
+    expect((await writeRequest(setup, '/role_cards', {
+      id: 'role-2', accountId: 'account-2', name: 'Assistant', content: 'Other account',
+    })).status).toBe(201);
+
+    expect((await setup.app.request('/role_cards', {}, setup.bindings)).status).toBe(400);
+    const listed = await setup.app.request('/role_cards?accountId=account-1', {}, setup.bindings);
+    expect(await listed.json()).toMatchObject({ data: [{ id: 'role-1' }] });
+    expect((await setup.app.request('/role_cards/role-2?accountId=account-1', {}, setup.bindings)).status).toBe(404);
+    expect((await writeRequest(setup, '/role_cards/role-2?accountId=account-1', { name: 'Taken' }, 'PATCH')).status).toBe(404);
+    expect((await setup.app.request('/role_cards/role-2?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(404);
+
+    const renamed = await writeRequest(setup, '/role_cards/role-1?accountId=account-1', { name: 'Renamed' }, 'PATCH');
+    expect(renamed.status).toBe(200);
+    expect((await json(renamed)).data).toMatchObject({ name: 'Renamed', accountId: 'account-1' });
+    expect((await setup.app.request('/accounts/account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(409);
+    expect((await setup.app.request('/role_cards/role-1?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(200);
+    expect((await setup.app.request('/role_cards/role-1?accountId=account-1', {}, setup.bindings)).status).toBe(404);
+  });
+
+  it('validates memory fields, account references, and account-scoped search', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'accounts', {
+      id: 'account-2', pluginId: 'plugin-1', protocol: 'qq', name: 'Bot 2', enabled: true, credentials: {}, config: {},
+    });
+    const first = await writeRequest(setup, '/memories', {
+      id: 'memory-1', accountId: 'account-1', type: 'project', name: 'Architecture', title: 'Project notes',
+      desc: 'A summary', content: 'Contains unique needle phrase', time: '2026-11-03T00:00:00.000Z',
+    });
+    expect(first.status).toBe(201);
+    expect((await writeRequest(setup, '/memories', {
+      id: 'memory-2', accountId: 'account-2', type: 'reference', name: 'Other', title: 'Other notes',
+      desc: '', content: 'Other account', time: '2026-11-03',
+    })).status).toBe(201);
+
+    expect((await writeRequest(setup, '/memories', {
+      accountId: 'account-1', type: 'unknown', name: 'Bad', title: 'Bad', desc: '', content: 'x', time: 'now',
+    })).status).toBe(400);
+    expect((await writeRequest(setup, '/memories', {
+      accountId: 'account-1', type: 'user', name: 'Bad', title: 'Bad', content: 'x', time: 'now',
+    })).status).toBe(400);
+    expect((await writeRequest(setup, '/memories', {
+      accountId: 'account-1', type: 'user', name: 'Bad', title: 'Bad', desc: '', content: 'x', time: 123,
+    })).status).toBe(400);
+    expect((await writeRequest(setup, '/memories', {
+      accountId: 'account-missing', type: 'user', name: 'Bad', title: 'Bad', desc: '', content: 'x', time: 'now',
+    })).status).toBe(400);
+
+    const found = await setup.app.request('/memories?accountId=account-1&q=NEEDLE', {}, setup.bindings);
+    expect((await json(found)).data).toMatchObject([{ id: 'memory-1' }]);
+    const hidden = await setup.app.request('/memories?accountId=account-1&q=Other', {}, setup.bindings);
+    expect((await json(hidden)).data).toEqual([]);
+    expect((await setup.app.request('/memories/memory-2?accountId=account-1', {}, setup.bindings)).status).toBe(404);
+    expect((await writeRequest(setup, '/memories/memory-2?accountId=account-1', { title: 'Changed' }, 'PATCH')).status).toBe(404);
+    expect((await setup.app.request('/memories/memory-2?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(404);
+    expect((await setup.app.request('/memories', {}, setup.bindings)).status).toBe(400);
+    expect((await setup.app.request('/accounts/account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(409);
+
+    const updated = await writeRequest(setup, '/memories/memory-1?accountId=account-1', { title: 'Updated notes' }, 'PATCH');
+    expect(updated.status).toBe(200);
+    expect((await json(updated)).data).toMatchObject({ title: 'Updated notes', accountId: 'account-1' });
+    expect((await setup.app.request('/memories/memory-1?accountId=account-1', { method: 'DELETE' }, setup.bindings)).status).toBe(200);
+    expect((await setup.app.request('/memories/memory-1?accountId=account-1', {}, setup.bindings)).status).toBe(404);
+  });
+});
+
+describe('capability policies', () => {
+  it('scopes policy fields by type and rejects unknown policy types', async () => {
+    const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
+    expect(policyFields('dialog').map((field) => field.key)).toEqual(['agent_stream', 'agent_max_rounds', 'agent_max_output_tokens', 'agent_temperature']);
+    expect(policyFields('voice').map((field) => field.key)).toEqual(['voice_model', 'voice_id', 'voice_speed', 'voice_max_text_chars', 'voice_max_bytes']);
+    expect(policyFields('identity').map((field) => field.key)).toEqual([
+      'bridge_mode', 'bridge_max_message_chars', 'bridge_max_messages_per_minute', 'bridge_group_batch_seconds',
+      'max_context', 'compact_rate', 'bridge_max_media_bytes', 'context_history_limit', 'memory_enabled',
+    ]);
+    expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
+      'bridge_owner_ids', 'bridge_allowed_groups', 'bridge_allowed_private', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
+    ]);
+
+    const setup = configuredApp();
+    const created = await writeRequest(setup, '/policies', { type: 'dialog', name: 'Fast', config: { agent_max_rounds: 100, agent_temperature: 0 } });
+    expect(created.status).toBe(201);
+    expect((await json(created)).data).toMatchObject({ type: 'dialog', enabled: true, config: { agent_max_rounds: 25, agent_temperature: 0, agent_max_output_tokens: 4096 } });
+    expect((await writeRequest(setup, '/policies', { type: 'unknown', name: 'Nope' })).status).toBe(400);
+  });
+
+  it('applies referenced policies to conversation settings and blocks deleting policies in use', async () => {
+    const setup = configuredApp({ bridge_max_message_chars: 1200, bridge_mode: 'reserved', agent_temperature: 0.2 });
+    const identity = (await json(await writeRequest(setup, '/policies', {
+      type: 'identity', name: 'Identity', providerId: 'provider-1', model: 'policy-model',
+      config: { bridge_max_message_chars: 900, max_context: 32768 },
+    }))).data as JsonObject;
+    const dialog = (await json(await writeRequest(setup, '/policies', { type: 'dialog', name: 'Dialog' }))).data as JsonObject;
+
+    const created = await writeRequest(setup, '/groups', {
+      ...baseGroup, identityPolicyId: identity.id, dialogPolicyId: dialog.id,
+      config: { bridge_max_message_chars: 300, bridge_mode: 'reserved' },
+    });
+    expect(created.status).toBe(201);
+    const group = (await json(created)).data as JsonObject;
+    expect(group).toMatchObject({ identityPolicyId: identity.id, dialogPolicyId: dialog.id });
+    expect(group.config).toMatchObject({ bridge_max_message_chars: 900, max_context: 32768, bridge_mode: 'chat', agent_temperature: 0.7 });
+
+    expect((await setup.app.request(`/policies/${identity.id}`, { method: 'DELETE' }, setup.bindings)).status).toBe(409);
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', identityPolicyId: dialog.id })).status).toBe(400);
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', identityPolicyId: 'missing-policy' })).status).toBe(400);
+  });
+
+  it('blocks deleting skills that only a policy references', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'skills', { id: 'skill-1', name: 'Skill', description: '', enabled: true, config: { prompt: 'do it' } });
+    const policy = (await json(await writeRequest(setup, '/policies', { type: 'identity', name: 'Identity', skillIds: ['skill-1'] }))).data as JsonObject;
+    expect((await setup.app.request('/skills/skill-1', { method: 'DELETE' }, setup.bindings)).status).toBe(409);
+    expect((await setup.app.request(`/policies/${policy.id}`, { method: 'DELETE' }, setup.bindings)).status).toBe(200);
+    expect((await setup.app.request('/skills/skill-1', { method: 'DELETE' }, setup.bindings)).status).toBe(200);
+  });
+
+  it('merges identity overrides with additive extension ids', () => {
+    const identity: PolicyRecord = {
+      id: 'policy-1', type: 'identity', name: 'Identity', description: '', enabled: true,
+      providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY', reasoningEffort: 'high',
+      skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'], config: {}, createdAt: '', updatedAt: '',
+    };
+    const base = { providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default' as const, skillIds: [], mcpIds: [], ruleIds: [] };
+    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL', systemPromptMode: 'append', skillIds: ['skill-2', 'skill-1'] }, identity)).toEqual({
+      providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY\n\nLOCAL', reasoningEffort: 'high',
+      skillIds: ['skill-1', 'skill-2'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'],
+    });
+    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL', systemPromptMode: 'override' }, identity).systemPrompt).toBe('LOCAL');
+    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL' }, identity).systemPrompt).toBe('LOCAL');
+    expect(resolveGroupIdentity({ ...base, providerId: 'provider-2', model: 'local-model', reasoningEffort: 'low' }, identity))
+      .toMatchObject({ providerId: 'provider-2', model: 'local-model', reasoningEffort: 'low', systemPrompt: 'POLICY' });
+    expect(resolveGroupIdentity(base, undefined)).toEqual({
+      providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', skillIds: [], mcpIds: [], ruleIds: [],
+    });
   });
 });

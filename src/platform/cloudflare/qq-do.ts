@@ -1,10 +1,14 @@
 import type { ChatMessage, GroupRecord, JsonObject, RuntimeBindings } from '../../shared/types';
-import { configNumber, effectiveGroupConfig } from '../../shared/plugin-catalog';
+import { configIdSet, configNumber, configString, effectivePolicyConfig, matchesConversationId, primaryConversationId } from '../../shared/plugin-catalog';
 import { readBoolean } from '../../server/env';
 import { completeRecentTurns } from '../../server/plugins/chatbot/tools';
+import { createMemeLibrary } from '../../server/plugins/chatbot/meme-library';
+import { createKVMemeStore } from '../../server/plugins/chatbot/meme-storage';
 import { createConversationLogRepository } from '../../server/storage/conversation-log-repository';
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
+import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from '../../server/plugins/chatbot/policies';
 import { createRepository } from '../../server/storage/repository';
+import { decryptSecrets } from '../../server/storage/secrets';
 import { getQQAccessToken, replyToQQGroup, sendQQMedia } from '../../server/protocols/qq/api';
 import { resolveQQAccountById } from '../../server/protocols/qq/accounts';
 import { normalizeQQGroupMessage } from '../../server/protocols/qq/message';
@@ -163,6 +167,7 @@ export class QQGatewayDurableObject {
     }
 
     const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/control') return this.controlConversation(request);
     if (request.method === 'POST' && url.pathname === '/enqueue') {
       let body: { accountId?: unknown; message?: QQGroupMessage };
       try { body = await request.json() as typeof body; }
@@ -201,7 +206,8 @@ export class QQGatewayDurableObject {
         await this.connectAccount(body.accountId);
         return Response.json({ starting: this.accountId === body.accountId }, { status: 202 });
       } catch (error) {
-        console.error('QQ gateway connect failed.', error instanceof Error ? error.message : error);
+        console.error('QQ gateway connect failed.', errorMessage(error));
+        await this.recordGatewayState(false, errorMessage(error));
         await this.scheduleReconnect();
         return Response.json({ starting: false, retryScheduled: true }, { status: 202 });
       }
@@ -214,6 +220,118 @@ export class QQGatewayDurableObject {
     return new Response('Not found', { status: 404 });
   }
 
+  private async controlConversation(request: Request): Promise<Response> {
+    let body: Record<string, unknown>;
+    try { body = await request.json() as Record<string, unknown>; }
+    catch { return Response.json({ error: 'invalid_request' }, { status: 400 }); }
+    const accountId = typeof body.accountId === 'string' ? body.accountId : '';
+    const groupId = typeof body.groupId === 'string' ? body.groupId : '';
+    const action = typeof body.action === 'string' ? body.action : '';
+    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete'].includes(action)) {
+      return Response.json({ error: 'invalid_request' }, { status: 400 });
+    }
+    const repository = createRepository(this.env);
+    const stored = await repository.get('groups', groupId);
+    if (!stored || stored.accountId !== accountId) return Response.json({ error: 'not_found' }, { status: 404 });
+    const account = await this.resolveAccount(accountId, this.env);
+    if (!account) return Response.json({ error: 'account_unavailable' }, { status: 404 });
+    const decryptedGroup = await decryptSecrets(stored as JsonObject, this.env) as unknown as GroupRecord;
+    const externalId = typeof body.externalId === 'string' ? body.externalId : primaryConversationId(decryptedGroup.externalId);
+    if (!matchesConversationId(decryptedGroup.externalId, externalId)) return Response.json({ error: 'not_found' }, { status: 404 });
+    const rawGroup = { ...decryptedGroup, externalId };
+    const group = applyGroupPolicies(rawGroup, await loadPolicyLayers(repository, stored), account.pluginConfig);
+    const scope = JSON.stringify([accountId, group.conversationType ?? 'group', group.externalId]);
+    const store = this.conversationStore();
+    if (!store.getState || !store.setState) return Response.json({ error: 'conversation_control_unavailable' }, { status: 503 });
+    const readState = store.getState.bind(store);
+    const writeState = store.setState.bind(store);
+    const state = await readState(scope);
+    const approvals = Array.isArray(state.toolApprovals) ? state.toolApprovals.flatMap((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const approval = value as Record<string, unknown>;
+      const call = approval.call as Record<string, unknown> | undefined;
+      const fn = call?.function as Record<string, unknown> | undefined;
+      if (typeof approval.id !== 'string' || typeof fn?.name !== 'string' || typeof approval.status !== 'string' || !Number.isFinite(approval.expiresAt)) return [];
+      return [{ id: approval.id, tool: fn.name, status: approval.status, expiresAt: approval.expiresAt as number, requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '' }];
+    }) : [];
+    if (action === 'status') {
+      return Response.json({ data: {
+        accountId, groupId, externalId: group.externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled,
+        connected: this.socket?.readyState === WebSocket.OPEN, mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
+        silent: state.silent === true, model: group.model, providerId: group.providerId,
+        contextMessages: (await store.getRecent(scope, 1000)).length, initialPromptPending: typeof state.initialPrompt === 'string',
+        disabledTools: [...configIdSet(state.disabledTools)], pendingAgentWait: Boolean(state.pendingAgentWait),
+        pendingApprovals: approvals, policyIds: { dialog: group.dialogPolicyId ?? '', voice: group.voicePolicyId ?? '', identity: group.identityPolicyId ?? '' },
+      } });
+    }
+    if (action === 'reset') {
+      if (!store.clear) return Response.json({ error: 'conversation_reset_unavailable' }, { status: 503 });
+      await store.clear(scope);
+      delete state.pendingAgentWait;
+      await writeState(scope, state);
+      return Response.json({ data: { reset: true } });
+    }
+    if (action === 'mode') {
+      if (!['chat', 'reserved', 'reserved2', 'closed-agent'].includes(String(body.mode))) return Response.json({ error: 'invalid_mode' }, { status: 400 });
+      state.mode = body.mode;
+      delete state.disabledTools;
+      delete state.pendingAgentWait;
+      await writeState(scope, state);
+      return Response.json({ data: { mode: state.mode } });
+    }
+    if (action === 'silent') {
+      if (typeof body.silent !== 'boolean') return Response.json({ error: 'invalid_silent' }, { status: 400 });
+      state.silent = body.silent;
+      await writeState(scope, state);
+      return Response.json({ data: { silent: state.silent } });
+    }
+    if (action === 'initialPrompt') {
+      if (body.prompt === null) delete state.initialPrompt;
+      else if (typeof body.prompt === 'string' && new TextEncoder().encode(body.prompt).byteLength <= 4000) state.initialPrompt = body.prompt;
+      else return Response.json({ error: 'invalid_initialPrompt' }, { status: 400 });
+      await writeState(scope, state);
+      return Response.json({ data: { initialPromptPending: typeof state.initialPrompt === 'string' } });
+    }
+    if (action === 'tools') {
+      if (!Array.isArray(body.disabledTools) || body.disabledTools.length > 200 || body.disabledTools.some((name) => typeof name !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(name))) return Response.json({ error: 'invalid_disabledTools' }, { status: 400 });
+      state.disabledTools = [...new Set(body.disabledTools)];
+      await writeState(scope, state);
+      return Response.json({ data: { disabledTools: state.disabledTools } });
+    }
+    if (action === 'memeList' || action === 'memeDelete') {
+      const memeStore = createKVMemeStore(this.env);
+      if (!memeStore) return Response.json({ error: 'meme_storage_unavailable' }, { status: 503 });
+      const library = createMemeLibrary({ store: memeStore, review: async () => 'uncertain' });
+      if (action === 'memeList') return Response.json({ data: { items: await library.list(accountId, scope) } });
+      if (typeof body.memeName !== 'string') return Response.json({ error: 'invalid_memeName' }, { status: 400 });
+      return Response.json({ data: { deleted: await library.delete(accountId, scope, body.memeName) } });
+    }
+    const source: QQGroupMessage = {
+      id: 'console-control', accountId, botId: account.appId, groupId: primaryConversationId(group.externalId), userId: '', text: '', mentionsBot: false,
+      receivedAt: this.now(), conversationType: group.conversationType ?? 'group', eventType: group.conversationType === 'private' ? 'C2C_MESSAGE_CREATE' : 'GROUP_AT_MESSAGE_CREATE',
+    };
+    if (action === 'approvalDecision') {
+      if (typeof body.approvalId !== 'string' || !['approve', 'reject'].includes(String(body.decision))) return Response.json({ error: 'invalid_approvalDecision' }, { status: 400 });
+      const ownerId = [...configIdSet(group.config?.bridge_owner_ids)][0];
+      if (!ownerId) return Response.json({ error: 'conversation_owner_not_configured' }, { status: 409 });
+      const replies: string[] = [];
+      const handler = createStoredChatbotHandler(this.env, {
+        conversationStore: store, costStore: this.costStore(),
+        sendReply: async (_bot, _target, _messageId, content) => { replies.push(content); },
+        reserveOutbound: async () => true,
+        fetch: this.fetchImpl, now: this.now,
+      });
+      await handler(account, { ...source, id: `console-${crypto.randomUUID()}`, eventId: `console-${crypto.randomUUID()}`, userId: ownerId, text: `/${body.decision} ${body.approvalId}`, mentionsBot: true });
+      return Response.json({ data: { decision: body.decision, actingOwnerId: ownerId, messages: replies } });
+    }
+    if (action === 'wakeList') return Response.json({ data: { items: await this.listWakes(account, source) } });
+    if (action === 'wakeCancel') {
+      if (typeof body.wakeId !== 'string') return Response.json({ error: 'invalid_wakeId' }, { status: 400 });
+      return Response.json({ data: { cancelled: await this.cancelWake(account, source, body.wakeId) } });
+    }
+    return Response.json({ data: { items: approvals } });
+  }
+
   async alarm(): Promise<void> {
     // 重连优先于可能较长的消息处理，避免provider请求阻塞gateway恢复。
     if ((this.env.API_METHOD ?? 'webhook') !== 'websocket') await this.disconnect();
@@ -221,7 +339,10 @@ export class QQGatewayDurableObject {
       const accountId = await this.state.storage.get<string>('accountId');
       if (accountId) {
         try { await this.connectAccount(accountId); }
-        catch { await this.scheduleReconnect(); }
+        catch (error) {
+          await this.recordGatewayState(false, errorMessage(error));
+          await this.scheduleReconnect();
+        }
       }
     }
     this.processingQueue = this.processingQueue.catch(() => undefined).then(() => this.drainPendingMessages());
@@ -253,7 +374,9 @@ export class QQGatewayDurableObject {
     }
 
     const accessToken = await this.getAccessToken(account);
-    const gatewayResponse = await this.fetchImpl(GATEWAY_ENDPOINT, {
+    // 必须以裸函数调用全局fetch；以方法形式调用（this.fetchImpl）在Workers里会抛Illegal invocation。
+    const fetchImpl = this.fetchImpl;
+    const gatewayResponse = await fetchImpl(GATEWAY_ENDPOINT, {
       headers: { authorization: `QQBot ${accessToken}` },
       signal: AbortSignal.timeout(10_000),
     });
@@ -280,6 +403,7 @@ export class QQGatewayDurableObject {
       if (this.socket !== socket) return;
       this.clearHeartbeat();
       this.socket = undefined;
+      this.state.waitUntil(this.recordGatewayState(false, `closed ${event.code} ${event.reason ?? ''}`.trim()));
       if (event.code === 4914 || event.code === 4915) {
         this.state.waitUntil(this.disconnect());
         return;
@@ -339,9 +463,11 @@ export class QQGatewayDurableObject {
       this.reconnectAttempt = 0;
       this.startHeartbeat();
       console.log('QQ gateway session ready.', this.accountId);
+      await this.recordGatewayState(true);
     } else if (packet.t === 'RESUMED') {
       this.reconnectAttempt = 0;
       this.startHeartbeat();
+      await this.recordGatewayState(true);
     } else if (packet.t === 'GROUP_AT_MESSAGE_CREATE' || packet.t === 'GROUP_MESSAGE_CREATE' || packet.t === 'C2C_MESSAGE_CREATE') {
       await this.handleGroupMessage(packet);
     }
@@ -399,10 +525,14 @@ export class QQGatewayDurableObject {
 
   private async enqueueMessage(account: QQAccountContext, message: QQGroupMessage): Promise<void> {
     if (await this.wasEventProcessed(message)) return;
-    const group = this.injectedMessageHandler ? undefined : await createRepository(this.env).list('groups').then((groups) => groups.find((entry) =>
-      entry.accountId === account.account.id && entry.externalId === message.groupId &&
-      (entry.conversationType ?? 'group') === (message.conversationType ?? 'group')));
-    const config = group ? effectiveGroupConfig(account.pluginConfig, group.config as JsonObject | undefined) : account.pluginConfig ?? {};
+    const repository = this.injectedMessageHandler ? undefined : createRepository(this.env);
+    const group = repository ? await repository.list('groups').then((groups) => groups.find((entry) =>
+      entry.accountId === account.account.id && matchesConversationId(entry.externalId, message.groupId) &&
+      (entry.conversationType ?? 'group') === (message.conversationType ?? 'group'))) : undefined;
+    const policies = group && repository && hasPolicySelection(group) ? await loadPolicyLayers(repository, group) : {};
+    const config = group
+      ? effectivePolicyConfig(account.pluginConfig, policies, group.config as JsonObject | undefined)
+      : account.pluginConfig ?? {};
     const window = message.isWake || message.conversationType === 'private' ? 0 : configNumber(config, 'bridge_group_batch_seconds', 1, 0, 10) * 1000;
     await this.state.storage.put('queueAccountId', account.account.id);
     await this.updatePending(async (pending) => {
@@ -566,10 +696,23 @@ export class QQGatewayDurableObject {
     return removed;
   }
 
+  private async recordGatewayState(connected: boolean, error?: string): Promise<void> {
+    const db = this.env.DB;
+    const accountId = this.accountId ?? await this.state.storage.get<string>('accountId');
+    if (!db || !accountId) return;
+    const at = new Date(this.now()).toISOString();
+    const value = JSON.stringify({ accountId, connected, ...(error ? { error: error.slice(0, 500) } : {}), updatedAt: at });
+    // 连接状态写入D1仅用于排障，失败不能影响gateway本身。
+    try {
+      await db.prepare('INSERT INTO records (kind, id, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
+        .bind('gateway-state', accountId, value, at).run();
+    } catch { /* diagnostics are best effort */ }
+  }
+
   private async recordQueueFailure(account: QQAccountContext, message: QQGroupMessage, error: unknown): Promise<void> {
     if (!readBoolean(this.env.LOG_RECORD)) return;
     const group = (await createRepository(this.env).list('groups')).find((entry) =>
-      entry.accountId === account.account.id && entry.externalId === message.groupId &&
+      entry.accountId === account.account.id && matchesConversationId(entry.externalId, message.groupId) &&
       (entry.conversationType ?? 'group') === (message.conversationType ?? 'group'));
     await createConversationLogRepository(this.env).append([{
       id: `queue-failure:${message.eventId ?? message.id}`, accountId: account.account.id,
@@ -652,7 +795,7 @@ export class QQGatewayDurableObject {
     const accountId = this.accountId ?? await this.state.storage.get<string>('queueAccountId') ?? await this.state.storage.get<string>('accountId');
     if (identity[0] !== accountId) return undefined;
     const group = (await createRepository(this.env).list('groups')).find((entry) =>
-      entry.accountId === accountId && entry.externalId === identity[2] && (entry.conversationType ?? 'group') === 'group');
+      entry.accountId === accountId && matchesConversationId(entry.externalId, identity[2]) && (entry.conversationType ?? 'group') === 'group');
     return group?.id;
   }
 
@@ -828,6 +971,10 @@ export class QQGatewayDurableObject {
     this.reconnectAttempt += 1;
     await this.setGatewayAlarm(this.now() + delay);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isQQGatewayHost(hostname: string): boolean {

@@ -17,7 +17,7 @@ describe('AI API speech generation', () => {
     expect(result.inputCharacters).toBe(2);
     expect(result.bytes).toEqual(mp3);
     const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/audio/speech'))!;
-    expect(call[1]?.redirect).toBe('error');
+    expect(call[1]?.redirect).toBe('manual');
     expect(JSON.parse(String(call[1]?.body))).toEqual({ model: 'custom-tts', input: '你好', voice: 'alloy', speed: 1.2, response_format: 'mp3' });
   });
 

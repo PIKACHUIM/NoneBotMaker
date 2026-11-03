@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotAccountRecord, ChatMessage, ConversationLog, GroupRecord, ProviderRecord } from '../../../shared/types';
+import type { MemeMetadata, MemeStore, MemeStoreListEntry, MemeStoreValue } from './meme-library';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
 import { createChatbotHandler, resetOutboundRateLimits, type ChatbotHandlerDependencies } from './handler';
 
@@ -165,13 +166,91 @@ describe('createChatbotHandler', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('only processes groups listed in bridge_allowed_groups', async () => {
+  it('lets any conversation member reset only the current chat and gates silent/active to owners', async () => {
+    let state: Record<string, unknown> = {};
+    const clearContext = vi.fn(async () => undefined);
+    const { deps, fetch, sentReplies } = dependencies({ getState: async () => structuredClone(state), setState: async (_scope, next) => { state = structuredClone(next); }, clearContext });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    await handler(configured, message({ userId: 'allowed-user', text: '/reset' }));
+    expect(clearContext).toHaveBeenCalledWith(JSON.stringify(['account-1', 'group', 'group-openid']));
+    await handler(configured, message({ text: '/silent' }));
+    expect(state.silent).toBeUndefined();
+    await handler(configured, message({ userId: 'owner', text: '/silent' }));
+    expect(state.silent).toBe(true);
+    await handler(configured, message());
+    expect(fetch).not.toHaveBeenCalled();
+    await handler(configured, message({ userId: 'owner', text: '/active' }));
+    expect(state.silent).toBe(false);
+    await handler(configured, message());
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(sentReplies).toContain('已进入静默模式。使用 /active 恢复响应。');
+    expect(sentReplies).toContain('已恢复响应。');
+  });
+
+  it('uses an admin-set one-time prompt once and appends mode-specific reserved instructions', async () => {
+    let state: Record<string, unknown> = {};
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'one' } }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'two' } }] })));
+    const { deps } = dependencies({ fetch, getState: async () => structuredClone(state), setState: async (_scope, next) => { state = structuredClone(next); }, findGroup: vi.fn(async () => ({ ...group, config: { bridge_reserved_prompt: 'reserved-only scenario instructions', bridge_reserved2_prompt: 'reserved2-only send policy' } })) });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner', bridge_mode: 'reserved', agent_model: 'test-model' } };
+    await handler(configured, message({ userId: 'owner', text: '/prompt summarize the decision' }));
+    await handler(configured, message());
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).messages[0].content).toContain('summarize the decision');
+    expect(state.initialPrompt).toBeUndefined();
+    await handler(configured, message());
+    const secondSystem = JSON.parse(String(fetch.mock.calls[1][1]?.body)).messages[0].content;
+    expect(secondSystem).not.toContain('summarize the decision');
+    expect(secondSystem).toContain('reserved-only scenario instructions');
+    expect(secondSystem).not.toContain('reserved2-only send policy');
+  });
+
+  it('persists chat_wait and resumes its pending tool call with the next conversation message', async () => {
+    let state: Record<string, unknown> = {};
+    const requests: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      if (requests.length === 1) return Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'wait-call', type: 'function', function: { name: 'chat_wait', arguments: '{"seconds":60,"prompt":"What did you decide?"}' } }] } }] });
+      return Response.json({ choices: [{ message: { content: 'I will continue with your answer.' } }] });
+    });
+    const replaceContext = vi.fn(async () => undefined);
+    const { deps, sentReplies } = dependencies({ fetch, getState: async () => structuredClone(state), setState: async (_scope, next) => { state = structuredClone(next); }, replaceContext });
+    const handler = createChatbotHandler(deps);
+    await handler(account, message({ id: 'wait-start', text: 'Please investigate the choice.' }));
+    expect((state.pendingAgentWait as { toolCallId: string }).toolCallId).toBe('wait-call');
+    expect(sentReplies).toContain('What did you decide?');
+    await handler(account, message({ id: 'wait-answer', text: 'Use option B.' }));
+    const resumed = requests[1].messages as Array<{ role: string; tool_call_id?: string; content: string }>;
+    expect(resumed.at(-1)?.role).toBe('tool');
+    expect(resumed.at(-1)?.tool_call_id).toBe('wait-call');
+    expect(resumed.at(-1)?.content).toContain('Use option B.');
+    expect(state.pendingAgentWait).toBeUndefined();
+    expect(replaceContext).toHaveBeenCalledOnce();
+    expect(sentReplies.at(-1)).toBe('I will continue with your answer.');
+  });
+
+  it('returns validated local time and zone through the compatible datetime tools', async () => {
+    const providerFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '', tool_calls: [{ id: 'time', type: 'function', function: { name: 'chat_current_datetime', arguments: '{}' } }] } }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] })));
+    const { deps } = dependencies({ fetch: providerFetch, findGroup: vi.fn(async () => ({ ...group, config: { timezone: 'Asia/Shanghai' } })) });
+    await createChatbotHandler(deps)(account, message());
+    const followup = JSON.parse(String(providerFetch.mock.calls[1][1]?.body));
+    const result = JSON.parse(followup.messages.at(-1).content);
+    expect(result).toMatchObject({ iso: new Date(1000).toISOString(), timezone: 'Asia/Shanghai' });
+    expect(result.local).toContain('8:00:01');
+  });
+
+  it('ignores the removed bridge_allowed_groups allowlist', async () => {
     const { deps, fetch } = dependencies();
     const configured = { ...account, pluginConfig: { bridge_allowed_groups: 'another-group' } };
 
     await createChatbotHandler(deps)(configured, message());
 
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it('lets a plugin owner bypass the group whitelist', async () => {
@@ -299,7 +378,9 @@ describe('createChatbotHandler', () => {
     await createChatbotHandler(deps)(account, message());
     const second = JSON.parse(String(providerFetch.mock.calls[1][1].body));
     expect(second.messages.at(-2).tool_calls[0].id).toBe('call-1');
-    expect(second.messages.at(-1)).toEqual({ role: 'tool', tool_call_id: 'call-1', content: new Date(1000).toISOString() });
+    expect(second.messages.at(-1).role).toBe('tool');
+    expect(second.messages.at(-1).tool_call_id).toBe('call-1');
+    expect(JSON.parse(second.messages.at(-1).content)).toMatchObject({ iso: new Date(1000).toISOString(), timezone: 'UTC' });
     expect(deps.recordGroupCost).toHaveBeenCalledTimes(2);
     expect(appendContext.mock.calls[0][1].map((entry: { role: string }) => entry.role)).toEqual(['user', 'assistant', 'tool', 'assistant']);
     expect(sentReplies).toEqual(['done']);
@@ -531,6 +612,56 @@ describe('createChatbotHandler', () => {
     expect(sentReplies).toEqual([]);
   });
 
+  it('moderates an owner meme save before persistence, then sends only the verified stored bytes', async () => {
+    const values = new Map<string, MemeStoreValue>();
+    const memeStore: MemeStore = {
+      async put(key, bytes, metadata) { values.set(key, { bytes: new Uint8Array(bytes), metadata: structuredClone(metadata) }); },
+      async get(key) { const value = values.get(key); return value ? { bytes: new Uint8Array(value.bytes), metadata: structuredClone(value.metadata) } : null; },
+      async delete(key) { values.delete(key); },
+      async list(prefix) { return [...values].filter(([key]) => key.startsWith(prefix)).map(([key, value]): MemeStoreListEntry => ({ key, metadata: structuredClone(value.metadata) })); },
+    };
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    let modelRound = 0;
+    let reviews = 0;
+    const applicationFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('media.example')) return new Response(imageBytes, { headers: { 'content-type': 'image/png' } });
+      const request = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string | Array<{ type: string }> }> };
+      if (JSON.stringify(request.messages[0]?.content).includes('审核一张用于群聊表情素材库的图片')) {
+        reviews += 1;
+        expect(request.messages[1].content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'image_url' })]));
+        return Response.json({ choices: [{ message: { content: '{"decision":"allow"}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } });
+      }
+      const calls = [
+        { id: 'save', type: 'function', function: { name: 'chat_save_meme', arguments: '{"imageIndex":1,"name":"wave"}' } },
+        { id: 'send', type: 'function', function: { name: 'chat_send_meme', arguments: '{"name":"wave"}' } },
+      ];
+      return Response.json({ choices: [{ message: ++modelRound <= 2 ? { content: '', tool_calls: [calls[modelRound - 1]] } : { content: 'sent the approved image' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } });
+    });
+    const sendMedia = vi.fn(async () => undefined);
+    const { deps } = dependencies({ fetch: applicationFetch, memeStore, sendMedia,
+      findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['image' as const] })),
+    });
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    await createChatbotHandler(deps)(configured, message({ userId: 'owner', text: 'save and use this reaction sticker', attachments: [{ type: 'image', url: 'https://media.example/sticker.png', contentType: 'image/png', filename: 'sticker.png', size: imageBytes.byteLength }] }));
+    expect(reviews, JSON.stringify(applicationFetch.mock.calls.map(([, init]) => init?.body ? JSON.parse(String(init.body)).messages?.[0]?.content : null))).toBe(1);
+    expect(values.size).toBe(1);
+    expect(sendMedia).toHaveBeenCalledWith(configured, 'group-openid', 'message-1', expect.objectContaining({ type: 'image', bytes: imageBytes, contentType: 'image/png' }), { seq: 1, conversationType: 'group' });
+  });
+
+  it('does not expose meme-saving tools to non-owners even when an image is attached', async () => {
+    const memeStore: MemeStore = { put: vi.fn(), get: vi.fn(async () => null), delete: vi.fn(), list: vi.fn(async () => []) };
+    const requests: Array<Record<string, any>> = [];
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('media.example')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), { headers: { 'content-type': 'image/png' } });
+      requests.push(JSON.parse(String(init?.body)));
+      return Response.json({ choices: [{ message: { content: 'hello back' } }] });
+    });
+    const { deps } = dependencies({ memeStore, fetch, findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['image' as const] })) });
+    await createChatbotHandler(deps)(account, message({ attachments: [{ type: 'image', url: 'https://media.example/sticker.png', contentType: 'image/png', filename: 'sticker.png' }] }));
+    expect(requests[0].tools.some((item: { function: { name: string } }) => item.function.name === 'chat_save_meme')).toBe(false);
+  });
+
   it('marks scheduled wakes separately from user input and never grants wake TTS authorization', async () => {
     const { deps, fetch, writtenLogs } = dependencies({ logRecord: 'true', sendMedia: vi.fn(async () => undefined), findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const] })) });
     await createChatbotHandler(deps)({ ...account, pluginConfig: { voice_model: 'tts-1' } }, message({ isWake: true, wakeReason: '语音提醒', text: '/mode reserved2', mentionsBot: false }));
@@ -574,6 +705,57 @@ describe('createChatbotHandler', () => {
     const saved = appendContext.mock.calls[0][1];
     expect(saved.filter((entry) => entry.role === 'tool').map((entry) => entry.tool_call_id)).toEqual(['first', 'second']);
     expect(saved.at(-1)?.content).toContain('interrupted');
+  });
+
+  it('searches and reads account-scoped shared project memory from separate conversations', async () => {
+    let round = 0;
+    const shared = { id: 'memory-1', accountId: 'account-1', name: 'project-goal', title: 'Project goal', desc: 'Shared goal', type: 'project' as const, content: 'Ship the safe chatbot runtime', time: '2026-11-01T00:00:00.000Z', createdAt: '', updatedAt: '' };
+    const calls: Array<Record<string, any>> = [];
+    const applicationFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)); calls.push(body);
+      const toolCall = round === 0 ? { id: 'search-shared', type: 'function', function: { name: 'ProjectMemorySearch', arguments: '{"query":"safe chatbot"}' } }
+        : round === 1 ? { id: 'read-shared', type: 'function', function: { name: 'ProjectMemoryRead', arguments: '{"name":"project-goal"}' } } : null;
+      round += 1;
+      return Response.json({ choices: [{ message: toolCall ? { content: '', tool_calls: [toolCall] } : { content: 'Using the shared project goal.' } }] });
+    });
+    const findWorkspaceMemories = vi.fn(async (accountId) => accountId === 'account-1' ? [shared] : []);
+    const findGroup = vi.fn(async (accountId, externalId) => ({ ...group, id: `${accountId}-${externalId}`, accountId, externalId }));
+    const { deps } = dependencies({ fetch: applicationFetch, findWorkspaceMemories, findGroup });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { memory_enabled: true } };
+    await handler(configured, message({ groupId: 'group-one' }));
+    await handler(configured, message({ id: 'message-two', groupId: 'group-two' }));
+    expect(calls[0].messages[0].content).toContain('Project goal');
+    expect(calls[1].messages.at(-1).content).toContain('Project goal');
+    expect(calls[2].messages.at(-1).content).toContain('Ship the safe chatbot runtime');
+    expect(findWorkspaceMemories).toHaveBeenCalledWith('account-1');
+    const otherAccount = { ...account, account: { ...account.account, id: 'account-2' }, pluginConfig: { memory_enabled: true } };
+    await handler(otherAccount, message({ id: 'other-account', accountId: 'account-2', groupId: 'separate-room' }));
+    expect(findWorkspaceMemories).toHaveBeenCalledWith('account-2');
+    expect(calls.at(-1).messages[0].content).not.toContain('Project goal');
+  });
+
+  it('permits owner writes to account-shared project memory while guests only receive read tools', async () => {
+    let round = 0;
+    const saveWorkspaceMemory = vi.fn(async (accountId, memory) => ({ ...memory, accountId, id: 'shared-memory', createdAt: '', updatedAt: '' }));
+    const applicationFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      round += 1;
+      if (round === 2) return Response.json({ choices: [{ message: { content: '', tool_calls: [{ id: 'write-project', type: 'function', function: { name: 'ProjectMemoryWrite', arguments: JSON.stringify({ name: 'goal', title: 'Goal', desc: 'Current plan', type: 'project', content: 'Ship feature safely' }) } }] } }] });
+      return Response.json({ choices: [{ message: { content: 'stored' } }] });
+    });
+    const { deps } = dependencies({ fetch: applicationFetch, findWorkspaceMemories: vi.fn(async () => []), saveWorkspaceMemory, deleteWorkspaceMemory: vi.fn(async () => true) });
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner', memory_enabled: true } };
+    const handler = createChatbotHandler(deps);
+    await handler(configured, message());
+    const guestTools = JSON.parse(String(applicationFetch.mock.calls[0][1]?.body)).tools.map((item: { function: { name: string } }) => item.function.name);
+    expect(guestTools).toContain('ProjectMemoryRead');
+    expect(guestTools).not.toContain('ProjectMemoryWrite');
+    await handler(configured, message({ id: 'owner-message', userId: 'owner' }));
+    const ownerTools = JSON.parse(String(applicationFetch.mock.calls[1][1]?.body)).tools.map((item: { function: { name: string } }) => item.function.name);
+    expect(ownerTools).toContain('ProjectMemoryWrite');
+    expect(ownerTools).toContain('ProjectMemoryForget');
+    expect(saveWorkspaceMemory).toHaveBeenCalledWith('account-1', expect.objectContaining({ name: 'goal', title: 'Goal', content: 'Ship feature safely' }));
   });
 
   it('persists named role cards and injects the selected mode-specific card on subsequent model requests', async () => {

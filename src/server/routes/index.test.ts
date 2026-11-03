@@ -54,6 +54,23 @@ describe('admin route protections', () => {
     expect(crossOrigin.status).toBe(403);
   });
 
+  it.each(['role_cards', 'memories'])('requires a session and same-origin mutations for shared records: %s', async (kind) => {
+    const router = createApiRouter();
+    const bindings = { SYS_SECRET: 'test-secret' };
+    const read = await router.request(`/${kind}?accountId=account-1`, {}, bindings);
+    expect(read.status).toBe(401);
+
+    const blockedOrigin = await router.request(`/${kind}`, { method: 'POST' }, bindings);
+    expect(blockedOrigin.status).toBe(403);
+    const blockedSession = await router.request(`/${kind}`, { method: 'POST', headers: { Origin: 'http://localhost' } }, bindings);
+    expect(blockedSession.status).toBe(401);
+    const token = await createSessionToken(bindings);
+    const crossOrigin = await router.request(`/${kind}`, {
+      method: 'POST', headers: { Cookie: `${SESSION_COOKIE}=${token}`, Origin: 'https://attacker.example' },
+    }, bindings);
+    expect(crossOrigin.status).toBe(403);
+  });
+
   it('protects prices when mounted under /api and allows authenticated same-origin CRUD', async () => {
     const values = new Map<string, string>();
     const KV: KVNamespaceLike = {

@@ -4,6 +4,8 @@ import type {
   D1DatabaseLike,
   LibraryRecord,
   ModelPriceRecord,
+  ProjectMemoryRecord,
+  RoleCardRecord,
   GroupRecord,
   JsonObject,
   KVNamespaceLike,
@@ -13,13 +15,16 @@ import type {
 import { readBoolean } from '../../env';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
 import { findModelPrice } from '../../../shared/model-pricing';
+import { matchesConversationId } from '../../../shared/plugin-catalog';
 import { createD1MatcherSessionStore, PluginRuntime } from '../dispatcher';
 import { createConversationLogRepository, type ConversationLogRepository } from '../../storage/conversation-log-repository';
 import type { EdgeOneBlobStoreLike } from '../../storage/edgeone-blob-repository';
-import { createRepository } from '../../storage/repository';
+import { createRepository, type StoredRecord } from '../../storage/repository';
 import { decryptSecrets } from '../../storage/secrets';
 import { createChatbotHandler, type ChatbotHandlerDependencies } from './handler';
+import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from './policies';
 import { completeRecentTurns } from './tools';
+import { createKVMemeStore } from './meme-storage';
 
 export interface GroupConversationStore {
   getRecent(groupId: string, limit: number): Promise<ChatMessage[]>;
@@ -63,6 +68,7 @@ export interface StoredChatbotDependencies {
   scheduleWake?: ChatbotHandlerDependencies['scheduleWake'];
   listWakes?: ChatbotHandlerDependencies['listWakes'];
   cancelWake?: ChatbotHandlerDependencies['cancelWake'];
+  memeStore?: ChatbotHandlerDependencies['memeStore'];
   reserveOutbound?: ChatbotHandlerDependencies['reserveOutbound'];
   fetch?: typeof fetch;
   random?: () => number;
@@ -286,8 +292,14 @@ export function createStoredChatbotHandler(
   const dependencies: ChatbotHandlerDependencies = {
     findGroup: async (accountId, groupOpenId, conversationType = 'group') => {
       const recordsForAccount = await records.list('groups');
-      const group = recordsForAccount.find((record) => record.accountId === accountId && record.externalId === groupOpenId && (record.conversationType ?? 'group') === conversationType);
-      return group ? await decryptSecrets(group as JsonObject, bindings) as unknown as GroupRecord : null;
+      const group = recordsForAccount.find((record) => record.accountId === accountId && matchesConversationId(record.externalId, groupOpenId) && (record.conversationType ?? 'group') === conversationType);
+      if (!group) return null;
+      const resolved = await decryptSecrets(group as JsonObject, bindings) as unknown as GroupRecord;
+      if (!hasPolicySelection(group)) return resolved;
+      const policies = await loadPolicyLayers(records, group);
+      const account = await records.get('accounts', accountId);
+      const plugin = account?.pluginId ? await records.get('plugins', String(account.pluginId)) : null;
+      return applyGroupPolicies(resolved, policies, plugin?.config as JsonObject | undefined);
     },
     findProvider: async (providerId) => {
       const provider = await records.get('providers', providerId);
@@ -302,6 +314,27 @@ export function createStoredChatbotHandler(
       const library = await records.get(kind, id);
       return library ? await decryptSecrets(library as JsonObject, bindings) as unknown as LibraryRecord : null;
     },
+    findWorkspaceRoleCards: async (accountId) => (await records.list('role_cards')).filter((record) => record.accountId === accountId) as unknown as RoleCardRecord[],
+    findWorkspaceMemories: async (accountId) => (await records.list('memories')).filter((record) => record.accountId === accountId) as unknown as ProjectMemoryRecord[],
+    saveWorkspaceMemory: async (accountId, memory) => {
+      const name = memory.name.normalize('NFKC').trim();
+      const validType = ['user', 'feedback', 'project', 'reference'].includes(memory.type);
+      if (!accountId || !/^[\p{L}\p{N}][\p{L}\p{N}_ .-]{0,63}$/u.test(name) || !validType || !memory.title.trim() || memory.title.length > 120 ||
+          memory.desc.length > 500 || !memory.content.trim() || new TextEncoder().encode(memory.content).byteLength > 20_000 || !Number.isFinite(Date.parse(memory.time))) {
+        throw new Error('Shared project memory fields are invalid or exceed their limits.');
+      }
+      const previous = (await records.list('memories')).find((record) => record.accountId === accountId && record.name === name);
+      const now = new Date().toISOString();
+      const record: StoredRecord = { id: previous?.id ?? crypto.randomUUID(), accountId, name, type: memory.type, title: memory.title.trim(), desc: memory.desc.slice(0, 500), content: memory.content, time: memory.time, createdAt: previous?.createdAt ?? now, updatedAt: now };
+      await records.put('memories', record);
+      return record as unknown as ProjectMemoryRecord;
+    },
+    deleteWorkspaceMemory: async (accountId, name) => {
+      const record = (await records.list('memories')).find((item) => item.accountId === accountId && item.name === name);
+      if (!record) return false;
+      await records.delete('memories', record.id);
+      return true;
+    },
     getRecentContext: (groupId, limit) => services.conversationStore.getRecent(groupId, limit),
     appendContext: (groupId, entries) => services.conversationStore.append(groupId, entries),
     replaceContext: services.conversationStore.replace?.bind(services.conversationStore),
@@ -312,6 +345,7 @@ export function createStoredChatbotHandler(
     scheduleWake: services.scheduleWake,
     listWakes: services.listWakes,
     cancelWake: services.cancelWake,
+    memeStore: services.memeStore ?? createKVMemeStore(bindings) ?? undefined,
     reserveOutbound: services.reserveOutbound,
     isWithinCostLimits: (group, at) => services.costStore.isWithinLimits(group, at),
     recordGroupCost: (group, amount, at) => services.costStore.add(group, amount, at),

@@ -7,8 +7,16 @@ import type {
   LibraryRecord,
   ModelPriceRecord,
   PluginRecord,
+  PolicyRecord,
+  ProjectMemoryRecord,
   ProviderRecord,
+  RoleCardRecord,
 } from '../shared/types';
+
+export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
+export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string }>; policyIds?: Record<string, string> }
+export interface ChatbotWake { id: string; dueAt: number; reason: string }
+export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
 
 export class ApiError extends Error {
   status: number;
@@ -128,6 +136,45 @@ export const api = {
   async listGroups() {
     return records<GroupRecord>(await request('/api/groups'));
   },
+  async listRoleCards(accountId: string) {
+    const params = new URLSearchParams({ accountId });
+    return records<RoleCardRecord>(await request(collectionPath('/api/role_cards', params)));
+  },
+  async saveRoleCard(data: Partial<RoleCardRecord> & Pick<RoleCardRecord, 'accountId' | 'name' | 'content'>, id?: string) {
+    return record<RoleCardRecord>(await request(collectionPath(id ? `/api/role_cards/${encodeURIComponent(id)}` : '/api/role_cards', new URLSearchParams({ accountId: data.accountId })), { method: id ? 'PUT' : 'POST', ...jsonBody(data) }));
+  },
+  async deleteRoleCard(accountId: string, id: string) {
+    return request(collectionPath(`/api/role_cards/${encodeURIComponent(id)}`, new URLSearchParams({ accountId })), { method: 'DELETE' });
+  },
+  async listProjectMemories(accountId: string, query?: string) {
+    const params = new URLSearchParams({ accountId });
+    if (query) params.set('q', query);
+    return records<ProjectMemoryRecord>(await request(collectionPath('/api/memories', params)));
+  },
+  async saveProjectMemory(data: Partial<ProjectMemoryRecord> & Pick<ProjectMemoryRecord, 'accountId' | 'type' | 'name' | 'title' | 'content'>, id?: string) {
+    return record<ProjectMemoryRecord>(await request(collectionPath(id ? `/api/memories/${encodeURIComponent(id)}` : '/api/memories', new URLSearchParams({ accountId: data.accountId })), { method: id ? 'PUT' : 'POST', ...jsonBody(data) }));
+  },
+  async deleteProjectMemory(accountId: string, id: string) {
+    return request(collectionPath(`/api/memories/${encodeURIComponent(id)}`, new URLSearchParams({ accountId })), { method: 'DELETE' });
+  },
+  async listChatbotConversations(accountId?: string) {
+    const params = new URLSearchParams();
+    if (accountId) params.set('accountId', accountId);
+    return records<ChatbotConversationSummary>(await request(collectionPath('/api/chatbot/conversations', params)));
+  },
+  async getChatbotConversation(accountId: string, groupId: string, externalId?: string) {
+    const params = new URLSearchParams();
+    if (externalId) params.set('externalId', externalId);
+    return request<ChatbotConversationStatus>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}`, params));
+  },
+  async controlChatbotConversation<T = unknown>(accountId: string, groupId: string, control: Record<string, unknown>) {
+    return request<T>(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/control`, { method: 'POST', ...jsonBody(control) });
+  },
+  async listChatbotApprovals(accountId: string, groupId: string, externalId?: string) {
+    const params = new URLSearchParams();
+    if (externalId) params.set('externalId', externalId);
+    return request<{ items: ChatbotConversationStatus['pendingApprovals'] }>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/approvals`, params));
+  },
   async saveGroup(data: Partial<GroupRecord> & Pick<GroupRecord, 'accountId' | 'externalId' | 'name'>, id?: string) {
     const payload = await request(id ? `/api/groups/${encodeURIComponent(id)}` : '/api/groups', {
       method: id ? 'PUT' : 'POST',
@@ -176,6 +223,19 @@ export const api = {
   },
   async listLibraries(kind: LibraryKind) {
     return records<LibraryRecord>(await request(`/api/${kind}`));
+  },
+  async listPolicies() {
+    return records<PolicyRecord>(await request('/api/policies'));
+  },
+  async savePolicy(data: Partial<PolicyRecord> & Pick<PolicyRecord, 'type' | 'name'>, id?: string) {
+    const payload = await request(id ? `/api/policies/${encodeURIComponent(id)}` : '/api/policies', {
+      method: id ? 'PUT' : 'POST',
+      ...jsonBody(data),
+    });
+    return record<PolicyRecord>(payload);
+  },
+  async deletePolicy(id: string) {
+    return request(`/api/policies/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   async saveLibrary(kind: LibraryKind, data: Partial<LibraryRecord> & Pick<LibraryRecord, 'name'>, id?: string) {
     const payload = await request(id ? `/api/${kind}/${encodeURIComponent(id)}` : `/api/${kind}`, {
