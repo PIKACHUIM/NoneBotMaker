@@ -474,6 +474,7 @@ const EN: Record<string, string> = {
   '，再在群聊策略中引用。': ' and reference it from a group policy.',
   '编辑策略': 'Edit policy',
   '描述 AI 的角色、边界与回复风格': 'Describe the AI role, boundaries and reply style',
+  '角色卡与项目记忆会在该提示词之后叠加注入，不会相互覆盖。': 'Role cards and project memories are appended after this prompt; they do not overwrite each other.',
   '沿用插件默认': 'Use the plugin default',
   '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。': 'Select capability policies and override the model, prompt and extensions per conversation.',
   '配置对话/语音/身份策略、模型供应商与单价，以及 Skills、MCP 和 Rules。': 'Configure dialogue, voice and identity policies, model providers and prices, plus Skills, MCP and Rules.',

@@ -1282,13 +1282,13 @@ function IntegrationsPage({ providers, prices, libraries, policies, accounts, ro
   const { tr } = useI18n();
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
+    { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity')}</Tag></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     { key: 'voice', label: <span><MessageOutlined /> {tr('语音策略')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     { key: 'role-cards', label: <span><BookOutlined /> {tr('角色卡')} <Tag>{roleCards.length}</Tag></span>, children: <RoleCardsPanel data={roleCards} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
     { key: 'memories', label: <span><DatabaseOutlined /> {tr('项目记忆')} <Tag>{memories.length}</Tag></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
@@ -1378,7 +1378,7 @@ function PolicyPanel({ type, data, providers, libraries, onRefresh, onError }: {
             <Form.Item name="model" label={tr('模型')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('选择或输入模型 ID')} filterOption /></Form.Item>
           </div>
           <Form.Item name="reasoningEffort" label={tr('思考强度')} extra={tr('模型默认不发送思考强度参数，适用于不支持该参数的模型。')}><Select options={[{ label: tr('模型默认'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
-          <Form.Item name="systemPrompt" label={tr('系统提示词')}><Input.TextArea rows={5} placeholder={tr('描述 AI 的角色、边界与回复风格')} /></Form.Item>
+          <Form.Item name="systemPrompt" label={tr('系统提示词')} extra={tr('角色卡与项目记忆会在该提示词之后叠加注入，不会相互覆盖。')}><Input.TextArea rows={5} placeholder={tr('描述 AI 的角色、边界与回复风格')} /></Form.Item>
           <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
           <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
           <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
