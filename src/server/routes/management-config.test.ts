@@ -141,7 +141,7 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
-    expect(definition.configFields.map((field) => field.key)).toEqual(['brave_api_key']);
+    expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
     expect(definition.groupFields.some((field) => field.key.startsWith('bridge_voice'))).toBe(false);
     expect(defaultFieldValues(definition.groupFields)).toMatchObject({ voice_model: '', voice_id: 'alloy', voice_speed: 1, voice_max_text_chars: 500, voice_max_bytes: 5 * 1024 * 1024, voice_sends_per_hour: 20 });

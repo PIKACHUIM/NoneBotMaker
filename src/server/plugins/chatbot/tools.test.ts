@@ -115,8 +115,8 @@ describe('runtime tool argument validation', () => {
     expect((await executeTool('allowed', '{"count":2}', registry, [])).content).toBe('done');
   });
 
-  it('registers Brave only when configured and restricts WebFetch to text', async () => {
-    expect(webTools({}).map((entry) => entry.definition.function.name)).toEqual(['WebFetch']);
+  it('always registers the free WebSearch tool and restricts WebFetch to text', async () => {
+    expect(webTools({}).map((entry) => entry.definition.function.name)).toEqual(['WebFetch', 'WebSearch']);
     expect(webTools({ brave_api_key: 'key' }).map((entry) => entry.definition.function.name)).toContain('WebSearch');
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : new Response('binary', { headers: { 'content-type': 'application/octet-stream' } }));
     await expect(webTools({}, fetchImpl)[0].execute({ url: 'https://web.example' })).rejects.toThrow('text content');

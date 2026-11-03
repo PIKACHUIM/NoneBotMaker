@@ -52,9 +52,26 @@ const chatbotDefinition: PluginDefinition = {
     en: 'Receives QQ group and private messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
+    text('web_search_engine', ['搜索方式', 'Search engine'], [
+      '免费选项无需密钥：auto 依次尝试 DuckDuckGo、Bing；brave 需要填写 Brave Search API Key。',
+      'Free options need no key: auto tries DuckDuckGo then Bing; brave requires a Brave Search API key.',
+    ], {
+      group: searchGroup,
+      default: 'auto',
+      options: [
+        { value: 'auto', label: { zh: 'auto / 自动（DuckDuckGo → Bing）', en: 'auto / DuckDuckGo then Bing' } },
+        { value: 'duckduckgo', label: { zh: 'DuckDuckGo（免费）', en: 'DuckDuckGo (free)' } },
+        { value: 'bing', label: { zh: 'Bing（免费）', en: 'Bing (free)' } },
+        { value: 'brave', label: { zh: 'Brave（需要密钥）', en: 'Brave (API key)' } },
+      ],
+    }),
+    number('web_search_results', ['搜索结果数量', 'Search results'], [
+      '每次搜索返回的结果条数，1–10。',
+      'Number of results returned per search, from 1 to 10.',
+    ], { group: searchGroup, default: 5, min: 1, max: 10, step: 1 }),
     text('brave_api_key', ['Brave Search API Key', 'Brave Search API key'], [
-      '用于联网搜索工具；留空时不启用 Brave Search。',
-      'Used by the web search tool. Leave empty to disable Brave Search.',
+      '仅在搜索方式为 brave 或作为自动兜底时使用；留空则只使用免费搜索。',
+      'Used when the search engine is brave or as an automatic fallback; leave empty to use free search only.',
     ], { group: searchGroup, default: '', secret: true }),
   ],
   accountFields: [],
