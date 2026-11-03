@@ -18,6 +18,7 @@ const MAX_CONTEXT_ENTRIES = 1000;
 const MAX_RECENT_MESSAGE_IDS = 512;
 const DEDUPE_RETENTION_MS = 10 * 60_000;
 const GROUP_AND_C2C_INTENT = 1 << 25;
+const GATEWAY_BUILD = 'build-2026-11-03-manual-redirect';
 
 interface DurableStorageData {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -580,7 +581,7 @@ export class QQGatewayDurableObject {
     const accountId = this.accountId ?? await this.state.storage.get<string>('accountId');
     if (!db || !accountId) return;
     const at = new Date(this.now()).toISOString();
-    const value = JSON.stringify({ accountId, connected, ...(error ? { error: error.slice(0, 500) } : {}), updatedAt: at });
+    const value = JSON.stringify({ accountId, connected, build: GATEWAY_BUILD, ...(error ? { error: error.slice(0, 500) } : {}), updatedAt: at });
     // 连接状态写入D1仅用于排障，失败不能影响gateway本身。
     try {
       await db.prepare('INSERT INTO records (kind, id, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
