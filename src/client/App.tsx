@@ -106,7 +106,7 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
-  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '管理会话运行状态、模式、静默、提示与工具；模型、供应商、白名单和预算请在群聊策略配置。' },
+  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '设置模式、静默、提示和工具；模型与群聊策略在「群聊策略」中配置。' },
   integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 AI 供应商与单价，以及身份、对话、语音、记忆策略和技能、MCP、规则。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
@@ -545,7 +545,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
               {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
-              {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} />}
+              {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} />}
               {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} memories={memories} onRefresh={refresh} onError={handleError} />}
               {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
             </>
@@ -855,7 +855,7 @@ function SlangReviewEditor({ candidate, onSave }: { candidate: ChatbotSlangCandi
   </Form>;
 }
 
-function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void; onNavigate: (page: AdminPage) => void }) {
+function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void; onNavigate: (page: AdminPage) => void; onRefresh: () => void }) {
   const { tr } = useI18n();
   const { message } = AntApp.useApp();
   const [conversationTargets, setConversationTargets] = useState<ChatbotConversationSummary[]>([]);
@@ -863,7 +863,6 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups:
   const [conversationLoading, setConversationLoading] = useState(true);
   const [conversationListError, setConversationListError] = useState('');
   const [statusError, setStatusError] = useState('');
-  const [conversationListRevision, setConversationListRevision] = useState(0);
   const [status, setStatus] = useState<ChatbotConversationStatus | null>(null);
   const [approvals, setApprovals] = useState<ChatbotConversationStatus['pendingApprovals']>([]);
   const [wakes, setWakes] = useState<ChatbotWake[]>([]);
@@ -899,7 +898,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups:
       setConversationListError(formatError(reason));
     }).finally(() => { if (active) setConversationLoading(false); });
     return () => { active = false; };
-  }, [groups, conversationListRevision]);
+  }, [groups]);
   const refresh = useCallback(async () => {
     if (!selectedConversation || !selectedGroup) {
       setStatus(null); setApprovals([]); setWakes([]); setMemes([]); setVoices([]);
@@ -1018,16 +1017,16 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups:
   return <section className="data-page chatbot-runtime-page">
     <Card className="runtime-control-card" title={tr('选择会话')} extra={<Space>
       {selectedGroup && <Button size="small" icon={<SettingOutlined />} onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button>}
-      <Button icon={<ReloadOutlined />} onClick={() => { setConversationListRevision((value) => value + 1); void refresh(); }}>{tr('刷新会话列表')}</Button>
+      <Button icon={<ReloadOutlined />} onClick={onRefresh}>{tr('刷新会话列表')}</Button>
       {selectedConversation && <Button size="small" onClick={() => void refresh()}>{tr('刷新状态')}</Button>}
     </Space>}>
       <Select className="full-width" loading={conversationLoading} value={selectedConversationKey || undefined} onChange={setSelectedConversationKey} placeholder={tr('选择账号和会话')} notFoundContent={conversationLoading ? tr('正在加载会话…') : tr('没有可管理会话')} options={conversationTargets.map((item) => ({ value: JSON.stringify([item.id, item.externalId]), label: `${item.accountName} · ${item.name || item.externalId} · ${item.conversationType === 'private' ? tr('私聊') : tr('群聊')}${item.enabled ? '' : ` · ${tr('已停用')}`} · ${item.externalId}` }))} />
-      {conversationListError && <Alert className="runtime-empty-alert" type="error" showIcon message={tr('会话列表读取失败')} description={conversationListError} action={<Button size="small" onClick={() => setConversationListRevision((value) => value + 1)}>{tr('重试')}</Button>} />}
-      {!conversationLoading && !conversationListError && conversationTargets.length === 0 && <Alert className="runtime-empty-alert" type="info" showIcon message={tr('尚无可管理会话')} description={tr(groups.length ? '已存在会话策略，但没有有效的会话 ID。请在群聊策略中填写群聊或私聊 OpenID。' : accounts.length ? '会话列表来自已保存的群聊策略，不会自动发现历史聊天。请先创建策略并填写外部会话 ID。' : '请先配置平台账号，再创建群聊或私聊策略并填写外部会话 ID。')} action={<Space>
+      {conversationListError && <Alert className="runtime-empty-alert" type="error" showIcon message={tr('会话列表读取失败')} description={conversationListError} action={<Button size="small" onClick={() => onRefresh()}>{tr('重试')}</Button>} />}
+      {!conversationLoading && !conversationListError && conversationTargets.length === 0 && <Alert className="runtime-empty-alert" type="info" showIcon message={tr('尚无可管理会话')} description={tr(groups.length ? '已有会话策略但缺少有效 ID，请到群聊策略补充群聊或私聊 OpenID 后刷新。' : accounts.length ? '会话列表只读取已保存的策略，不会扫描历史聊天。请添加群聊/私聊策略并填写 OpenID。' : '请先配置平台账号，再到群聊策略添加群聊/私聊并填写 OpenID。历史聊天不会自动加入此列表。')} action={<Space>
         <Button type="primary" size="small" onClick={() => onNavigate(accounts.length ? 'groups' : 'accounts')}>{tr(accounts.length ? '添加会话策略' : '配置平台账号')}</Button>
-        <Button size="small" onClick={() => setConversationListRevision((value) => value + 1)}>{tr('刷新')}</Button>
+        <Button size="small" onClick={() => onRefresh()}>{tr('刷新')}</Button>
       </Space>} />}
-      {statusError && <Alert className="runtime-empty-alert" type="warning" showIcon message={tr('会话状态读取失败')} description={statusError} action={<Button size="small" onClick={() => { setConversationListRevision((value) => value + 1); void refresh(); }}>{tr('刷新')}</Button>} />}
+      {statusError && <Alert className="runtime-empty-alert" type="warning" showIcon message={tr('会话状态读取失败')} description={statusError} action={<Button size="small" onClick={onRefresh}>{tr('刷新')}</Button>} />}
       {status && <div className="runtime-status-grid">
         <div><span>{tr('会话策略')}</span><strong>{status.enabled ? tr('启用') : tr('已停用')}</strong></div><div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
         <div><span>{tr('对话上下文')}</span><strong>{status.contextMessages}</strong></div><div><span>{tr('静默')}</span><strong>{status.silent ? tr('启用') : tr('停用')}</strong></div>
@@ -1036,7 +1035,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate }: { groups:
     </Card>
     {selectedGroup && status && <>
       <Card className="runtime-control-card" title={tr('会话设置')}>
-        <p className="form-note">{tr('此处配置运行时设置；模型、供应商、白名单、预算、提示词和扩展策略请在群聊策略中配置。')} <Button type="link" onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button></p>
+        <p className="form-note">{tr('此处配置临时运行设置；系统提示词、模型、供应商、白名单、预算和工具策略请在群聊策略中配置。')} <Button type="link" onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button></p>
         <div className="runtime-control-row"><span>{tr('运行模式')}</span><Select value={mode} onChange={setMode} options={['chat', 'reserved', 'reserved2', 'closed-agent'].map((value) => ({ value, label: value }))} /><Button type="primary" loading={busy} onClick={() => void runControl({ action: 'mode', mode })}>{tr('保存模式')}</Button></div>
         <div className="runtime-control-row"><span>{tr('静默模式')}</span><Switch checked={silent} onChange={(value) => { setSilent(value); void runControl({ action: 'silent', silent: value }); }} checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></div>
         <label className="runtime-prompt-field"><span>{tr('一次性提示')} · {tr('只会在下一次模型请求中消费；留空后点击保存会清除。')}</span><Input.TextArea value={initialPrompt} maxLength={4000} showCount rows={3} onChange={(event) => setInitialPrompt(event.target.value)} /></label>
