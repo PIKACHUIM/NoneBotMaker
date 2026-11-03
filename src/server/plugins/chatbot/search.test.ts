@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseBingRss, parseDuckDuckGoHtml, parseDuckDuckGoLite, webSearch } from './search';
+import { parseBaiduMobile, parseBingRss, parseDuckDuckGoHtml, parseDuckDuckGoLite, webSearch } from './search';
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 const dns = () => json({ Status: 0, Answer: [{ type: 1, data: '8.8.8.8' }] });
@@ -44,10 +44,26 @@ describe('free web search parsers', () => {
     expect(parseBingRss(xml, 5)).toEqual([{ title: 'Bing & title', url: 'https://bing.example/a', snippet: 'hello world' }]);
   });
 
-  it('falls back from DuckDuckGo to Bing in auto mode', async () => {
+  it('parses Baidu mobile SSR results and skips unsafe links', () => {
+    const html = `<script>window.__state={"citationList":[{"abstract":"A &amp; B","title":"T","url":"https://example.com/a"},{"title":"bad","url":"javascript:1"}]};</script>`;
+    expect(parseBaiduMobile(html, 5)).toEqual([{ title: 'T', url: 'https://example.com/a', snippet: 'A & B' }]);
+  });
+
+  it('uses Baidu mobile when DuckDuckGo is challenged', async () => {
     const fetchImpl = routed((url) => url.includes('duckduckgo')
       ? new Response('<html><div class="anomaly-modal">challenge</div></html>', { headers: { 'content-type': 'text/html' } })
-      : new Response('<rss><channel><item><title>B</title><link>https://b.example</link><description>s</description></item></channel></rss>', { headers: { 'content-type': 'application/rss+xml' } }));
+      : new Response('<script>{"citationList":[{"title":"B","url":"https://b.example","abstract":"s"}]}</script>', { headers: { 'content-type': 'text/html' } }));
+    await expect(webSearch('test', { engine: 'auto' }, fetchImpl as typeof fetch)).resolves.toMatchObject({
+      engine: 'baidu', results: [{ title: 'B', url: 'https://b.example', snippet: 's' }],
+    });
+  });
+
+  it('falls back from DuckDuckGo and Baidu to Bing in auto mode', async () => {
+    const fetchImpl = routed((url) => url.includes('duckduckgo')
+      ? new Response('<html><div class="anomaly-modal">challenge</div></html>', { headers: { 'content-type': 'text/html' } })
+      : url.includes('baidu')
+        ? new Response('<html><div>wappass.baidu.com/static/captcha</div></html>', { headers: { 'content-type': 'text/html' } })
+        : new Response('<rss><channel><item><title>B</title><link>https://b.example</link><description>s</description></item></channel></rss>', { headers: { 'content-type': 'application/rss+xml' } }));
     await expect(webSearch('test', { engine: 'auto' }, fetchImpl as typeof fetch)).resolves.toMatchObject({
       engine: 'bing', results: [{ title: 'B', url: 'https://b.example', snippet: 's' }],
     });

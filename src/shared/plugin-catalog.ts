@@ -53,14 +53,15 @@ const chatbotDefinition: PluginDefinition = {
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [
-      '免费选项无需密钥：auto 依次尝试 DuckDuckGo、Bing；brave 需要填写 Brave Search API Key。',
-      'Free options need no key: auto tries DuckDuckGo then Bing; brave requires a Brave Search API key.',
+      '免费选项无需密钥：auto 依次尝试 DuckDuckGo、百度、Bing；brave 需要填写 Brave Search API Key。',
+      'Free options need no key: auto tries DuckDuckGo, Baidu, then Bing; brave requires a Brave Search API key.',
     ], {
       group: searchGroup,
       default: 'auto',
       options: [
-        { value: 'auto', label: { zh: 'auto / 自动（DuckDuckGo → Bing）', en: 'auto / DuckDuckGo then Bing' } },
+        { value: 'auto', label: { zh: 'auto / 自动（DuckDuckGo → 百度 → Bing）', en: 'auto / DuckDuckGo, Baidu, Bing' } },
         { value: 'duckduckgo', label: { zh: 'DuckDuckGo（免费）', en: 'DuckDuckGo (free)' } },
+        { value: 'baidu', label: { zh: '百度（免费）', en: 'Baidu (free)' } },
         { value: 'bing', label: { zh: 'Bing（免费）', en: 'Bing (free)' } },
         { value: 'brave', label: { zh: 'Brave（需要密钥）', en: 'Brave (API key)' } },
       ],

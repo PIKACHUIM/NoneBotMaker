@@ -1,6 +1,6 @@
 import { boundedText, safeFetch } from './network';
 
-export type WebSearchEngine = 'auto' | 'duckduckgo' | 'bing' | 'brave';
+export type WebSearchEngine = 'auto' | 'duckduckgo' | 'baidu' | 'bing' | 'brave';
 
 export interface WebSearchResult {
   title: string;
@@ -22,7 +22,7 @@ const BROWSER_HEADERS: Record<string, string> = {
 };
 
 export function normalizeSearchEngine(value: unknown): WebSearchEngine {
-  return value === 'duckduckgo' || value === 'bing' || value === 'brave' ? value : 'auto';
+  return value === 'duckduckgo' || value === 'baidu' || value === 'bing' || value === 'brave' ? value : 'auto';
 }
 
 function clampLimit(value: unknown): number {
@@ -121,6 +121,70 @@ export function parseBingRss(xml: string, limit: number): WebSearchResult[] {
   return dedupe(results, limit);
 }
 
+function extractJsonArrays(text: string, key: string): unknown[] {
+  const marker = `"${key}":[`;
+  const values: unknown[] = [];
+  let cursor = 0;
+  for (;;) {
+    const index = text.indexOf(marker, cursor);
+    if (index < 0) return values;
+    const start = index + marker.length - 1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let position = start; position < text.length; position += 1) {
+      const code = text.charCodeAt(position);
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (code === 92) escaped = true;
+        else if (code === 34) inString = false;
+        continue;
+      }
+      if (code === 34) inString = true;
+      else if (code === 91) depth += 1;
+      else if (code === 93 && --depth === 0) { end = position + 1; break; }
+    }
+    if (end < 0) return values;
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end));
+      if (Array.isArray(parsed)) values.push(...parsed);
+    } catch { /* skip malformed embedded state */ }
+    cursor = end;
+  }
+}
+
+/** 百度移动版把结果内嵌在 SSR JSON 中；Cloudflare 出口访问 www.baidu.com 会被验证码拦截。 */
+export function parseBaiduMobile(html: string, limit: number): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+  for (const item of extractJsonArrays(html, 'citationList')) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const link = record.linkInfo && typeof record.linkInfo === 'object' ? record.linkInfo as Record<string, unknown> : {};
+    const url = typeof record.url === 'string' && /^https?:\/\//i.test(record.url) ? record.url
+      : typeof link.href === 'string' && /^https?:\/\/m\.baidu\.com\//i.test(link.href) ? link.href : '';
+    if (!url) continue;
+    const abstract = typeof record.abstract === 'string' ? record.abstract : typeof record.content === 'string' ? record.content : '';
+    results.push({
+      title: trimText(typeof record.title === 'string' ? record.title : url, 300),
+      url,
+      snippet: trimText(abstract, 500),
+    });
+    if (results.length >= limit * 2) break;
+  }
+  return dedupe(results, limit);
+}
+
+async function baidu(query: string, limit: number, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  const response = await safeFetch(`https://m.baidu.com/s?word=${encodeURIComponent(query)}`, {
+    headers: { ...BROWSER_HEADERS, 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' },
+  }, fetchImpl);
+  const html = await boundedText(response, 4 * 1024 * 1024);
+  const results = parseBaiduMobile(html, limit);
+  if (!results.length) throw new Error(/wappass\.baidu\.com\/static\/captcha/.test(html) ? 'Baidu returned a verification page.' : 'Baidu returned no parsable results.');
+  return results;
+}
+
 async function duckDuckGo(query: string, limit: number, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
   const region = /[\u3400-\u9fff]/.test(query) ? 'cn-zh' : 'us-en';
   const endpoint = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=${region}`;
@@ -161,14 +225,15 @@ export async function webSearch(
   const limit = clampLimit(options.limit);
   const selected = normalizeSearchEngine(options.engine);
   const braveKey = typeof options.braveApiKey === 'string' ? options.braveApiKey.trim() : '';
-  const order: Array<'duckduckgo' | 'bing' | 'brave'> = selected === 'auto' ? ['duckduckgo', 'bing', ...(braveKey ? ['brave' as const] : [])] : [selected];
+  const order: Array<'duckduckgo' | 'baidu' | 'bing' | 'brave'> = selected === 'auto' ? ['duckduckgo', 'baidu', 'bing', ...(braveKey ? ['brave' as const] : [])] : [selected];
   const failures: string[] = [];
   for (const engine of order) {
     if (engine === 'brave' && !braveKey) throw new Error('Brave Search requires brave_api_key in the plugin settings.');
     try {
       const results = engine === 'duckduckgo' ? await duckDuckGo(text, limit, fetchImpl)
-        : engine === 'bing' ? await bing(text, limit, fetchImpl)
-          : await brave(text, limit, braveKey, fetchImpl);
+        : engine === 'baidu' ? await baidu(text, limit, fetchImpl)
+          : engine === 'bing' ? await bing(text, limit, fetchImpl)
+            : await brave(text, limit, braveKey, fetchImpl);
       if (results.length) return { engine, query: text, results };
       failures.push(`${engine}: no results`);
     } catch (error) {
