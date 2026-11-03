@@ -334,9 +334,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .integration-tabs .ant-tabs-tab .anticon { margin-right: 6px; color: var(--accent); }
 .integration-tabs .ant-tabs-tab .ant-tag { margin-left: 7px; color: #93aaa5; border-color: #354447; background: #202a2d; font: 8px var(--mono); }
 .tab-panel { padding-top: 12px; }
-.identity-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0 0; }
-.identity-switch-hint { color: var(--muted); font-size: 11px; }
-.identity-panel .tab-panel { padding-top: 4px; }
 .id-list { display: grid; gap: 0; }
 .id-list-row { display: flex; gap: 8px; align-items: flex-start; }
 .id-list-row .ant-form-item { flex: 1; margin-bottom: 10px; }

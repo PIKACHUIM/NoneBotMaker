@@ -504,10 +504,18 @@ const EN: Record<string, string> = {
   '角色卡与项目记忆会在该提示词之后叠加注入，不会相互覆盖。': 'Role cards and project memories are appended after this prompt; they do not overwrite each other.',
   '项目记忆会叠加在该提示词之后，不会相互覆盖。': 'Project memories are appended after this prompt; they do not overwrite it.',
   '身份策略视图': 'Identity policy views',
+  '单价': 'Price',
+  '身份': 'Identity',
+  '对话': 'Dialogue',
+  '语音': 'Voice',
+  '记忆': 'Memory',
+  '技能': 'Skills',
+  '规则': 'Rules',
   '三者在系统提示词中依次叠加：身份策略 → 角色卡 → 项目记忆。': 'All three stack in the system prompt: identity policy, then role cards, then project memories.',
   '沿用插件默认': 'Use the plugin default',
   '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。': 'Select capability policies and override the model, prompt and extensions per conversation.',
   '配置对话/语音/身份策略、AI供应商与单价，以及 Skills、MCP 和 Rules。': 'Configure dialogue, voice and identity policies, model providers and prices, plus Skills, MCP and Rules.',
+  '配置 AI 供应商与单价，以及身份、对话、语音、记忆策略和技能、MCP、规则。': 'Configure AI providers and prices, plus identity, dialogue, voice and memory policies together with Skills, MCP and Rules.',
 };
 
 interface LanguageContextValue {

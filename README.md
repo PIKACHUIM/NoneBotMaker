@@ -147,7 +147,7 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 - 表情素材只接受经过图片类型/大小校验并由视觉模型明确审核通过的 owner 上传素材；素材按会话隔离。
 - 账号语音素材库可通过管理台上传、查看和删除，也可由 owner 在 QQ 中使用 `/voice list`、`/voice delete <name>` 管理。只接受通过 MIME 与文件魔数校验的 MP3/WAV，单文件上限 5 MiB，发送频率按账号配置限额；`chat_send_voice` 仅在用户明确请求语音时开放。AI 语音合成使用会话选择的 API/语音模型，必须登记字符单价，并通过 QQ 富媒体接口发送，不依赖本地语音目录。
 - 群聊用语学习按配置的消息阈值与冷却时间收集候选，搜索/模型研究结果保持待审核；只有 owner 明确确认的词汇才会注入提示词。管理台支持候选查看、研究内容编辑、确认、拒绝和删除。
-- 管理台「会话运行管理」提供会话状态、模式/静默/一次性提示/工具限制、上下文重置、审批、计划唤醒、表情素材、账号语音素材和群聊用语的管理入口；生产接口仍受管理会话鉴权与账号/会话范围校验保护。
+- 管理台「会话管理」提供运行状态、模式/静默/一次性提示/工具限制、上下文重置、审批、计划唤醒、表情素材、账号语音素材和群聊用语的管理入口。页面会话列表只从已保存的群聊策略及其群/私聊 OpenID 生成，不会自动扫描历史聊天；为空时按提示先配置平台账号和会话策略。模型/供应商/白名单/预算等策略设置仍在「群聊策略」页编辑。生产接口受管理会话鉴权与账号/会话范围校验保护。
 
 `src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。`onMessage()` 复用 NoneBot 的消息 matcher 默认阻断，`MatcherContext.skip()` 只跳过当前 handler 并继续执行同 matcher 的下一个 handler。交互 session 默认在下一条 message 上续接；matcher 可用 `resumeType` 指定其他续接事件类型。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver/adapter 生态及本地 shell/文件系统工具不能因此宣称完全兼容。Cloudflare Worker 也不运行 `pyttsx3` 等本地 Python 语音引擎，语音依赖兼容供应商 API。
 

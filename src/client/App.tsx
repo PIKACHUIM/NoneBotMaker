@@ -100,14 +100,14 @@ type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'setup' } | { kind: 
 type LibraryData = Record<LibraryKind, LibraryRecord[]>;
 type LogFilters = { q?: string; pluginId?: string; openid?: string; accountId?: string; groupId?: string; from?: string; to?: string };
 
-const libraryNames: Record<LibraryKind, string> = { skills: 'Skills', mcps: 'MCP', rules: 'Rules' };
+const libraryNames: Record<LibraryKind, string> = { skills: '技能', mcps: 'MCP', rules: '规则' };
 const pageTitles: Record<AdminPage, { title: string; eyebrow: string; description: string }> = {
   overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '查看 Bot 实例、群聊与扩展能力的当前配置。' },
   plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
   accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
   groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
   conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '管理会话运行状态、模式、静默、提示与工具；模型、供应商、白名单和预算请在群聊策略配置。' },
-  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置对话/语音/身份策略、AI供应商与单价，以及 Skills、MCP 和 Rules。' },
+  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 AI 供应商与单价，以及身份、对话、语音、记忆策略和技能、MCP、规则。' },
   logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
 
@@ -1281,33 +1281,14 @@ function IntegrationsPage({ providers, prices, libraries, policies, accounts, me
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
     { key: 'providers', label: <span><ApiOutlined /> {tr('AI供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity') + memories.length}</Tag></span>, children: <IdentityPanel policies={policies} providers={providers} libraries={libraries} accounts={accounts} memories={memories} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'voice', label: <span><MessageOutlined /> {tr('语音策略')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
+    { key: 'prices', label: <span><DatabaseOutlined /> {tr('单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份')} <Tag>{count('identity')}</Tag></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'voice', label: <span><MessageOutlined /> {tr('语音')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'memories', label: <span><BookOutlined /> {tr('记忆')} <Tag>{memories.length}</Tag></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
+    ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {tr(libraryNames[kind])} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
-}
-
-function IdentityPanel({ policies, providers, libraries, accounts, memories, onRefresh, onError }: {
-  policies: PolicyRecord[]; providers: ProviderRecord[]; libraries: LibraryData; accounts: BotAccountRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
-}) {
-  const { tr } = useI18n();
-  const [view, setView] = useState<'policies' | 'memories'>('policies');
-  const identityCount = policies.filter((item) => item.type === 'identity').length;
-  const change = (value: string | number) => setView(value as 'policies' | 'memories');
-  return <div className="identity-panel">
-    <div className="identity-switch">
-      <Segmented size="small" value={view} onChange={change} aria-label={tr('身份策略视图')} options={[
-        { value: 'policies', label: `${tr('身份策略')} ${identityCount}` },
-        { value: 'memories', label: `${tr('项目记忆')} ${memories.length}` },
-      ]} />
-      <span className="identity-switch-hint">{tr('项目记忆会叠加在身份策略的系统提示词之后，不会相互覆盖。')}</span>
-    </div>
-    {view === 'policies' && <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} />}
-    {view === 'memories' && <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} />}
-  </div>;
 }
 
 function policySummary(type: PolicyType, policy: PolicyRecord, providers: ProviderRecord[]): string {
