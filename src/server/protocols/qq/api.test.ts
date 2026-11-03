@@ -61,7 +61,7 @@ describe('QQ media delivery', () => {
     const handler = createChatbotHandler({
       findGroup: async () => group, findProvider: async () => provider,
       findPrice: async (model, unit) => ({ id: model, model, enabled: true, unit, currency: 'USD', inputCostPerMillion: 1, outputCostPerMillion: 1 } as ModelPriceRecord),
-      getRecentContext: async () => [], isWithinCostLimits: async () => true, recordGroupCost: async () => undefined,
+      getRecentContext: async () => [], getState: async () => ({}), setState: async () => undefined, isWithinCostLimits: async () => true, recordGroupCost: async () => undefined,
       sendReply: (account, target, id, content, options) => replyToQQGroup(account, target, id, content, fetch, options?.seq, options?.conversationType),
       sendMedia: (account, target, id, media, options) => sendQQMedia(account, target, id, media, options, fetch), fetch,
     });

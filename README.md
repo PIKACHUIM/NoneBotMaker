@@ -138,16 +138,19 @@ EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服�
 
 内置聊天执行链支持 JSON/流式 SSE 响应、多轮工具调用、多个 MCP 的发现与调用、Skills/Rules 提示词、历史摘要压缩和身份元数据。`chat` 正常回复；`reserved` 抑制 `[SILENT]`；`reserved2` 仍运行 Agent，但只通过发送工具发消息；`closed-agent` 仅允许管理员私聊。管理员可通过 `/status`、`/reset`、`/mode`、`/role`、`/memory` 管理当前会话。
 
-- `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理命名角色卡，支持按运行模式渲染内容。
-- 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。不会跨账号或跨会话共享。
+- `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理会话内角色卡，支持按运行模式渲染。管理台还可维护账号共享角色卡和项目记忆；`ProjectMemorySearch/Read` 可跨同账号会话检索，共享写入/删除仅向 owner 提供。
+- 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。会话记忆按会话隔离，不与账号共享记忆混用。
 - MCP 非只读操作先持久化待审批，不会因模型提出调用就执行。管理员通过 `/approvals`、`/approval <id>` 检查请求参数，使用 `/approve <id>` 或 `/reject <id>` 决定。批准后先原子认领、执行并保存结果，再继续 Agent；未知执行结果不会自动重复外部副作用。KV/Blob 没有原子审批认领时，不开放此类危险工具。
 - `/tools disable <name>`、`/tools enable <name>`、`/tools reset` 控制当前会话的工具；启用操作不能扩充会话原本的权限，切换模式会重置额外禁用项。
 - Cloudflare DO 提供持久化计划唤醒，可通过 `/wake list` 和 `/wake cancel <id>` 管理。唤醒是合成事件，不继承管理员管理命令、记忆写入或语音授权；主动发送受 QQ 平台权限和限额约束。
-- AI 语音配置使用会话选择的 AI API 和语音模型，必须登记字符单价并由用户明确请求语音。生成 MP3 后走 QQ 富媒体上传和发送，不需要本地语音目录。直传上限为 5 MiB。
+- 表情素材只接受经过图片类型/大小校验并由视觉模型明确审核通过的 owner 上传素材；素材按会话隔离。
+- 账号语音素材库可通过管理台上传、查看和删除，也可由 owner 在 QQ 中使用 `/voice list`、`/voice delete <name>` 管理。只接受通过 MIME 与文件魔数校验的 MP3/WAV，单文件上限 5 MiB，发送频率按账号配置限额；`chat_send_voice` 仅在用户明确请求语音时开放。AI 语音合成使用会话选择的 API/语音模型，必须登记字符单价，并通过 QQ 富媒体接口发送，不依赖本地语音目录。
+- 群聊用语学习按配置的消息阈值与冷却时间收集候选，搜索/模型研究结果保持待审核；只有 owner 明确确认的词汇才会注入提示词。管理台支持候选查看、研究内容编辑、确认、拒绝和删除。
+- 管理台「会话运行管理」提供会话状态、模式/静默/一次性提示/工具限制、上下文重置、审批、计划唤醒、表情素材、账号语音素材和群聊用语的管理入口；生产接口仍受管理会话鉴权与账号/会话范围校验保护。
 
-`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver、适配器生态及本地 shell/文件系统工具不能因此宣称完全兼容。
+`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver/adapter 生态及本地 shell/文件系统工具不能因此宣称完全兼容。Cloudflare Worker 也不运行 `pyttsx3` 等本地 Python 语音引擎，语音依赖兼容供应商 API。
 
-尚未完整移植上游的表情素材审核与持久素材库、完整控制台会话管理接口及全部 NoneBot driver/adapter。当前媒体发送、角色卡和记忆工具不能替代这些缺失能力；测试通过不代表上游全功能达到 100% 等价。真实 QQ 收发、主动消息权限和供应商媒体能力仍需用测试账号做外部联调。
+上述为项目内可执行的 TypeScript 行为移植，并不代表与上游 Python 插件生态 100% 等价。真实 QQ 收发、主动消息权限、AI/Brave/TTS 供应商行为和平台媒体能力仍需使用测试账号及真实服务完成外部联调。
 
 管理台右上角提供「中 / EN」切换，导航、页面标题、表格、表单和插件字段标签/说明会跟随语言切换。语言选择保存在浏览器本地。
 

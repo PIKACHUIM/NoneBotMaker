@@ -4,8 +4,9 @@ import { readBoolean } from '../../server/env';
 import { completeRecentTurns } from '../../server/plugins/chatbot/tools';
 import { createMemeLibrary } from '../../server/plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../../server/plugins/chatbot/meme-storage';
+import { createKVVoiceAssetStore, createVoiceLibrary } from '../../server/plugins/chatbot/voice-library';
 import { SlangWorkflow } from '../../server/plugins/chatbot/slang';
-import { createConversationLogRepository } from '../../server/storage/conversation-log-repository';
+import { createConversationLogRepository, sanitizeLogDetails } from '../../server/storage/conversation-log-repository';
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
 import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from '../../server/plugins/chatbot/policies';
 import { createRepository } from '../../server/storage/repository';
@@ -228,7 +229,7 @@ export class QQGatewayDurableObject {
     const accountId = typeof body.accountId === 'string' ? body.accountId : '';
     const groupId = typeof body.groupId === 'string' ? body.groupId : '';
     const action = typeof body.action === 'string' ? body.action : '';
-    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete'].includes(action)) {
+    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) {
       return Response.json({ error: 'invalid_request' }, { status: 400 });
     }
     const repository = createRepository(this.env);
@@ -253,7 +254,10 @@ export class QQGatewayDurableObject {
       const call = approval.call as Record<string, unknown> | undefined;
       const fn = call?.function as Record<string, unknown> | undefined;
       if (typeof approval.id !== 'string' || typeof fn?.name !== 'string' || typeof approval.status !== 'string' || !Number.isFinite(approval.expiresAt)) return [];
-      return [{ id: approval.id, tool: fn.name, status: approval.status, expiresAt: approval.expiresAt as number, requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '' }];
+      let args: JsonObject | undefined;
+      if (typeof fn.arguments === 'string' && fn.arguments.length <= 16_384) { try { args = sanitizeLogDetails(JSON.parse(fn.arguments)); } catch { args = { unavailable: 'invalid_json' }; } }
+      return [{ id: approval.id, tool: fn.name, status: approval.status, expiresAt: approval.expiresAt as number,
+        requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '', ...(args ? { arguments: args } : {}) }];
     }) : [];
     if (action === 'status') {
       return Response.json({ data: {
@@ -299,6 +303,21 @@ export class QQGatewayDurableObject {
       await writeState(scope, state);
       return Response.json({ data: { disabledTools: state.disabledTools } });
     }
+    if (action === 'voiceList' || action === 'voiceUpload' || action === 'voiceDelete') {
+      const voiceStore = createKVVoiceAssetStore(this.env);
+      if (!voiceStore) return Response.json({ error: 'voice_storage_unavailable' }, { status: 503 });
+      const library = createVoiceLibrary(voiceStore);
+      if (action === 'voiceList') return Response.json({ data: { items: await library.list(accountId) } });
+      if (action === 'voiceDelete') {
+        if (typeof body.voiceName !== 'string') return Response.json({ error: 'invalid_voice_asset' }, { status: 400 });
+        return Response.json({ data: { deleted: await library.delete(accountId, 'account', body.voiceName) } });
+      }
+      if (typeof body.voiceName !== 'string' || typeof body.voiceContentType !== 'string' || typeof body.voiceData !== 'string' || body.voiceData.length > 7 * 1024 * 1024) return Response.json({ error: 'invalid_voice_asset' }, { status: 400 });
+      let voiceBytes: Uint8Array;
+      try { voiceBytes = Uint8Array.from(atob(body.voiceData), (character) => character.charCodeAt(0)); } catch { return Response.json({ error: 'invalid_voice_asset' }, { status: 400 }); }
+      const asset = await library.save({ accountId, scope: 'account', name: body.voiceName, contentType: body.voiceContentType, bytes: voiceBytes, createdBy: 'console-admin' });
+      return Response.json({ data: { asset } });
+    }
     if (action === 'memeList' || action === 'memeDelete') {
       const memeStore = createKVMemeStore(this.env);
       if (!memeStore) return Response.json({ error: 'meme_storage_unavailable' }, { status: 503 });
@@ -342,6 +361,11 @@ export class QQGatewayDurableObject {
       if (typeof body.slangId !== 'string') return Response.json({ error: 'invalid_slangId' }, { status: 400 });
       if (action === 'slangApprove') return Response.json({ data: { item: await slang.approve(body.slangId, true) } });
       if (action === 'slangReject') return Response.json({ data: { item: await slang.reject(body.slangId, true) } });
+      if (action === 'slangUpdate') {
+        const details = body.slangDetails as { meaning?: unknown; usage?: unknown; example?: unknown; risk?: unknown; sources?: unknown } | undefined;
+        if (!details || typeof details.meaning !== 'string' || typeof details.usage !== 'string' || typeof details.example !== 'string' || typeof details.risk !== 'string' || details.sources !== undefined && (!Array.isArray(details.sources) || details.sources.some((source) => typeof source !== 'string'))) return Response.json({ error: 'invalid_slangDetails' }, { status: 400 });
+        return Response.json({ data: { item: await slang.updateDetails(body.slangId, { meaning: details.meaning, usage: details.usage, example: details.example, risk: details.risk, ...(Array.isArray(details.sources) ? { sources: details.sources as string[] } : {}) }, true) } });
+      }
       await slang.delete(body.slangId, true);
       return Response.json({ data: { deleted: true } });
     }

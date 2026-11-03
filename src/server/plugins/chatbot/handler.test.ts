@@ -590,16 +590,26 @@ describe('createChatbotHandler', () => {
       return Response.json({ choices: [{ message: ++round === 1 ? { content: '', tool_calls: [{ id: 'tts', type: 'function', function: { name: 'chat_tts', arguments: '{"text":"hello"}' } }] } : { content: 'already spoken' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
     });
     const sendMedia = vi.fn(async () => undefined);
-    const { deps, writtenLogs, sentReplies } = dependencies({ fetch: applicationFetch, sendMedia, logRecord: 'true', findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const], priceMultiplier: 2 })),
+    const setState = vi.fn(async () => undefined);
+    const { deps, writtenLogs, sentReplies } = dependencies({ fetch: applicationFetch, sendMedia, setState, logRecord: 'true', findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const], priceMultiplier: 2 })),
       findPrice: vi.fn(async (model, unit) => ({ id: unit!, name: model, model, unit: unit!, currency: 'USD' as const, enabled: true, inputCostPerMillion: unit === 'characters' ? 10 : 1, outputCostPerMillion: 2, createdAt: '', updatedAt: '' })) });
     await createChatbotHandler(deps)({ ...account, pluginConfig: { voice_model: 'tts-1' } }, message({ text: '请用语音回复' }));
     expect(applicationFetch.mock.calls.some(([url]) => String(url).endsWith('/audio/speech'))).toBe(true);
     expect(sendMedia).toHaveBeenCalledOnce();
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.0001, 1000);
+    expect(setState).toHaveBeenCalledWith(JSON.stringify(['account-1', 'group', 'group-openid']), expect.objectContaining({ voiceSendTimes: [1_000] }));
     expect(sentReplies).toEqual([]);
     const speech = writtenLogs.mock.calls.flatMap(([entries]) => entries).find((entry) => entry.status === 'speech_completed');
     expect(speech?.details?.usage).toMatchObject({ unit: 'characters', inputCharacters: 5 });
     expect(JSON.stringify(writtenLogs.mock.calls)).not.toContain('Uint8Array');
+  });
+
+  it('does not expose TTS without persistent voice-send limits', async () => {
+    const { deps, fetch } = dependencies({ sendMedia: vi.fn(async () => undefined), findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const] })),
+      findPrice: vi.fn(async (_model, unit) => ({ id: 'speech-price', name: 'Speech', model: 'tts-1', unit: unit!, currency: 'USD' as const, enabled: true, inputCostPerMillion: 10, outputCostPerMillion: 2, createdAt: '', updatedAt: '' })) });
+    await createChatbotHandler(deps)({ ...account, pluginConfig: { voice_model: 'tts-1' } }, message({ text: '请用语音回复' }));
+    const tools = JSON.parse(String(fetch.mock.calls[0][1]?.body)).tools;
+    expect(tools.some((entry: { function: { name: string } }) => entry.function.name === 'chat_tts')).toBe(false);
   });
 
   it('downloads safe outbound media and sends bytes through the injected protocol service', async () => {

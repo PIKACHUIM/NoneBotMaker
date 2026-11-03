@@ -97,6 +97,43 @@ describe('chatbot conversation management API', () => {
     expect(await library.list('account-1')).toEqual([]);
   });
 
+  it('supports scoped slang candidate research edits and manual approval in the authenticated console', async () => {
+    const f = fixture();
+    const control = (body: unknown) => authorized(f, '/chatbot/conversations/account-1/group-1/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const created = await control({ action: 'slangCreate', slangTerm: 'qwerx', slangContext: 'A sample use in the group.' });
+    expect(created.status).toBe(200);
+    const candidate = (await created.json() as { data: { item: { id: string; status: string } } }).data.item;
+    expect(candidate.status).toBe('pending');
+    const updated = await control({ action: 'slangUpdate', slangId: candidate.id, slangDetails: { meaning: 'A group greeting', usage: 'Used at greeting', example: 'qwerx!', risk: 'Context specific', sources: ['https://example.com/slang'] } });
+    expect(updated.status).toBe(200);
+    const approved = await control({ action: 'slangApprove', slangId: candidate.id });
+    expect((await approved.json() as { data: { item: { status: string; meaning: string } } }).data.item).toMatchObject({ status: 'confirmed', meaning: 'A group greeting' });
+    expect((await control({ action: 'slangList' })).status).toBe(200);
+    expect((await control({ action: 'slangReject', slangId: candidate.id })).status).toBe(409);
+  });
+
+  it('manages approved memes and reviewed slang only inside the authenticated target conversation', async () => {
+    const f = fixture();
+    const stores = createKVMemeStore(f.bindings)!;
+    const memeLibrary = createMemeLibrary({ store: stores, review: async () => 'allow' });
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 8]);
+    const scope = JSON.stringify(['account-1', 'group', 'group-openid']);
+    await memeLibrary.save({ accountId: 'account-1', conversationScope: scope, name: 'approved-wave', bytes: png, contentType: 'image/png', createdBy: 'owner' });
+    const control = (body: unknown) => authorized(f, '/chatbot/conversations/account-1/group-1/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const memes = await control({ action: 'memeList' });
+    expect((await memes.json() as { data: { items: Array<Record<string, unknown>> } }).data.items).toMatchObject([{ name: 'approved-wave', contentType: 'image/png', size: png.byteLength }]);
+    expect((await control({ action: 'memeDelete', memeName: 'approved-wave' })).status).toBe(200);
+    const candidate = await control({ action: 'slangCreate', slangTerm: 'qwerx', slangContext: 'Sample usage in the group.' });
+    expect(candidate.status).toBe(200);
+    const id = (await candidate.json() as { data: { item: { id: string } } }).data.item.id;
+    const edited = await control({ action: 'slangUpdate', slangId: id, slangDetails: { meaning: 'A greeting', usage: 'Used at start', example: 'qwerx!', risk: 'Local only', sources: ['https://example.com/ref'] } });
+    expect((await edited.json() as { data: { item: { meaning: string } } }).data.item.meaning).toBe('A greeting');
+    const approved = await control({ action: 'slangApprove', slangId: id });
+    expect((await approved.json() as { data: { item: { status: string } } }).data.item.status).toBe('confirmed');
+    const list = await control({ action: 'slangList' });
+    expect((await list.json() as { data: { items: Array<{ id: string; status: string }> } }).data.items).toMatchObject([{ id, status: 'confirmed' }]);
+  });
+
   it('rejects cross-account group listings even when the external openid matches', async () => {
     const f = fixture();
     f.values.set('nonebotmaker:records:groups:group-2', JSON.stringify({ ...f.group, id: 'group-2', accountId: 'account-2', name: 'Other account' }));

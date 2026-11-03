@@ -17,6 +17,12 @@ export interface RuntimeBot {
   callApi?(name: string, parameters: JsonObject): Promise<unknown>;
 }
 
+/** An adapter converts platform-specific callbacks into the shared event contract. */
+export interface RuntimeAdapter<EventInput = unknown> {
+  platform: string;
+  normalizeEvent(bot: RuntimeBot, input: EventInput): RuntimeEvent | null;
+}
+
 export interface MatcherSession {
   matcherId: string;
   nextHandler: number;
@@ -110,6 +116,10 @@ export class MatcherContext {
     readonly matcher: MatcherDefinition,
     state: JsonObject,
     private readonly dependencies: Map<Dependency<unknown>, Promise<unknown>>,
+    private readonly invokeApi: (name: string, parameters: JsonObject) => Promise<unknown> = async (name, parameters) => {
+      if (!bot.callApi) throw new Error('The bot adapter does not support API calls.');
+      return bot.callApi(name, parameters);
+    },
   ) {
     this.state = state;
     this.block = matcher.block ?? false;
@@ -125,6 +135,10 @@ export class MatcherContext {
 
   send(content: string): Promise<unknown> {
     return this.bot.send(this.event, content);
+  }
+
+  callApi(name: string, parameters: JsonObject): Promise<unknown> {
+    return this.invokeApi(name, parameters);
   }
 
   async finish(content?: string): Promise<never> {
@@ -185,6 +199,7 @@ export class PluginRuntime {
   private readonly plugins = new Map<string, RuntimePlugin>();
   private readonly matchers = new Map<string, MatcherDefinition>();
   private readonly registeredMatchers = new Map<string, MatcherDefinition>();
+  private readonly adapters = new Map<string, RuntimeAdapter>();
   private readonly bots = new Map<string, RuntimeBot>();
   private readonly memorySessions = new Map<string, MatcherSession>();
   private started = false;
@@ -194,6 +209,25 @@ export class PluginRuntime {
   constructor(
     private readonly options: { hooks?: RuntimeHooks; sessions?: MatcherSessionStore; now?: () => number; sessionTimeoutMs?: number } = {},
   ) {}
+
+  registerAdapter(adapter: RuntimeAdapter): void {
+    if (this.started || this.starting) throw new Error('Register adapters before starting the runtime.');
+    if (!adapter.platform || this.adapters.has(adapter.platform)) throw new Error('Adapter platform IDs must be unique and non-empty.');
+    this.adapters.set(adapter.platform, adapter);
+  }
+
+  adapterPlatforms(): string[] {
+    return [...this.adapters.keys()];
+  }
+
+  async dispatchAdapterEvent(bot: RuntimeBot, input: unknown): Promise<DispatchResult> {
+    const adapter = this.adapters.get(bot.platform);
+    if (!adapter) throw new Error(`No event adapter registered for platform: ${bot.platform}`);
+    if (adapter.platform !== bot.platform) throw new Error('Adapter does not belong to this bot platform.');
+    const event = adapter.normalizeEvent(bot, input);
+    if (!event) return { matched: [], blocked: false, ignored: true, errors: [] };
+    return this.dispatch(bot, event);
+  }
 
   register(plugin: RuntimePlugin): void {
     if (this.started || this.starting) throw new Error('Register plugins before starting the runtime.');
@@ -320,7 +354,7 @@ export class PluginRuntime {
       if (resumed && resumed.expiresAt > now) {
         const matcher = this.registeredMatchers.get(resumed.matcherId);
         if (matcher) {
-          const context = new MatcherContext(bot, event, matcher, resumed.state, cache);
+          const context = new MatcherContext(bot, event, matcher, resumed.state, cache, (name, parameters) => this.callApi(bot, name, parameters));
           const permissions = matcher.permissions ?? [];
           if (!permissions.length || (await Promise.all(permissions.map((check) => check(context)))).some(Boolean)) {
             if (resumed.receiveKey && event.message) context.state[resumed.receiveKey] = event.message;
@@ -341,7 +375,7 @@ export class PluginRuntime {
             return;
           }
           if (matcher.type && matcher.type !== event.type) return;
-          const context = new MatcherContext(bot, event, matcher, { ...state, ...structuredClone(matcher.state ?? {}) }, cache);
+          const context = new MatcherContext(bot, event, matcher, { ...state, ...structuredClone(matcher.state ?? {}) }, cache, (name, parameters) => this.callApi(bot, name, parameters));
           try {
             const permissions = matcher.permissions ?? [];
             if (permissions.length && !(await Promise.all(permissions.map((check) => check(context)))).some(Boolean)) return;

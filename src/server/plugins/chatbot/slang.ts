@@ -9,7 +9,7 @@ export interface SlangWorkflowContext {
   minMessages?: number;
   cooldownSeconds?: number;
   extract?: (rows: Array<{ userId: string; context: string }>) => Promise<Array<{ term: string; sourceIndex?: number }>>;
-  research?: (candidate: { term: string; context: string }) => Promise<{ definition: string; sources: string[] }>;
+  research?: (candidate: { term: string; context: string }) => Promise<{ definition: string; meaning?: string; usage?: string; example?: string; risk?: string; sources: string[] }>;
 }
 
 export type SlangStatus = 'pending' | 'confirmed' | 'rejected';
@@ -19,6 +19,10 @@ export interface SlangCandidate {
   term: string;
   context: string;
   definition: string;
+  meaning?: string;
+  usage?: string;
+  example?: string;
+  risk?: string;
   sources: string[];
   status: SlangStatus;
   hits: number;
@@ -116,7 +120,11 @@ function parseCandidate(value: unknown): SlangCandidate | null {
   const sources = value.sources.filter((source): source is string => typeof source === 'string' && source.length <= MAX_SOURCE_CHARS).slice(0, MAX_SOURCE_COUNT);
   return {
     id: value.id.slice(0, 64), term: value.term.slice(0, MAX_TERM_CHARS), context: value.context.slice(0, MAX_CONTEXT_CHARS),
-    definition: value.definition.slice(0, MAX_DEFINITION_CHARS), sources, status: value.status as SlangStatus,
+    definition: value.definition.slice(0, MAX_DEFINITION_CHARS),
+    ...(typeof value.meaning === 'string' ? { meaning: value.meaning.slice(0, MAX_DEFINITION_CHARS) } : {}),
+    ...(typeof value.usage === 'string' ? { usage: value.usage.slice(0, MAX_DEFINITION_CHARS) } : {}),
+    ...(typeof value.example === 'string' ? { example: value.example.slice(0, MAX_DEFINITION_CHARS) } : {}),
+    ...(typeof value.risk === 'string' ? { risk: value.risk.slice(0, MAX_DEFINITION_CHARS) } : {}), sources, status: value.status as SlangStatus,
     hits: Math.max(0, value.hits as number), distinctUsers: Math.max(0, value.distinctUsers as number),
     createdAt: value.createdAt as number, updatedAt: value.updatedAt as number,
     ...(Number.isFinite(value.researchedAt) ? { researchedAt: value.researchedAt as number } : {}),
@@ -197,7 +205,7 @@ export class SlangWorkflow {
 
   private async researchCandidate(candidate: SlangCandidate): Promise<void> {
     if (!this.context.research) return;
-    let result: { definition: string; sources: string[] };
+    let result: { definition: string; meaning?: string; usage?: string; example?: string; risk?: string; sources: string[] };
     try {
       // 上游语料一律作为不可信数据传递，先转义再交给可选研究回调。
       result = await this.context.research({ term: htmlEscape(candidate.term), context: htmlEscape(candidate.context) });
@@ -221,6 +229,10 @@ export class SlangWorkflow {
       const stored = workflow.entries.find((entry) => entry.id === candidate.id);
       if (!stored || stored.status !== 'pending') return;
       stored.definition = definition;
+      stored.meaning = safeResearchText(result.meaning ?? definition, MAX_DEFINITION_CHARS, 4000);
+      stored.usage = safeResearchText(result.usage ?? '', MAX_DEFINITION_CHARS, 4000);
+      stored.example = safeResearchText(result.example ?? '', MAX_DEFINITION_CHARS, 4000);
+      stored.risk = safeResearchText(result.risk ?? '', MAX_DEFINITION_CHARS, 4000);
       stored.sources = sources;
       stored.researchedAt = at;
       stored.updatedAt = at;
@@ -305,6 +317,13 @@ export class SlangWorkflow {
     return saved;
   }
 
+  async hasProcessableBatch(): Promise<boolean> {
+    const workflow = readWorkflow(await this.context.getState(), this.context.scopeKey);
+    const now = this.now();
+    return workflow.messageWindow.filter((entry) => entry.at > now - OBSERVATION_WINDOW_MS && entry.at <= now).length >= this.minMessages &&
+      (workflow.lastBatchAt === 0 || now - workflow.lastBatchAt >= this.cooldownMs);
+  }
+
   async observeBatch(userId: string, text: string): Promise<SlangCandidate[]> {
     await this.queueMessage(userId, text);
     return this.processBatch();
@@ -377,6 +396,33 @@ export class SlangWorkflow {
     const candidate = findCandidate(workflow.entries, safeIdentifier);
     if (!candidate) throw new Error('Slang candidate does not exist in this conversation.');
     return { ...candidate, sources: [...candidate.sources] };
+  }
+
+  async updateDetails(identifier: string, details: { meaning: string; usage: string; example: string; risk: string; sources?: string[] }, isOwner: boolean): Promise<SlangCandidate> {
+    if (!isOwner) throw new Error('Only the conversation owner can edit slang candidates.');
+    const safeIdentifier = boundedText(identifier, 256, 1024, 'Candidate identifier');
+    const meaning = boundedText(details.meaning, MAX_DEFINITION_CHARS, 4000, 'Meaning', true);
+    const usage = boundedText(details.usage, MAX_DEFINITION_CHARS, 4000, 'Usage', true);
+    const example = boundedText(details.example, MAX_DEFINITION_CHARS, 4000, 'Example', true);
+    const risk = boundedText(details.risk, MAX_DEFINITION_CHARS, 4000, 'Risk', true);
+    const sources: string[] = [];
+    for (const value of (details.sources ?? []).slice(0, MAX_SOURCE_COUNT)) {
+      const text = boundedText(value, MAX_SOURCE_CHARS, 2000, 'Source');
+      sources.push(publicHttpsUrl(text).toString());
+    }
+    await this.update((workflow, at) => {
+      const candidate = findCandidate(workflow.entries, safeIdentifier);
+      if (!candidate) throw new Error('Slang candidate does not exist in this conversation.');
+      if (candidate.status === 'rejected') throw new Error('Rejected slang candidate cannot be edited.');
+      candidate.definition = meaning;
+      candidate.meaning = meaning;
+      candidate.usage = usage;
+      candidate.example = example;
+      candidate.risk = risk;
+      candidate.sources = sources;
+      candidate.updatedAt = at;
+    });
+    return this.show(safeIdentifier);
   }
 
   async approve(identifier: string, isOwner: boolean): Promise<SlangCandidate> {

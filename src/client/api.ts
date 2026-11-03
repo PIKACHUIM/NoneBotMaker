@@ -14,10 +14,11 @@ import type {
 } from '../shared/types';
 
 export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
-export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string }>; policyIds?: Record<string, string> }
+export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string; arguments?: Record<string, unknown> }>; policyIds?: Record<string, string> }
 export interface ChatbotWake { id: string; dueAt: number; reason: string }
 export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
-export interface ChatbotSlangCandidate { id: string; term: string; context: string; definition: string; sources: string[]; status: 'pending' | 'confirmed' | 'rejected'; hits: number; distinctUsers: number; createdAt: number; updatedAt: number }
+export interface ChatbotSlangCandidate { id: string; term: string; context: string; definition: string; meaning?: string; usage?: string; example?: string; risk?: string; sources: string[]; status: 'pending' | 'confirmed' | 'rejected'; hits: number; distinctUsers: number; createdAt: number; updatedAt: number }
+export interface ChatbotVoiceSummary { accountId: string; name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
 
 export class ApiError extends Error {
   status: number;

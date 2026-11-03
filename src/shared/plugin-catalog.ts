@@ -179,6 +179,10 @@ const chatbotDefinition: PluginDefinition = {
       '生成语音的大小上限，最多 5 MiB，符合 QQ 富媒体发送限制。',
       'Maximum generated speech size, up to 5 MiB to fit the QQ rich-media limit.',
     ], { group: voiceGroup, default: 5 * 1024 * 1024, min: 1024, max: 5 * 1024 * 1024, step: 1024, scope: 'voice' }),
+    number('voice_sends_per_hour', ['每小时语音发送上限', 'Voice sends per hour'], [
+      '包含语音素材和语音合成的每会话小时上限，1–100，用于控制刷屏。',
+      'Per-conversation hourly limit for both saved voice assets and synthesis, from 1 to 100.',
+    ], { group: voiceGroup, default: 20, min: 1, max: 100, step: 1, scope: 'voice' }),
   ],
   credentialFields: [
     {

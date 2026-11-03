@@ -12,6 +12,26 @@ function fixtures(userId = 'user', botId = 'bot'): { bot: RuntimeBot; event: Run
 }
 
 describe('NoneBot-style event dispatcher', () => {
+  it('normalizes adapter-specific events before dispatch and exposes instrumented adapter APIs', async () => {
+    const before = vi.fn(async () => undefined);
+    const after = vi.fn(async () => undefined);
+    const callApi = vi.fn(async () => ({ accepted: true }));
+    const runtime = new PluginRuntime({ hooks: { apiBefore: [before], apiAfter: [after] } });
+    runtime.registerAdapter({ platform: 'custom', normalizeEvent: (bot, input) => {
+      const packet = input as { sender?: unknown; body?: unknown };
+      if (typeof packet.sender !== 'string' || typeof packet.body !== 'string') return null;
+      return { type: 'message', platform: bot.platform, botId: bot.id, sessionId: 'custom:room', userId: packet.sender, message: { id: 'external-event', accountId: bot.id, botId: bot.id, groupId: 'room', userId: packet.sender, text: packet.body, mentionsBot: false, receivedAt: 0 } };
+    } });
+    runtime.register({ id: 'plugin', matchers: [{ id: 'custom-event', handlers: [async (context) => { await context.callApi('send_reaction', { emoji: 'ok' }); }] }] });
+    const bot: RuntimeBot = { id: 'custom-bot', platform: 'custom', send: vi.fn(), callApi };
+    await expect(runtime.dispatchAdapterEvent(bot, { sender: 'alice', body: 'hello' })).resolves.toMatchObject({ matched: ['plugin:custom-event'] });
+    await expect(runtime.dispatchAdapterEvent(bot, { broken: true })).resolves.toMatchObject({ ignored: true });
+    expect(callApi).toHaveBeenCalledWith('send_reaction', { emoji: 'ok' });
+    expect(before).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+    expect(runtime.adapterPlatforms()).toEqual(['custom']);
+  });
+
   it('executes all same-priority matchers and blocks only lower priorities', async () => {
     const calls: string[] = [];
     const runtime = new PluginRuntime();

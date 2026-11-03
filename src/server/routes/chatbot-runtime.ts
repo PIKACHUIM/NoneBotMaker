@@ -4,15 +4,17 @@ import { configIdSet, configString, conversationIdList, matchesConversationId, p
 import type { QQGroupMessage } from '../protocols/qq/types';
 import { resolveQQAccountById } from '../protocols/qq/accounts';
 import { createRepository } from '../storage/repository';
+import { sanitizeLogDetails } from '../storage/conversation-log-repository';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from '../plugins/chatbot/runtime';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
 import { createMemeLibrary } from '../plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../plugins/chatbot/meme-storage';
+import { createKVVoiceAssetStore, createVoiceLibrary } from '../plugins/chatbot/voice-library';
 import { SlangWorkflow } from '../plugins/chatbot/slang';
 import { ApiError } from './management';
 
 interface ConversationControlRequest {
-  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalDecision' | 'memeList' | 'memeDelete' | 'slangList' | 'slangCreate' | 'slangApprove' | 'slangReject' | 'slangDelete';
+  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalDecision' | 'memeList' | 'memeDelete' | 'slangList' | 'slangCreate' | 'slangApprove' | 'slangReject' | 'slangDelete' | 'slangUpdate' | 'voiceList' | 'voiceUpload' | 'voiceDelete';
   mode?: string;
   silent?: boolean;
   prompt?: string | null;
@@ -25,6 +27,10 @@ interface ConversationControlRequest {
   slangId?: string;
   slangTerm?: string;
   slangContext?: string;
+  slangDetails?: { meaning: string; usage: string; example: string; risk: string; sources?: string[] };
+  voiceName?: string;
+  voiceContentType?: string;
+  voiceData?: string;
 }
 
 interface QQControlNamespace {
@@ -37,7 +43,7 @@ function requiredValue(value: unknown, key: string, max = 256): string {
   return value.trim();
 }
 
-function safeApprovalSummary(state: JsonObject): Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string }> {
+function safeApprovalSummary(state: JsonObject): Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string; arguments?: JsonObject }> {
   if (!Array.isArray(state.toolApprovals)) return [];
   return state.toolApprovals.flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -45,7 +51,12 @@ function safeApprovalSummary(state: JsonObject): Array<{ id: string; tool: strin
     const call = approval.call as Record<string, unknown> | undefined;
     const fn = call?.function as Record<string, unknown> | undefined;
     if (typeof approval.id !== 'string' || typeof fn?.name !== 'string' || typeof approval.status !== 'string' || !Number.isFinite(approval.expiresAt)) return [];
-    return [{ id: approval.id, tool: fn.name, status: approval.status, expiresAt: approval.expiresAt as number, requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '' }];
+    let argumentsObject: JsonObject | undefined;
+    if (typeof fn.arguments === 'string' && fn.arguments.length <= 16_384) {
+      try { argumentsObject = sanitizeLogDetails(JSON.parse(fn.arguments)); } catch { argumentsObject = { unavailable: 'invalid_json' }; }
+    }
+    return [{ id: approval.id, tool: fn.name, status: approval.status, expiresAt: approval.expiresAt as number,
+      requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '', ...(argumentsObject ? { arguments: argumentsObject } : {}) }];
   });
 }
 
@@ -154,6 +165,28 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
       const library = createMemeLibrary({ store, review: async () => 'uncertain' });
       return { deleted: await library.delete(group.accountId, scope, input.memeName) };
     }
+    case 'voiceList': {
+      const store = createKVVoiceAssetStore(bindings);
+      if (!store) throw new ApiError(503, 'voice_storage_unavailable');
+      const library = createVoiceLibrary(store);
+      return { items: await library.list(group.accountId) };
+    }
+    case 'voiceUpload': {
+      const store = createKVVoiceAssetStore(bindings);
+      if (!store) throw new ApiError(503, 'voice_storage_unavailable');
+      if (!input.voiceName || !input.voiceContentType || !input.voiceData || input.voiceData.length > 7 * 1024 * 1024) throw new ApiError(400, 'invalid_voice_asset');
+      let bytes: Uint8Array;
+      try { bytes = Uint8Array.from(atob(input.voiceData), (character) => character.charCodeAt(0)); } catch { throw new ApiError(400, 'invalid_voice_asset'); }
+      const library = createVoiceLibrary(store);
+      return { asset: await library.save({ accountId: group.accountId, scope: 'account', name: input.voiceName, contentType: input.voiceContentType, bytes, createdBy: 'console-admin' }) };
+    }
+    case 'voiceDelete': {
+      const store = createKVVoiceAssetStore(bindings);
+      if (!store) throw new ApiError(503, 'voice_storage_unavailable');
+      if (!input.voiceName) throw new ApiError(400, 'invalid_voice_asset');
+      const library = createVoiceLibrary(store);
+      return { deleted: await library.delete(group.accountId, 'account', input.voiceName) };
+    }
     case 'slangList': {
       const workflow = new SlangWorkflow({ scopeKey: scope, getState: async () => await stores.conversationStore.getState?.(scope) ?? {}, setState: async (next) => { await stores.conversationStore.setState?.(scope, next); } });
       return { items: await workflow.list() };
@@ -165,13 +198,26 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
     }
     case 'slangApprove':
     case 'slangReject':
-    case 'slangDelete': {
+    case 'slangDelete':
+    case 'slangUpdate': {
       const workflow = new SlangWorkflow({ scopeKey: scope, getState: async () => await stores.conversationStore.getState?.(scope) ?? {}, setState: async (next) => { await stores.conversationStore.setState?.(scope, next); } });
       if (!input.slangId) throw new ApiError(400, 'invalid_slangId');
-      if (input.action === 'slangApprove') return { item: await workflow.approve(input.slangId, true) };
-      if (input.action === 'slangReject') return { item: await workflow.reject(input.slangId, true) };
-      await workflow.delete(input.slangId, true);
-      return { deleted: true };
+      try {
+        if (input.action === 'slangApprove') return { item: await workflow.approve(input.slangId, true) };
+        if (input.action === 'slangReject') return { item: await workflow.reject(input.slangId, true) };
+        if (input.action === 'slangUpdate') {
+          const details = input.slangDetails;
+          if (!details || typeof details.meaning !== 'string' || typeof details.usage !== 'string' || typeof details.example !== 'string' || typeof details.risk !== 'string' || details.sources !== undefined && (!Array.isArray(details.sources) || details.sources.some((source) => typeof source !== 'string'))) throw new ApiError(400, 'invalid_slangDetails');
+          return { item: await workflow.updateDetails(input.slangId, details, true) };
+        }
+        await workflow.delete(input.slangId, true);
+        return { deleted: true };
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        const reason = error instanceof Error ? error.message : '';
+        throw new ApiError(reason.includes('does not exist') ? 404 : reason.includes('cannot be') ? 409 : 400,
+          reason.includes('does not exist') ? 'slang_not_found' : reason.includes('cannot be') ? 'slang_transition_conflict' : 'invalid_slang_operation');
+      }
     }
     case 'wakeList':
     case 'wakeCancel':
@@ -227,7 +273,7 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     try { body = await context.req.json() as Record<string, unknown>; }
     catch { throw new ApiError(400, 'invalid_json'); }
     const action = requiredValue(body.action, 'action') as ConversationControlRequest['action'];
-    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
+    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
     const repository = createRepository(context.env);
     const group = await repository.get('groups', groupId) as unknown as GroupRecord | null;
     if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');
@@ -243,6 +289,13 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
       ...(Array.isArray(body.disabledTools) ? { disabledTools: body.disabledTools as string[] } : {}),
       ...(typeof body.wakeId === 'string' ? { wakeId: body.wakeId } : {}),
       ...(typeof body.memeName === 'string' ? { memeName: body.memeName } : {}),
+      ...(typeof body.slangId === 'string' ? { slangId: body.slangId } : {}),
+      ...(typeof body.slangTerm === 'string' ? { slangTerm: body.slangTerm } : {}),
+      ...(typeof body.slangContext === 'string' ? { slangContext: body.slangContext } : {}),
+      ...(body.slangDetails && typeof body.slangDetails === 'object' && !Array.isArray(body.slangDetails) ? { slangDetails: body.slangDetails as ConversationControlRequest['slangDetails'] } : {}),
+      ...(typeof body.voiceName === 'string' ? { voiceName: body.voiceName } : {}),
+      ...(typeof body.voiceContentType === 'string' ? { voiceContentType: body.voiceContentType } : {}),
+      ...(typeof body.voiceData === 'string' ? { voiceData: body.voiceData } : {}),
     };
     return context.json({ data: await control(context.env, accountId, group, input) });
   });

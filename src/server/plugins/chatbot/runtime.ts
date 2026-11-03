@@ -25,6 +25,7 @@ import { createChatbotHandler, type ChatbotHandlerDependencies } from './handler
 import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from './policies';
 import { completeRecentTurns } from './tools';
 import { createKVMemeStore } from './meme-storage';
+import { createKVVoiceAssetStore } from './voice-library';
 
 export interface GroupConversationStore {
   getRecent(groupId: string, limit: number): Promise<ChatMessage[]>;
@@ -69,6 +70,7 @@ export interface StoredChatbotDependencies {
   listWakes?: ChatbotHandlerDependencies['listWakes'];
   cancelWake?: ChatbotHandlerDependencies['cancelWake'];
   memeStore?: ChatbotHandlerDependencies['memeStore'];
+  voiceStore?: ChatbotHandlerDependencies['voiceStore'];
   reserveOutbound?: ChatbotHandlerDependencies['reserveOutbound'];
   fetch?: typeof fetch;
   random?: () => number;
@@ -346,6 +348,7 @@ export function createStoredChatbotHandler(
     listWakes: services.listWakes,
     cancelWake: services.cancelWake,
     memeStore: services.memeStore ?? createKVMemeStore(bindings) ?? undefined,
+    voiceStore: services.voiceStore ?? createKVVoiceAssetStore(bindings) ?? undefined,
     reserveOutbound: services.reserveOutbound,
     isWithinCostLimits: (group, at) => services.costStore.isWithinLimits(group, at),
     recordGroupCost: (group, amount, at) => services.costStore.add(group, amount, at),
@@ -359,13 +362,20 @@ export function createStoredChatbotHandler(
   };
   const handler = createChatbotHandler(dependencies);
   const runtime = new PluginRuntime({ sessions: bindings.DB ? createD1MatcherSessionStore(bindings) : undefined, now: services.now });
+  runtime.registerAdapter({ platform: 'qq', normalizeEvent: (_bot, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const value = input as { account?: QQAccountContext; message?: QQGroupMessage };
+    const message = value.message;
+    if (!value.account || !message || typeof message.accountId !== 'string' || typeof message.groupId !== 'string' || typeof message.userId !== 'string') return null;
+    return { type: 'message', platform: 'qq', botId: message.accountId, sessionId: JSON.stringify([message.conversationType ?? 'group', message.groupId]), userId: message.userId, message, payload: { account: value.account } };
+  } });
   runtime.register({ id: CHATBOT_PLUGIN_TYPE, matchers: [{ id: 'message', type: 'message', priority: 20, handlers: [async (context) => {
     const account = (context.event.payload as { account: QQAccountContext }).account;
     await handler(account, context.event.message as QQGroupMessage);
   }] }] });
   return async (account: QQAccountContext, message: QQGroupMessage): Promise<void> => {
-    const result = await runtime.dispatch({ id: account.account.id, platform: 'qq', send: async (event, text) => services.sendReply(account, event.message!.groupId, event.message!.id, text, { seq: 1, conversationType: event.message?.conversationType ?? 'group' }) },
-      { type: 'message', platform: 'qq', botId: account.account.id, sessionId: JSON.stringify([message.conversationType ?? 'group', message.groupId]), userId: message.userId, message, payload: { account } });
+    const bot = { id: account.account.id, platform: 'qq', send: async (event: import('../dispatcher').RuntimeEvent, text: string) => services.sendReply(account, event.message!.groupId, event.message!.id, text, { seq: 1, conversationType: event.message?.conversationType ?? 'group' }) };
+    const result = await runtime.dispatchAdapterEvent(bot, { account, message });
     if (result.errors.length) throw result.errors[0].error;
   };
 }

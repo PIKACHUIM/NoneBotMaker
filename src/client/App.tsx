@@ -90,7 +90,7 @@ import {
 import { findModelPrice, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ApiError, api } from './api';
-import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotWake } from './api';
+import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake } from './api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
@@ -846,6 +846,19 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   </section>;
 }
 
+function SlangReviewEditor({ candidate, onSave }: { candidate: ChatbotSlangCandidate; onSave: (details: { meaning: string; usage: string; example: string; risk: string; sources: string[] }) => void }) {
+  const { tr } = useI18n();
+  const [form] = Form.useForm<{ meaning: string; usage: string; example: string; risk: string; sourcesText: string }>();
+  useEffect(() => {
+    form.setFieldsValue({ meaning: candidate.meaning ?? candidate.definition ?? '', usage: candidate.usage ?? '', example: candidate.example ?? '', risk: candidate.risk ?? '', sourcesText: candidate.sources.join('\n') });
+  }, [candidate, form]);
+  return <Form form={form} layout="vertical" onFinish={(values) => onSave({ meaning: values.meaning, usage: values.usage, example: values.example, risk: values.risk, sources: values.sourcesText.split(/\s+/).filter(Boolean) })}>
+    <div className="form-grid two-cols"><Form.Item name="meaning" label={tr('释义')}><Input.TextArea rows={2} maxLength={1000} /></Form.Item><Form.Item name="usage" label={tr('使用场景')}><Input.TextArea rows={2} maxLength={1000} /></Form.Item><Form.Item name="example" label={tr('示例')}><Input.TextArea rows={2} maxLength={1000} /></Form.Item><Form.Item name="risk" label={tr('歧义与风险')}><Input.TextArea rows={2} maxLength={1000} /></Form.Item></div>
+    <Form.Item name="sourcesText" label={tr('公共来源 HTTPS URL')} extra={tr('每行一个公开 HTTPS 链接；私网地址会被拒绝。')}><Input.TextArea rows={2} maxLength={5000} /></Form.Item>
+    <Button size="small" htmlType="submit">{tr('保存研究内容')}</Button>
+  </Form>;
+}
+
 function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
   const { message } = AntApp.useApp();
@@ -856,6 +869,8 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
   const [wakes, setWakes] = useState<ChatbotWake[]>([]);
   const [memes, setMemes] = useState<ChatbotMemeSummary[]>([]);
   const [memeError, setMemeError] = useState('');
+  const [voices, setVoices] = useState<ChatbotVoiceSummary[]>([]);
+  const [voiceError, setVoiceError] = useState('');
   const [slang, setSlang] = useState<ChatbotSlangCandidate[]>([]);
   const [slangTerm, setSlangTerm] = useState('');
   const [slangContext, setSlangContext] = useState('');
@@ -880,7 +895,7 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
     return () => { active = false; };
   }, [groups, selectedConversationKey, onError]);
   const refresh = useCallback(async () => {
-    if (!selectedConversation || !selectedGroup) { setStatus(null); setApprovals([]); setWakes([]); setMemes([]); return; }
+    if (!selectedConversation || !selectedGroup) { setStatus(null); setApprovals([]); setWakes([]); setMemes([]); setVoices([]); return; }
     try {
       const [current, pending] = await Promise.all([
         api.getChatbotConversation(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId),
@@ -903,6 +918,10 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
         const slangResult = await api.controlChatbotConversation<{ items: ChatbotSlangCandidate[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'slangList', externalId: selectedConversation.externalId });
         setSlang(slangResult.items); setSlangError('');
       } catch (reason) { setSlang([]); setSlangError(formatError(reason)); }
+      try {
+        const voiceResult = await api.controlChatbotConversation<{ items: ChatbotVoiceSummary[] }>(selectedGroup.accountId, selectedGroup.id, { action: 'voiceList', externalId: selectedConversation.externalId });
+        setVoices(voiceResult.items); setVoiceError('');
+      } catch (reason) { setVoices([]); setVoiceError(formatError(reason)); }
     } catch (reason) { setStatus(null); onError(reason); }
   }, [selectedGroup, selectedConversation, onError]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -911,14 +930,42 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
     setBusy(true);
     try {
       const result = await api.controlChatbotConversation<unknown>(selectedGroup.accountId, selectedGroup.id, { ...payload, externalId: selectedConversation.externalId });
+      if (typeof payload.action === 'string' && payload.action.startsWith('voice')) setVoiceError('');
       if (payload.action === 'approvalDecision' && result && typeof result === 'object' && Array.isArray((result as { messages?: unknown }).messages)) {
         const output = ((result as { messages: unknown[] }).messages).filter((item): item is string => typeof item === 'string');
         if (output.length) message.info(output.join('\n'));
       }
       await refresh();
       return result;
-    } catch (reason) { onError(reason); return undefined; }
+    } catch (reason) {
+      if (typeof payload.action === 'string' && payload.action.startsWith('voice')) setVoiceError(formatError(reason));
+      onError(reason); return undefined;
+    }
     finally { setBusy(false); }
+  };
+  const uploadVoice = async (file: File): Promise<void> => {
+    if (!selectedGroup) return;
+    if (!file.size || file.size > 5 * 1024 * 1024) {
+      setVoiceError(tr('语音文件为空或超过 5 MiB。'));
+      return;
+    }
+    const contentType = file.type === 'audio/mpeg' || file.type === 'audio/wav'
+      ? file.type
+      : file.name.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : file.name.toLowerCase().endsWith('.wav') ? 'audio/wav' : file.type;
+    setBusy(true);
+    setVoiceError('');
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 16_384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16_384));
+      await api.controlChatbotConversation(selectedGroup.accountId, selectedGroup.id, {
+        action: 'voiceUpload', externalId: selectedConversation?.externalId, voiceName: file.name, voiceContentType: contentType, voiceData: btoa(binary),
+      });
+      await refresh();
+    } catch (reason) {
+      setVoiceError(formatError(reason));
+      onError(reason);
+    } finally { setBusy(false); }
   };
   const approvalColumns: TableColumnsType<ChatbotConversationStatus['pendingApprovals'][number]> = [
     { title: tr('审批 ID'), dataIndex: 'id', key: 'id', ellipsis: true },
@@ -932,12 +979,26 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
     { title: tr('执行时间'), dataIndex: 'dueAt', key: 'dueAt', render: (value: number) => prettyDate(value) },
     { title: tr('操作'), key: 'actions', render: (_, row) => <Popconfirm title={tr('确定取消此计划唤醒？')} okText={tr('取消唤醒')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'wakeCancel', wakeId: row.id })}><Button size="small" danger>{tr('取消唤醒')}</Button></Popconfirm> },
   ];
+  const slangColumns: TableColumnsType<ChatbotSlangCandidate> = [
+    { title: tr('群聊用语'), dataIndex: 'term', key: 'term' },
+    { title: tr('状态'), dataIndex: 'status', key: 'status', render: (value: string) => <Tag color={value === 'confirmed' ? 'success' : value === 'rejected' ? 'error' : 'processing'}>{tr(value === 'confirmed' ? '已确认' : value === 'rejected' ? '已拒绝' : '待审核')}</Tag> },
+    { title: tr('命中/人数'), key: 'evidence', render: (_, row) => `${row.hits} / ${row.distinctUsers}` },
+    { title: tr('释义'), dataIndex: 'meaning', key: 'meaning', render: (value: string | undefined, row) => value || row.definition || tr('尚未研究') },
+    { title: tr('操作'), key: 'actions', render: (_, row) => row.status === 'pending' ? <Space><Button size="small" type="primary" loading={busy} onClick={() => void runControl({ action: 'slangApprove', slangId: row.id })}>{tr('确认用语')}</Button><Button size="small" danger loading={busy} onClick={() => void runControl({ action: 'slangReject', slangId: row.id })}>{tr('拒绝')}</Button><Button size="small" loading={busy} onClick={() => void runControl({ action: 'slangDelete', slangId: row.id })}>{tr('删除')}</Button></Space> : row.status === 'rejected' ? <Button size="small" danger onClick={() => void runControl({ action: 'slangDelete', slangId: row.id })}>{tr('删除')}</Button> : <span className="muted">—</span> },
+  ];
   const memeColumns: TableColumnsType<ChatbotMemeSummary> = [
     { title: tr('素材名称'), dataIndex: 'name', key: 'name' },
     { title: tr('图片类型'), dataIndex: 'contentType', key: 'contentType' },
     { title: tr('大小'), dataIndex: 'size', key: 'size', render: (size: number) => `${(size / 1024).toFixed(1)} KB` },
     { title: tr('创建者'), dataIndex: 'createdBy', key: 'createdBy' },
     { title: tr('操作'), key: 'actions', render: (_, item) => <Popconfirm title={tr('删除这个表情素材？')} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'memeDelete', memeName: item.name })}><Button size="small" danger loading={busy}>{tr('删除')}</Button></Popconfirm> },
+  ];
+  const voiceColumns: TableColumnsType<ChatbotVoiceSummary> = [
+    { title: tr('素材名称'), dataIndex: 'name', key: 'name' },
+    { title: tr('语音类型'), dataIndex: 'contentType', key: 'contentType' },
+    { title: tr('大小'), dataIndex: 'size', key: 'size', render: (size: number) => `${(size / 1024).toFixed(1)} KB` },
+    { title: tr('创建者'), dataIndex: 'createdBy', key: 'createdBy' },
+    { title: tr('操作'), key: 'actions', render: (_, item) => <Popconfirm title={tr('删除这个语音素材？')} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'voiceDelete', voiceName: item.name })}><Button size="small" danger loading={busy}>{tr('删除')}</Button></Popconfirm> },
   ];
   return <section className="data-page chatbot-runtime-page">
     <Card className="runtime-control-card" title={tr('选择会话')} extra={<Button icon={<ReloadOutlined />} onClick={() => void refresh()}>{tr('刷新状态')}</Button>}>
@@ -958,7 +1019,7 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
         <Space><Button loading={busy} onClick={() => void runControl({ action: 'tools', disabledTools: disabledToolsText.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean) })}>{tr('保存工具设置')}</Button><Popconfirm title={tr('清空当前会话上下文？')} okText={tr('清空')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'reset' })}><Button danger loading={busy}>{tr('重置会话上下文')}</Button></Popconfirm></Space>
       </Card>
       <Card className="runtime-control-card" title={tr('待审批操作')} extra={<Text type="secondary">{tr('危险 MCP 操作仍需在目标 QQ 会话中由 owner 批准。')}</Text>}>
-        <Table<ChatbotConversationStatus['pendingApprovals'][number]> rowKey="id" columns={approvalColumns} dataSource={approvals} pagination={false} locale={{ emptyText: tr('当前没有待审批操作') }} />
+        <Table<ChatbotConversationStatus['pendingApprovals'][number]> rowKey="id" columns={approvalColumns} dataSource={approvals} pagination={false} locale={{ emptyText: tr('当前没有待审批操作') }} expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('待执行工具参数')}</h3><DetailValue value={row.arguments ?? { unavailable: 'invalid_json' }} /></div> }} />
       </Card>
       <Card className="runtime-control-card" title={tr('计划唤醒')} extra={<Button size="small" onClick={() => void refresh()}>{tr('刷新')}</Button>}>
         {wakeError ? <Alert type="info" showIcon message={wakeError} description={tr('计划唤醒查询仅在提供持久唤醒存储的平台可用。')} /> : <Table<ChatbotWake> rowKey="id" columns={wakeColumns} dataSource={wakes} pagination={false} locale={{ emptyText: tr('当前会话没有计划唤醒') }} />}
@@ -966,6 +1027,18 @@ function ChatbotRuntimePage({ groups, accounts, onError }: { groups: GroupRecord
       <Card className="runtime-control-card" title={tr('已审核表情素材')}>
         {memeError ? <Alert type="info" showIcon message={memeError} description={tr('当前平台未配置持久素材存储。')} /> : <Table<ChatbotMemeSummary> rowKey="name" columns={memeColumns} dataSource={memes} pagination={false} locale={{ emptyText: tr('当前会话还没有已审核表情。') }} />}
       </Card>
+      <Card className="runtime-control-card" title={tr('账号语音素材库')} extra={<Button size="small" onClick={() => void refresh()}>{tr('刷新')}</Button>}>
+        <p className="form-note">{tr('语音文件按账号共享，仅接受有效 MP3/WAV，单个文件最大 5 MiB。发送语音仍需在 QQ 会话中显式触发。')}</p>
+        <label className="runtime-prompt-field"><span>{tr('上传 MP3 或 WAV')}</span><input aria-label={tr('上传 MP3 或 WAV')} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" disabled={busy} onChange={(event) => { const input = event.currentTarget; const file = input.files?.[0]; if (file) void uploadVoice(file).finally(() => { input.value = ''; }); }} /></label>
+        {voiceError ? <Alert type="warning" showIcon message={voiceError} description={tr('账号语音素材存储或请求失败；请检查 KV 配置、文件格式和大小。')} /> : <Table<ChatbotVoiceSummary> rowKey="name" columns={voiceColumns} dataSource={voices} pagination={false} locale={{ emptyText: tr('此账号还没有语音素材。') }} />}
+      </Card>
+      {(selectedConversation?.conversationType ?? selectedGroup.conversationType ?? 'group') === 'group' && <Card className="runtime-control-card" title={tr('群聊用语研究与审核')} extra={<Button size="small" onClick={() => void refresh()}>{tr('刷新')}</Button>}>
+        <p className="form-note">{tr('仅达到群消息阈值的候选会进入研究流程；来源和群聊内容均为非可信数据。必须手动确认后才会进入模型提示词。')}</p>
+        {slangError && <Alert type="warning" showIcon message={slangError} description={tr('以下为当前会话内的候选/已确认记录；搜索依赖Brave密钥，失败时候选保持待审核。')} />}
+        <div className="form-grid two-cols"><Form.Item label={tr('用语')}><Input maxLength={80} value={slangTerm} onChange={(event) => setSlangTerm(event.target.value)} /></Form.Item><Form.Item label={tr('上下文证据')}><Input.TextArea rows={2} maxLength={1000} value={slangContext} onChange={(event) => setSlangContext(event.target.value)} /></Form.Item></div>
+        <Button loading={busy} onClick={() => void runControl({ action: 'slangCreate', slangTerm, slangContext }).then((result) => { if (result) { setSlangTerm(''); setSlangContext(''); } })}>{tr('提交候选')}</Button>
+        <Table<ChatbotSlangCandidate> rowKey="id" columns={slangColumns} dataSource={slang} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} locale={{ emptyText: tr('当前没有群聊用语候选。') }} expandable={{ expandedRowRender: (row) => <SlangReviewEditor candidate={row} onSave={(slangDetails) => void runControl({ action: 'slangUpdate', slangId: row.id, slangDetails })} /> }} />
+      </Card>}
     </>}
   </section>;
 }
@@ -1143,10 +1216,10 @@ function RoleCardsPanel({ data, accounts, onRefresh, onError }: { data: RoleCard
     { title: tr('适用模式'), dataIndex: 'mode', key: 'mode', render: (value?: string) => value || 'all' },
     { title: tr('内容长度'), dataIndex: 'content', key: 'content', render: (value: string) => value.length },
     { title: tr('更新时间'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
-    { title: '', key: 'actions', render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} aria-label={`${tr('编辑')} ${row.name}`} onClick={() => drawer.edit(row.id)} /><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void api.deleteRoleCard(row.accountId, row.id).then(onRefresh).catch(onError)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: '', key: 'actions', render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} aria-label={`${tr('编辑')} ${row.name}`} onClick={() => drawer.edit(row.id)} /><Button size="small" onClick={() => void api.saveRoleCard({ accountId: row.accountId, name: `${row.name}-copy`, description: row.description ?? '', content: row.content, mode: row.mode }).then(onRefresh).catch(onError)}>{tr('复制')}</Button><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('返回')} onConfirm={() => void api.deleteRoleCard(row.accountId, row.id).then(onRefresh).catch(onError)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun="ROLE CARDS" action={tr('新增角色卡')} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<RoleCardRecord> rowKey="id" dataSource={data} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" /> : <EmptyTable title={tr('还没有角色卡')} description={tr('建立可复用的会话角色卡，按适用模式注入到 Agent 提示词。')} onCreate={() => drawer.edit()} action={tr('新增角色卡')} />}
+    {data.length ? <Table<RoleCardRecord> rowKey="id" dataSource={data} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('角色卡预览')}</h3><DetailValue value={row.content} /></div> }} /> : <EmptyTable title={tr('还没有角色卡')} description={tr('建立可复用的会话角色卡，按适用模式注入到 Agent 提示词。')} onCreate={() => drawer.edit()} action={tr('新增角色卡')} />}
     <Drawer title={<DrawerTitle label="CHAT ROLES" title={editing ? tr('编辑角色卡') : tr('新增角色卡')} />} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('返回')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="accountId" label={tr('所属账号')} rules={[{ required: true, message: tr('请选择账号') }]}><Select disabled={Boolean(editing)} options={accounts.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
@@ -1190,7 +1263,7 @@ function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: Pr
   ];
   return <div className="tab-panel"><PageToolbar count={visible.length} noun="PROJECT MEMORIES" action={tr('新增记忆')} onCreate={() => drawer.edit()} />
     <Input allowClear value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr('搜索记忆名称、标题或正文')} aria-label={tr('搜索记忆')} className="memory-search" />
-    {visible.length ? <Table<ProjectMemoryRecord> rowKey="id" dataSource={visible} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" /> : <EmptyTable title={tr('还没有项目记忆')} description={tr('按账号存储可由所选会话检索的共享记忆。')} onCreate={() => drawer.edit()} action={tr('新增记忆')} />}
+    {visible.length ? <Table<ProjectMemoryRecord> rowKey="id" dataSource={visible} columns={columns} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} className="data-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('项目记忆内容')}</h3><DetailValue value={row.content} /></div> }} /> : <EmptyTable title={tr('还没有项目记忆')} description={tr('按账号存储可由所选会话检索的共享记忆。')} onCreate={() => drawer.edit()} action={tr('新增记忆')} />}
     <Drawer title={<DrawerTitle label="PROJECT MEMORY" title={editing ? tr('编辑记忆') : tr('新增记忆')} />} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('返回')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="accountId" label={tr('所属账号')} rules={[{ required: true, message: tr('请选择账号') }]}><Select disabled={Boolean(editing)} options={accounts.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
