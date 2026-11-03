@@ -143,21 +143,40 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
   async function process(account: QQAccountContext, message: QQGroupMessage): Promise<void> {
     if (!account.account.enabled || !account.pluginEnabled) return;
     const kind = message.conversationType ?? 'group';
+    const group = await dependencies.findGroup(account.account.id, message.groupId, kind);
+    const registered = Boolean(group && (group.conversationType ?? 'group') === kind);
     const batch = message.batchMessages?.length ? message.batchMessages : [message];
     // 在会话绑定与白名单校验之前响应 /openid，便于首次接入时拿到自己和群的 openid。
     const openidCommand = message.isWake ? undefined : batch.find((incoming) => incoming.accountId === account.account.id &&
       incoming.groupId === message.groupId && (incoming.conversationType ?? 'group') === kind && /^\/openid\b/i.test(incoming.text.trim()));
     if (openidCommand) {
-      const config = account.pluginConfig ?? {};
-      const text = JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null });
+      const config = registered && group ? { ...account.pluginConfig, ...effectiveGroupConfig(account.pluginConfig ?? {}, group.config ?? {}) } : account.pluginConfig ?? {};
+      const hint = registered
+        ? group!.enabled ? undefined : '当前会话已在管理台注册但未启用，请启用后再使用。'
+        : kind === 'group' ? '当前群聊尚未在管理台注册：请把 groupOpenid 添加到会话配置后启用。' : '当前私聊尚未在管理台注册：请把 userOpenid 添加到会话配置后启用。';
+      const text = JSON.stringify({ conversationType: kind, userOpenid: openidCommand.userId, groupOpenid: kind === 'group' ? message.groupId : null, registered, ...(hint ? { hint } : {}) });
+      const writeLog = async (direction: 'in' | 'out', content: string, status: string) => {
+        if (!readBoolean(dependencies.logRecord, false) || !dependencies.conversationLogs) return;
+        const at = now();
+        try {
+          await dependencies.conversationLogs.append([{
+            id: crypto.randomUUID(), accountId: account.account.id, groupId: group?.id ?? message.groupId,
+            groupExternalId: message.groupId, pluginId: account.account.pluginId, pluginType: CHATBOT_PLUGIN_TYPE,
+            eventId: openidCommand.eventId ?? message.eventId, userId: openidCommand.userId, direction,
+            content, createdAt: at, expiresAt: at + LOG_RETENTION_DAYS * 86_400_000, status,
+            details: { conversationType: kind, messageId: openidCommand.id, registered, command: '/openid' },
+          }]);
+        } catch { /* 日志失败不应阻断命令回复 */ }
+      };
+      await writeLog('in', openidCommand.text.slice(0, 200), 'received');
       const parts = splitMessage(text, Math.trunc(configNumber(config, 'bridge_max_message_chars', 500, 100, 4000)));
       if (await (dependencies.reserveOutbound ?? reserveOutbound)(conversationKey(account.account.id, kind, message.groupId), parts.length, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60)))) {
         for (const [index, part] of parts.entries()) await dependencies.sendReply(account, message.groupId, message.id, part, { seq: index + 1, conversationType: kind });
+        await writeLog('out', text, 'sent');
       }
       return;
     }
-    const group = await dependencies.findGroup(account.account.id, message.groupId, kind);
-    if (!group?.enabled || (group.conversationType ?? 'group') !== kind) return;
+    if (!group?.enabled || !registered) return;
     const config = { ...account.pluginConfig, ...effectiveGroupConfig(account.pluginConfig ?? {}, group.config ?? {}) };
     const memoryEnabled = configBoolean(config, 'memory_enabled', false);
     const historyLimit = Math.trunc(configNumber(config, 'context_history_limit', 50, 0, 500));
