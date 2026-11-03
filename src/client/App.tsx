@@ -1284,14 +1284,34 @@ function IntegrationsPage({ providers, prices, libraries, policies, accounts, ro
   return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
     { key: 'providers', label: <span><ApiOutlined /> {tr('模型供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     { key: 'prices', label: <span><DatabaseOutlined /> {tr('模型单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity')}</Tag></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份策略')} <Tag>{count('identity') + roleCards.length + memories.length}</Tag></span>, children: <IdentityPanel policies={policies} providers={providers} libraries={libraries} accounts={accounts} roleCards={roleCards} memories={memories} onRefresh={onRefresh} onError={onError} /> },
     { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话策略')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
     { key: 'voice', label: <span><MessageOutlined /> {tr('语音策略')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'role-cards', label: <span><BookOutlined /> {tr('角色卡')} <Tag>{roleCards.length}</Tag></span>, children: <RoleCardsPanel data={roleCards} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'memories', label: <span><DatabaseOutlined /> {tr('项目记忆')} <Tag>{memories.length}</Tag></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
     ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {libraryNames[kind]} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
+}
+
+function IdentityPanel({ policies, providers, libraries, accounts, roleCards, memories, onRefresh, onError }: {
+  policies: PolicyRecord[]; providers: ProviderRecord[]; libraries: LibraryData; accounts: BotAccountRecord[]; roleCards: RoleCardRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+}) {
+  const { tr } = useI18n();
+  const [view, setView] = useState<'policies' | 'roles' | 'memories'>('policies');
+  const identityCount = policies.filter((item) => item.type === 'identity').length;
+  const change = (value: string | number) => setView(value as 'policies' | 'roles' | 'memories');
+  return <div className="identity-panel">
+    <div className="identity-switch">
+      <Segmented size="small" value={view} onChange={change} aria-label={tr('身份策略视图')} options={[
+        { value: 'policies', label: `${tr('身份策略')} ${identityCount}` },
+        { value: 'roles', label: `${tr('角色卡')} ${roleCards.length}` },
+        { value: 'memories', label: `${tr('项目记忆')} ${memories.length}` },
+      ]} />
+      <span className="identity-switch-hint">{tr('三者在系统提示词中依次叠加：身份策略 → 角色卡 → 项目记忆。')}</span>
+    </div>
+    {view === 'policies' && <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} />}
+    {view === 'roles' && <RoleCardsPanel data={roleCards} accounts={accounts} onRefresh={onRefresh} onError={onError} />}
+    {view === 'memories' && <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} />}
+  </div>;
 }
 
 function policySummary(type: PolicyType, policy: PolicyRecord, providers: ProviderRecord[]): string {
