@@ -40,6 +40,7 @@ import {
   CloudServerOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DesktopOutlined,
   EditOutlined,
   GithubOutlined,
   LoginOutlined,
@@ -47,11 +48,13 @@ import {
   MenuFoldOutlined,
   MessageOutlined,
   MinusCircleOutlined,
+  MoonOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  SunOutlined,
   TeamOutlined,
   ThunderboltOutlined,
   ToolOutlined,
@@ -89,6 +92,7 @@ import {
 } from '../shared/plugin-catalog';
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
+import { ThemeProvider, useTheme, type ThemeMode } from './theme';
 import { ApiError, api } from './api';
 import type { ChatbotConversationStatus, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake } from './api';
 
@@ -167,6 +171,25 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function ThemeSwitch() {
+  const { mode, setMode } = useTheme();
+  const { tr } = useI18n();
+  return (
+    <Segmented
+      className="theme-switch"
+      size="small"
+      value={mode}
+      onChange={(value) => setMode(value as ThemeMode)}
+      options={[
+        { value: 'light', icon: <SunOutlined />, tooltip: tr('亮色模式') },
+        { value: 'dark', icon: <MoonOutlined />, tooltip: tr('暗色模式') },
+        { value: 'system', icon: <DesktopOutlined />, tooltip: tr('跟随系统') },
+      ]}
+      aria-label={tr('界面主题')}
+    />
+  );
+}
+
 function LandingPage() {
   return (
     <main className="landing-shell">
@@ -175,6 +198,7 @@ function LandingPage() {
         <nav className="landing-nav" aria-label="主导航">
           <a href="#features">平台能力</a>
           <a href="https://github.com/PIKACHUIM/NoneBotMaker" target="_blank" rel="noreferrer">源代码 <ArrowUpOutlined /></a>
+          <ThemeSwitch />
           <Button type="primary" icon={<LoginOutlined />} href="#/login">管理员登录</Button>
         </nav>
       </header>
@@ -242,7 +266,7 @@ function LoginPage({ onSuccess }: { onSuccess: () => void }) {
 
   return (
     <main className="login-shell">
-      <header className="login-header"><a className="brand-link" href="#/"><BrandMark /></a><a href="#/" className="back-link">返回首页 <ArrowRightOutlined /></a></header>
+      <header className="login-header"><a className="brand-link" href="#/"><BrandMark /></a><div className="login-header-actions"><ThemeSwitch /><a href="#/" className="back-link">返回首页 <ArrowRightOutlined /></a></div></header>
       <div className="login-layout">
         <section className="login-context">
           <div className="eyebrow"><span className="eyebrow-line" /> AUTHENTICATED ACCESS <span className="eyebrow-index">ADMIN / 01</span></div>
@@ -312,7 +336,7 @@ function SetupPage() {
     <main className="login-shell setup-shell">
       <header className="login-header">
         <a className="brand-link" href="/" aria-label="NoneBotMaker 首页"><BrandMark /></a>
-        <a href="#/login" className="back-link">管理员登录 <ArrowRightOutlined /></a>
+        <div className="login-header-actions"><ThemeSwitch /><a href="#/login" className="back-link">管理员登录 <ArrowRightOutlined /></a></div>
       </header>
       <div className="login-layout setup-layout">
         <section className="login-context">
@@ -375,6 +399,7 @@ function SetupPage() {
 function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => void }) {
   const { message } = AntApp.useApp();
   const { language, setLanguage, tr } = useI18n();
+  const { resolved } = useTheme();
   const [mobileNav, setMobileNav] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -502,7 +527,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
 
   return (
     <Layout className="admin-layout">
-      <Sider className={`admin-sider${mobileNav ? ' admin-sider-open' : ''}`} width={252} theme="dark" aria-label={tr('管理台导航')}>
+      <Sider className={`admin-sider${mobileNav ? ' admin-sider-open' : ''}`} width={252} theme={resolved === 'dark' ? 'dark' : 'light'} aria-label={tr('管理台导航')}>
         <a className="sider-brand" href="#/admin/overview"><BrandMark /></a>
         <div className="workspace-label"><span className="workspace-dot" /> LOCAL CONTROL PLANE</div>
         <Menu mode="inline" selectedKeys={[page]} items={navItems} onClick={({ key }) => setPage(key)} className="admin-menu" />
@@ -518,6 +543,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
           <button type="button" aria-label={tr('打开导航菜单')} className="mobile-menu-button" onClick={() => setMobileNav(true)}><MenuFoldOutlined /></button>
           <div className="breadcrumbs"><span>CONTROL PLANE</span><span>/</span><strong>{tr(title.title)}</strong></div>
           <div className="topbar-right">
+            <ThemeSwitch />
             <Segmented
               className="language-switch"
               size="small"
@@ -1719,6 +1745,34 @@ function RoutedApp() {
   return <AdminConsole key={route.page} page={route.page} onLogout={logout} />;
 }
 
+function ThemedApp() {
+  const { resolved } = useTheme();
+  const dark = resolved === 'dark';
+  return (
+    <ConfigProvider
+      theme={{
+        algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: {
+          colorPrimary: dark ? '#78cfc3' : '#0f8a7c',
+          colorInfo: dark ? '#78cfc3' : '#0f8a7c',
+          colorSuccess: dark ? '#78cfc3' : '#0f8a7c',
+          colorBgBase: dark ? '#101619' : '#f4f7f6',
+          colorBgContainer: dark ? '#171f22' : '#ffffff',
+          colorBgElevated: dark ? '#202a2d' : '#ffffff',
+          colorText: dark ? '#e6ecea' : '#16201e',
+          colorTextSecondary: dark ? '#a1b0ae' : '#5c6b67',
+          colorBorder: dark ? '#303d40' : '#d5dfdc',
+          borderRadius: 3,
+          fontFamily: '"IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif',
+          controlHeight: 38,
+        },
+      }}
+    >
+      <AntApp><RoutedApp /></AntApp>
+    </ConfigProvider>
+  );
+}
+
 export default function App() {
-  return <LanguageProvider><ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#78cfc3', colorInfo: '#78cfc3', colorSuccess: '#78cfc3', colorBgBase: '#101619', colorBgContainer: '#171f22', colorBgElevated: '#202a2d', colorText: '#e6ecea', colorTextSecondary: '#a1b0ae', colorBorder: '#303d40', borderRadius: 3, fontFamily: '"IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei", sans-serif', controlHeight: 38 } }}><AntApp><RoutedApp /></AntApp></ConfigProvider></LanguageProvider>;
+  return <ThemeProvider><LanguageProvider><ThemedApp /></LanguageProvider></ThemeProvider>;
 }

@@ -6,6 +6,21 @@
     <meta name="theme-color" content="#11171a" />
     <meta name="description" content="NoneBotMaker：跨平台 Serverless 聊天机器人管理平台" />
     <title>NoneBotMaker — Serverless Bot Studio</title>
+    <script>
+      (function () {
+        try {
+          var mode = window.localStorage.getItem('nonebotmaker.theme');
+          var dark = mode === 'dark' || ((!mode || mode === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var theme = dark ? 'dark' : 'light';
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#11171a' : '#f4f7f6');
+        } catch (error) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
