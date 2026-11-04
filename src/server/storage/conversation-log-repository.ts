@@ -27,6 +27,7 @@ export interface ConversationLogRepository {
   append(entries: ConversationLog[]): Promise<void>;
   list(filter: ConversationLogFilter): Promise<ConversationLogPage>;
   purgeExpired(now: number): Promise<number>;
+  clear(): Promise<number>;
 }
 
 const KV_PREFIX = 'nonebotmaker:conversation_logs:';
@@ -312,6 +313,12 @@ export class D1ConversationLogRepository implements ConversationLogRepository {
     if ((await this.storageSchema()).sidecar) await this.db.prepare('DELETE FROM records WHERE kind = ? AND updated_at <= ?').bind(LOG_SIDECAR_KIND, new Date(now).toISOString()).run();
     return result.meta?.changes ?? 0;
   }
+
+  async clear(): Promise<number> {
+    const result = await this.db.prepare('DELETE FROM conversation_logs').run() as { meta?: { changes?: number } };
+    if ((await this.storageSchema()).sidecar) await this.db.prepare('DELETE FROM records WHERE kind = ?').bind(LOG_SIDECAR_KIND).run();
+    return result.meta?.changes ?? 0;
+  }
 }
 
 function encoded(value: string): string {
@@ -383,6 +390,12 @@ export class KVConversationLogRepository implements ConversationLogRepository {
     await Promise.all(expired.map(({ key }) => this.kv.delete(key)));
     return expired.length;
   }
+
+  async clear(): Promise<number> {
+    const records = await listKvRecords(this.kv, KV_PREFIX);
+    await Promise.all(records.map(({ key }) => this.kv.delete(key)));
+    return records.length;
+  }
 }
 
 export class EdgeOneKVConversationLogRepository extends KVConversationLogRepository {
@@ -436,6 +449,12 @@ export class EdgeOneBlobConversationLogRepository implements ConversationLogRepo
     const expired = records.filter(({ log }) => log.expiresAt <= now);
     await Promise.all(expired.map(({ key }) => this.blob.delete(key)));
     return expired.length;
+  }
+
+  async clear(): Promise<number> {
+    const records = await listBlobRecords(this.blob, BLOB_PREFIX);
+    await Promise.all(records.map(({ key }) => this.blob.delete(key)));
+    return records.length;
   }
 }
 

@@ -112,4 +112,16 @@ export function registerLogRoutes(api: Hono<{ Bindings: RuntimeBindings }>): voi
       throw new ApiError(503, 'storage_unavailable');
     }
   });
+
+  api.delete('/logs', async (context) => {
+    try {
+      const repository = createConversationLogRepository(context.env);
+      const cleared = await repository.clear();
+      context.header('X-Storage-Consistency', repository.consistency);
+      return context.json({ cleared });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(503, 'storage_unavailable');
+    }
+  });
 }

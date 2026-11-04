@@ -238,6 +238,9 @@ export const api = {
   async deleteLibrary(kind: LibraryKind, id: string) {
     return request(`/api/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
+  async clearLogs() {
+    return request<{ cleared?: number }>('/api/logs', { method: 'DELETE' });
+  },
   async listLogs(params: { page: number; pageSize: number; q?: string; pluginId?: string; openid?: string; accountId?: string; groupId?: string; from?: number; to?: number }) {
     const search = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
     if (params.q) search.set('q', params.q);

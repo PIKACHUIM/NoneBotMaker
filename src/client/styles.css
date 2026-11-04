@@ -496,7 +496,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .log-filter-form { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
   .log-filter-form .ant-form-item:first-child { grid-column: 1 / -1; }
   .log-filter-form .ant-input-affix-wrapper, .log-filter-form .ant-select { width: 100%; min-width: 0; }
-  .log-filter-form .ant-form-item:nth-last-child(2), .log-filter-form .ant-form-item:last-child { width: calc(50% - 4px); }
+  .log-filter-form .ant-form-item:last-child { grid-column: 1 / -1; width: 100%; }
+  .log-filter-form .log-actions .ant-space { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 8px !important; }
   .log-filter-form .ant-form-item .ant-btn { width: 100%; padding-inline: 5px; }
   .logs-pagination { align-items: flex-start; flex-direction: column; gap: 10px; }
   .logs-disabled { padding: 30px 22px; }

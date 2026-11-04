@@ -547,7 +547,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
               {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
               {page === 'conversations' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} />}
               {page === 'integrations' && <IntegrationsPage providers={providers} prices={prices} libraries={libraries} policies={policies} accounts={accounts} memories={memories} onRefresh={refresh} onError={handleError} />}
-              {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} />}
+              {page === 'logs' && <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} onCleared={() => { setLogPage(1); refresh(); }} />}
             </>
           )}
           <footer className="content-footer"><span>EDGE CONFIGURATION / NONEBOTMAKER</span><span>SESSION ISOLATED <i /></span></footer>
@@ -1615,10 +1615,21 @@ function logFieldValue(row: ConversationLog, key: string): unknown {
   return value;
 }
 
-function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter }: {
-  data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void;
+function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter, onCleared }: {
+  data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void; onCleared: () => void;
 }) {
   const { language, tr, localized } = useI18n();
+  const { message } = AntApp.useApp();
+  const [clearing, setClearing] = useState(false);
+  const clearLogs = async () => {
+    setClearing(true);
+    try {
+      const result = await api.clearLogs();
+      message.success(`${tr('已清除日志')}：${result.cleared ?? 0}`);
+      onCleared();
+    } catch (reason) { message.error(formatError(reason)); }
+    finally { setClearing(false); }
+  };
   const selectedPluginId = Form.useWatch('pluginId', { form, preserve: true }) as string | undefined;
   const rowPlugin = (row: ConversationLog) => plugins.find((item) => item.id === (row.pluginId || accounts.find((account) => account.id === row.accountId)?.pluginId));
   const rowDefinition = (row: ConversationLog) => pluginDefinition(row.pluginType || rowPlugin(row)?.type);
@@ -1649,8 +1660,13 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
       <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
       <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
       <Form.Item name="groupId"><Select allowClear placeholder={tr('全部群聊')} options={groups.map((item) => ({ label: item.name || item.externalId, value: item.id }))} /></Form.Item>
-      <Form.Item><Button type="primary" htmlType="submit">{tr('应用筛选')}</Button></Form.Item>
-      <Form.Item><Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button></Form.Item>
+      <Form.Item className="log-actions"><Space size={8} wrap={false}>
+        <Button type="primary" htmlType="submit">{tr('应用筛选')}</Button>
+        <Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button>
+        <Popconfirm title={tr('清除全部对话日志？')} description={tr('将删除所有对话日志记录，且无法恢复。')} okText={tr('清除')} cancelText={tr('取消')} okButtonProps={{ danger: true }} onConfirm={() => void clearLogs()}>
+          <Button danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
+        </Popconfirm>
+      </Space></Form.Item>
     </Form><div className="log-count"><span className="online-dot" /> {total} RECORDS / 30D</div></div>
     {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: Math.max(1140, columns.length * 180) }} className="data-table logs-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('完整消息与插件详情')}</h3><DetailFields values={{ content: row.content, ...Object.fromEntries(Object.entries(row).filter(([key]) => !fixedKeys.has(key))) }} labels={{ content: tr('收到内容'), reply: tr('发送内容'), direction: tr('方向'), accountId: tr('账号'), groupId: tr('群聊'), details: tr('插件详情'), ...Object.fromEntries((rowDefinition(row)?.logFields ?? []).map((field) => [field.key, localized(field.label)])) }} /></div> }} /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
   </section>;

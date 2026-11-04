@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ConversationLog, KVNamespaceLike, RuntimeBindings } from '../../shared/types';
+import type { ConversationLog, D1DatabaseLike, KVNamespaceLike, RuntimeBindings } from '../../shared/types';
+import { D1ConversationLogRepository } from '../storage/conversation-log-repository';
 import { createApiRouter } from './index';
 
 function createKV(logs: ConversationLog[]): KVNamespaceLike {
@@ -76,5 +77,67 @@ describe('conversation log filtering', () => {
     expect((await openidMatched.json() as { total: number }).total).toBe(1);
     const openidMissing = await router.request('/logs?openid=missing-openid', { headers: { Cookie: cookie } }, bindings);
     expect((await openidMissing.json() as { total: number }).total).toBe(0);
+  });
+});
+
+describe('conversation log clearing', () => {
+  const logs: ConversationLog[] = [
+    {
+      id: 'first', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1',
+      direction: 'in', content: 'first message', createdAt: Date.now(), expiresAt: Date.now() + 60_000,
+    },
+    {
+      id: 'second', accountId: 'account-2', groupId: 'group-2', groupExternalId: 'external-2', userId: 'user-2',
+      direction: 'in', content: 'second message', createdAt: Date.now(), expiresAt: Date.now() + 60_000,
+    },
+  ];
+
+  function bindings(): RuntimeBindings {
+    return { SYS_PASSWD: 'admin-password', SYS_SECRET: 'test-db-secret', LOG_RECORD: 'true', PLATFORM: 'local', KV: createKV(logs) };
+  }
+
+  async function loginCookie(router: ReturnType<typeof createApiRouter>, env: RuntimeBindings): Promise<string> {
+    const login = await router.request('/auth/login', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'admin-password' }),
+    }, env);
+    return login.headers.get('set-cookie')?.split(';')[0] ?? '';
+  }
+
+  it('requires a session and deletes every stored log', async () => {
+    const env = bindings();
+    const router = createApiRouter();
+    const unauthorized = await router.request('/logs', { method: 'DELETE', headers: { Origin: 'http://localhost' } }, env);
+    expect(unauthorized.status).toBe(401);
+
+    const cookie = await loginCookie(router, env);
+    const before = await router.request('/logs', { headers: { Cookie: cookie } }, env);
+    expect((await before.json() as { total: number }).total).toBe(2);
+
+    const cleared = await router.request('/logs', { method: 'DELETE', headers: { Cookie: cookie, Origin: 'http://localhost' } }, env);
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toEqual({ cleared: 2 });
+
+    const after = await router.request('/logs', { headers: { Cookie: cookie } }, env);
+    expect((await after.json() as { total: number }).total).toBe(0);
+  });
+
+  it('deletes every conversation log row from D1', async () => {
+    const statements: string[] = [];
+    const db: D1DatabaseLike = {
+      prepare(query: string) {
+        statements.push(query);
+        return {
+          bind() { return this; },
+          async run() { return { meta: { changes: 5 } }; },
+          async all<T>() { return { results: [] as T[] }; },
+          async first<T>() { return null as T | null; },
+        };
+      },
+    };
+    const repository = new D1ConversationLogRepository(db);
+    await expect(repository.clear()).resolves.toBe(5);
+    expect(statements).toContain('DELETE FROM conversation_logs');
   });
 });
