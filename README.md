@@ -2,176 +2,153 @@
 
 # NoneBotMaker
 
-基于 Serverless 运行时的 QQ 官方机器人管理与聊天服务
+**面向 QQ 官方机器人的 Serverless 管理与 AI 聊天服务**
+**A serverless management and AI chat service for official QQ bots**
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FPIKACHUIM%2FNoneBotMaker)
 [![Deploy with EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?repository-url=https%3A%2F%2Fgithub.com%2FPIKACHUIM%2FNoneBotMaker&repository-name=NoneBotMaker&project-name=NoneBotMaker&install-command=npm%20install&build-command=npm%20run%20build%3Aedgeone&output-directory=dist)
-[![Deploy to Alibaba Cloud ESA](https://img.shields.io/badge/Deploy_to-Alibaba_Cloud_ESA-FF6A00?logo=alibabacloud&logoColor=white)](https://esa.console.aliyun.com/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
+**简体中文 / English**
 
 </div>
 
-> **部署提示：** Cloudflare 首次部署仍需根据 `wrangler.example.jsonc` 创建 `wrangler.jsonc`、填写资源配置，并按下文完成 D1 migration 与密钥设置。ESA 按钮会打开控制台，请选择「函数和 Pages → 创建 → 导入 GitHub 仓库」；ESA 官方目前未提供可预填仓库的一键部署链接。
+## 项目简介 | Project Overview
 
-| 平台 | 构建命令 | 产物 / 入口 |
-| --- | --- | --- |
-| Cloudflare Workers | `npm run build` | `src/platform/cloudflare/worker.ts` |
-| EdgeOne | `npm run build:edgeone` | `dist/edge-functions/api/[[default]].js` |
-| 阿里云 ESA | `npm run build:esa` | `dist/edge-routine/index.js` |
+NoneBotMaker 使用 TypeScript、Hono 和 React 构建，为 QQ 机器人提供账号/会话策略管理、AI 聊天执行和工具扩展能力。应用逻辑可部署到 Cloudflare Workers、EdgeOne 或阿里云 ESA；Cloudflare 另支持基于 Durable Objects 的 WebSocket Gateway。项目还提供本地 Node 入口用于开发。
 
-## 目录
+NoneBotMaker is built with TypeScript, Hono, and React. It provides QQ bot account and conversation-policy management, AI chat execution, and extensible tools. The shared application can run on Cloudflare Workers, EdgeOne, or Alibaba Cloud ESA. Cloudflare additionally supports a Durable Objects-based WebSocket Gateway. A local Node entry point is available for development.
 
-- [本地验证](#本地验证)
-- [QQ Webhook 回调](#qq-webhook-回调)
-- [Cloudflare Workers](#cloudflare-workers)
-- [EdgeOne 与 ESA](#edgeone-与-esa)
-- [群聊预算与一致性](#群聊预算与一致性)
-- [对话日志清理](#对话日志清理)
+> **兼容性 / Compatibility:** 本项目是 Worker 中的 TypeScript 行为实现，不是 Python NoneBot 运行时；不能直接加载任意 Python 插件、driver/adapter 或本地 shell/文件系统工具。真实 QQ、AI、Brave、TTS 和平台媒体能力仍需真实账号与服务联调。
+> This is a TypeScript behavior implementation for serverless runtimes, not a Python NoneBot runtime. It cannot load arbitrary Python plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, AI, Brave, TTS, and media capabilities require integration testing with real accounts and services.
 
-## 本地验证
+双语文档源文件位于 [`docs/index.md`](docs/index.md)，包含需求、设计、使用教程、开发和部署。运行 `npm run docs:dev` 预览文档站。
+
+## 快速部署 | Quick Deployment
+
+以下使用 Cloudflare Workers；完整流程见[快速部署指南](docs/guide/quick-start.md)。部署会创建和修改云资源，请先准备自己的 Cloudflare 账户、D1、KV 和 Worker 域名。
+
+The following steps target Cloudflare Workers. See the [full deployment guide](docs/guide/quick-start.md). Deployment creates and changes cloud resources; prepare your own Cloudflare account, D1, KV, and Worker domain first.
+
+### 1. 安装依赖 / Install dependencies
 
 ```sh
-npm install
+git clone https://github.com/PIKACHUIM/NoneBotMaker.git
+cd NoneBotMaker
+npm ci
+```
+
+项目需要 Node.js `>=20`。文档站工具链还要求 Node.js `^20.19.0` 或 `>=22.12.0`，建议使用 Node.js 22.12+。
+The application requires Node.js `>=20`. The docs toolchain requires Node.js `^20.19.0` or `>=22.12.0`; Node.js 22.12+ is recommended.
+
+### 2. 配置资源与密钥 / Configure resources and secrets
+
+使用 `wrangler.example.jsonc` 作为模板创建自己的 Worker 配置，填写 D1 database 和 KV namespace 的名称及 ID。不要复用其他账户的资源 ID，也不要提交真实密钥。创建资源：
+
+Use `wrangler.example.jsonc` as a template for your Worker configuration and fill in your own D1 and KV resource names and IDs. Do not reuse another account's IDs or commit secrets. Create resources with:
+
+```sh
+npx wrangler d1 create nonebot-data
+npx wrangler kv namespace create nonebot-kv
+```
+
+设置管理台密码和独立的高熵系统密钥。每条 `secret put` 命令会提示输入 Secret：
+
+Set the admin password and a separate high-entropy system secret. Each `secret put` command prompts for the value:
+
+```sh
+npx wrangler secret put SYS_PASSWD
+npx wrangler secret put SYS_SECRET
+```
+
+`SYS_SECRET` 用于 session 签名、账号/provider 敏感凭据加密和受保护的维护接口；不要写入 `vars`、源码、URL 或命令行参数。
+`SYS_SECRET` is used for session signing, encryption of sensitive account/provider credentials, and protected maintenance endpoints. Do not put it in `vars`, source code, URLs, or command-line arguments.
+
+### 3. 构建、迁移、部署 / Build, migrate, and deploy
+
+```sh
+npm run build
+npx wrangler d1 migrations apply <database-name> --remote --config wrangler.jsonc
+npx wrangler deploy --config wrangler.jsonc
+```
+
+也可先部署，再访问 `https://<worker-domain>/setup` 并用 `SYS_SECRET` 初始化数据库。两种迁移方式二选一；不要手工重复执行 DDL。部署后确认 `/api/health` 正常，并将 QQ 开放平台回调配置为 `https://<worker-domain>/webhook/qq`。
+Alternatively, deploy first, then initialize the database at `https://<worker-domain>/setup` with `SYS_SECRET`. Choose one migration path; do not reapply DDL manually. Verify `/api/health` and configure the QQ callback as `https://<worker-domain>/webhook/qq`.
+
+> `npm run build:worker` 只执行 Cloudflare dry-run，不会部署或创建资源。Fork 后请检查仓库内的 `wrangler.jsonc`，确保其中没有他人账户资源配置，再使用自己的资源。
+> `npm run build:worker` only performs a Cloudflare dry run; it does not deploy or create resources. After forking, review the repository's `wrangler.jsonc` and replace any account-specific configuration before using your own resources.
+
+## 功能介绍 | Features
+
+- **管理台 / Admin console**：中英文界面，管理插件、QQ 账号、群聊/私聊策略、AI 供应商、模型价格、Skills/Rules、MCP、日志和记忆。 / Bilingual console for plugins, QQ accounts, group/private policies, AI providers, model pricing, Skills/Rules, MCP, logs, and memory.
+- **AI 对话 / AI conversations**：OpenAI-compatible API、多轮工具调用、流式响应、会话上下文、角色卡、会话记忆与账号共享项目记忆。 / OpenAI-compatible APIs, multi-round tool calls, streaming, conversation context, role cards, conversation memory, and account-shared project memory.
+- **工具与审批 / Tools and approvals**：内置时间、联网搜索、消息/媒体发送等工具；MCP 工具受 allowlist 与 owner 审批约束。 / Built-in time, web search, and message/media tools; MCP tools are controlled by allowlists and owner approval.
+- **QQ 功能 / QQ capabilities**：Webhook 消息、受平台许可的回复/媒体、命令、语音素材、计划唤醒与会话控制。具体能力取决于平台权限、策略与部署平台。 / Webhook messages, permitted replies/media, commands, voice assets, scheduled wakeups, and conversation controls. Availability depends on platform permissions, policies, and runtime.
+- **成本与日志 / Cost and logs**：模型单价、会话预算、用量与最多 30 天对话日志保留；日志默认关闭。KV/Blob 的一致性及并发预算限制以平台语义为准。 / Model pricing, conversation budgets, usage tracking, and up to 30-day conversation-log retention; logging is disabled by default. KV/Blob consistency and concurrent budget limits follow platform semantics.
+- **事件调度移植 / Event-dispatch port**：提供 TypeScript matcher 生命周期、传播控制和交互 session 行为，不代表与 Python NoneBot 生态完全兼容。 / Provides TypeScript matcher lifecycle, propagation control, and interactive session behavior; this is not full compatibility with the Python NoneBot ecosystem.
+
+## 工作原理 | How It Works
+
+1. **平台入口 / Runtime entry:** Cloudflare Worker、EdgeOne、ESA 或本地 Node 将平台 binding 传给共享 Hono 应用。 / Each runtime passes its bindings to the shared Hono application.
+2. **管理 API / Management API:** 管理路由验证管理员 session 与数据作用域，再读写插件、账号和会话策略。 / Management routes validate admin sessions and data scope before accessing plugin, account, and policy records.
+3. **QQ 接入 / QQ integration:** `/webhook/qq` 校验签名、按 AppID 找到账号并归一化事件。 / `/webhook/qq` validates signatures, resolves the account by AppID, and normalizes events.
+4. **聊天执行 / Chat execution:** 运行时读取策略、权限、上下文与价格，调用 AI API，并执行获准的工具，再按 QQ 能力发送回复。 / The runtime loads policy, permissions, context, and pricing; calls the AI API; executes permitted tools; and sends replies within QQ capabilities.
+5. **持久化 / Persistence:** D1/KV/Blob/DO adapter 隔离平台存储。缺少 binding 时不会用进程内状态假装持久化。 / D1/KV/Blob/DO adapters isolate platform storage. Missing bindings are reported rather than silently replaced with process-local state.
+
+| 运行平台 / Runtime | 接入方式 / Integration | 存储 / Storage |
+| --- | --- | --- |
+| Cloudflare Workers | Webhook；可选 Durable Objects WebSocket Gateway | D1、KV、Durable Objects |
+| EdgeOne | Webhook | EdgeOne Blob 或 KV |
+| 阿里云 ESA / Alibaba Cloud ESA | Webhook | ESA KV 或 KV |
+| 本地 Node / Local Node | 共享 Hono API | 需自行提供持久化 binding；本地入口不自动创建数据库 |
+
+## 开发部署 | Development & Deployment
+
+### 开发与测试 / Development and tests
+
+```sh
+npm ci
+npm run dev
 npm run typecheck
 npm test
 npm run build
 ```
 
-本地 Cloudflare secret 可参考 `.dev.vars.example`，不要提交真实密钥。
+`npm run dev` 启动本地 API 与 Vite 管理台，但本地 Node 入口不自动提供 D1/KV；需要持久化的管理和聊天行为应在配置了隔离存储的 Worker 环境验证。
+`npm run dev` starts the local API and Vite console, but the local Node entry does not create D1/KV bindings. Validate persistence-dependent management and chat behavior in a Worker environment with isolated storage.
 
-## QQ Webhook 回调
-
-在 QQ 机器人回调配置中填写部署后的地址：
-
-```text
-https://<your-worker-domain>/webhook/qq
-```
-
-`<your-worker-domain>` 必须替换成实际部署域名。Webhook 会使用 `X-Bot-Appid` 定位账号，并验证 QQ 的签名；不要在代理层删除或改写签名相关请求头和原始 JSON body。模板默认 `API_METHOD=webhook`、`LOG_RECORD=false`；正式配置可按需启用日志。
-
-## Cloudflare Workers
-
-### 配置与部署
-
-仓库根目录的 `wrangler.jsonc` 是 Cloudflare Workers Builds 使用的正式配置，包含 D1/KV binding、自定义域名和静态资源设置。`wrangler.example.jsonc` 是不含账号专属 ID 的模板，供 fork 后替换。
-
-Cloudflare Workers Builds 的 deploy 命令使用默认配置即可：
+### 平台构建 / Platform builds
 
 ```sh
-npx wrangler deploy
-```
-
-手动部署也使用同一条命令。Fork 仓库后，把 `wrangler.jsonc` 中的 D1 database ID、KV namespace ID 和自定义域名替换成自己的资源，或参考 `wrangler.example.jsonc` 重写。`npm run build:worker` 使用安全模板做通用 dry-run，不会触碰正式资源。
-
-管理员密码和系统密钥必须通过 Secret 写入，不要直接写进 `wrangler.jsonc`。下面命令会逐项提示输入值；生成器可分别运行，为两个 secret 生成独立高熵值：
-
-```sh
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
-npx wrangler secret put SYS_PASSWD
-npx wrangler secret put SYS_SECRET
-```
-
-`SYS_PASSWD` 用于管理台登录；`SYS_SECRET` 同时用于 session 签名、账号/provider 凭据加密、在线数据库初始化授权和手动日志清理授权。因为 `SYS_SECRET` 权限较高，外部调度器必须安全保存它。若从旧版本升级且数据库中已有加密凭据，将 `SYS_SECRET` 设置为旧 `DATA_ENCRYPTION_KEY` 的原值可继续解密；已有管理 session 会失效，需重新登录。
-
-### 在线数据库初始化
-
-首次部署后访问：
-
-```text
-https://<your-worker-domain>/setup
-```
-
-输入 `SYS_SECRET` 并执行初始化。页面会通过 Worker 的 D1 binding 创建记录、对话日志、chatbot 上下文/成本表和迁移记录，并写入 `0001`–`0004` 的 D1 migration 标记。`0004` 为插件扩展日志增加元数据字段。脚本幂等，可安全重试；不会清空已有数据，也不会设置管理员密码。升级已有部署时也应执行初始化或 CLI migration。
-
-也可以在部署前使用 CLI 应用迁移：
-
-```sh
-npx wrangler d1 migrations apply your-d1-database-name --remote --config wrangler.jsonc
-```
-
-两种方式二选一即可；在线初始化会记录迁移标记，之后 CLI 不会重复执行已应用的迁移。
-
-### WebSocket Gateway（仅 Cloudflare）
-
-将 `wrangler.jsonc` 的 `vars.API_METHOD` 改为 `websocket`。配置中 Durable Object binding 名为 `QQ_GATEWAY_SESSIONS`，class 为 `QQGatewayDurableObject`，并通过 `v1` / `new_sqlite_classes` migration 初始化。首次 Worker 请求会为已配置 QQ 账号启动 Gateway 会话。
-
-DO 持久化账号、Gateway session/sequence、上下文、成本及消息队列；alarm 在冷启动或断线后恢复连接并处理到期队列。Outbound WebSocket 不支持 DO hibernation，会使 Durable Object 持续活跃并产生持续资源/计费成本，alarm 每 5 分钟维护连接。Cloudflare 的 Webhook 也使用 `QQ_GATEWAY_SESSIONS` 持久化消息、去重、合并窗口与出站限流，存储成功后立即 ACK；缺少该 binding 会返回 `queue_unavailable`。切回 Webhook 只关闭 Gateway 连接，不应清除待处理消息的 alarm。
-
-## EdgeOne 与 ESA
-
-EdgeOne 构建产物为 `dist/edge-functions/api/[[default]].js`：
-
-```sh
+npm run build:worker
 npm run build:edgeone
-```
-
-在 EdgeOne 运行时绑定 `EDGEONE_BLOB` 或 `EDGEONE_KV`；也可按项目存储配置提供 `KV`。`EDGEONE_BLOB` 优先于 `EDGEONE_KV`。如使用 BLOB 存储且需要调用手动日志清理接口，还需配置 `EDGEONE_KV` 或 `KV` 保存清理节流标记。
-
-ESA 构建产物为 `dist/edge-routine/index.js`：
-
-```sh
 npm run build:esa
 ```
 
-在 ESA 运行时绑定 `ESA_KV` 或 `KV`。两个平台均需在运行时环境/密钥设置中配置 `SYS_PASSWD` 和 `SYS_SECRET`；需要手动清理日志时复用 `SYS_SECRET` 授权。
+Cloudflare 使用 `wrangler.example.jsonc` dry-run；EdgeOne 输出到 `dist/edge-functions/`；ESA 输出到 `dist/edge-routine/`。EdgeOne 和 ESA 当前不支持 WebSocket Gateway。
+Cloudflare uses `wrangler.example.jsonc` for its dry run; EdgeOne outputs to `dist/edge-functions/`; ESA outputs to `dist/edge-routine/`. EdgeOne and ESA do not currently support the WebSocket Gateway.
 
-EdgeOne 和 ESA 仅支持 `API_METHOD=webhook`；若设置为 `websocket`，服务返回 `503 websocket_unsupported`。聊天上下文和成本按与记录仓库相同的 adapter 持久化；缺少对应持久化 binding 时会报部署配置错误，不会退化为跨请求内存状态。
-
-## 插件配置与管理端语言
-
-插件在 `src/shared/plugin-catalog.ts` 中声明字段，而不是让管理员填写 JSON。每个字段必须声明：
-
-- `key`：保存到配置对象中的键名
-- `type`：`boolean`、`text` 或 `number`
-- `label` / `description`：`{ zh, en }` 双语标签与说明
-- 可选：`required`、`secret`、`multiline`、`default`、`placeholder`、`min`、`max`、`step`
-
-管理台会按声明生成开关、文本框、数字框、下拉框或密码框；服务端会按声明做类型归一化、默认值和必填校验。账号字段使用同一套声明机制，密钥字段留空时保留原值。插件配置与账号凭据不再提供 JSON 输入框。
-
-配置严格按 `插件 → 多个平台账号 → 多个群聊/私聊策略` 分层：
-
-- 插件通过 `configFields` 声明全局配置，通过 `credentialFields` / `accountFields` 声明账号配置，通过 `groupFields` 声明会话配置，通过 `logFields` 声明日志字段的双语名称。
-- QQ 平台账号只需要 `AppID` 和 `AppSecret`。旧 `botSecret` / `clientSecret` 相同时可兼容；不相同时必须重新填写 AppSecret，不能静默任选密钥。
-- 会话策略选择 AI API、模型、思考强度、多个 MCP 和 Skills/Rules，并配置访问名单、运行模式、分段与限流、合并窗口、上下文预算和压缩比例。
-- AI API 保存地址、密钥、价格倍率及实际支持的媒体能力。媒体通过所选 API 处理；不支持的附件会明确标注，不假装已读取。
-- 模型单价在「接口能力 → 模型单价」管理。预置是注明来源和日期的手动导入快照，不会自动修改已保存价格。
-- 无效的本地工作区、状态目录、控制台令牌、语音库目录及未实现的群黑话配置已经移除。旧字段仅为数据兼容保留，不再作为可编辑项。
-
-内置聊天执行链支持 JSON/流式 SSE 响应、多轮工具调用、多个 MCP 的发现与调用、Skills/Rules 提示词、历史摘要压缩和身份元数据。`chat` 正常回复；`reserved` 抑制 `[SILENT]`；`reserved2` 仍运行 Agent，但只通过发送工具发消息；`closed-agent` 仅允许管理员私聊。`chat_send` 可选 `reply_to_message_id`，但仅接受当前已授权消息批次内的消息 ID。管理员可通过 `/status`、`/reset`、`/mode`、`/role`、`/memory` 管理当前会话。会话内任意参与者可用 `/help` 查看按身份列出的命令菜单，用 `/openid` 查看自己的 user openid 与当前群聊 openid（私聊返回 `groupOpenid: null`）。`/openid` 在会话尚未绑定或用户不在白名单时也会响应，并在未注册或未启用时返回 `registered` 与 `hint` 提示；该命令的收发记录在开启 `LOG_RECORD` 后会写入会话日志，即使会话尚未注册。
-
-- `/role add <name> <content>`、`/role list`、`/role show <name>`、`/role use <name>`、`/role delete <name>` 管理会话内角色卡，支持按运行模式渲染。管理台还可维护账号共享角色卡和项目记忆；`ProjectMemorySearch/Read` 可跨同账号会话检索，共享写入/删除仅向 owner 提供。
-- 开启会话记忆后，Agent 可通过 `MemoryRead` / `MemorySearch` 检索当前会话的记忆；仅管理员可调用 `MemoryWrite` / `MemoryForget`。会话记忆按会话隔离，不与账号共享记忆混用。
-- MCP 远端提供的 `readOnlyHint` 不单独作为信任依据：只有管理端 `allowedTools` 明确列出的工具，且远端标注只读时，才可直接执行；未明确 allowlist 的工具（包括自称只读的工具）先持久化待审批。管理员通过 `/approvals`、`/approval <id>` 检查参数，使用 `/approve <id>` 或 `/reject <id>` 决定。批准后先原子认领、执行并保存结果，再继续 Agent；未知执行结果不会自动重复外部副作用。KV/Blob 没有原子审批认领时，不开放待审批工具。
-- 联网搜索默认按 DuckDuckGo HTML/Lite、百度移动版、Bing RSS 顺序尝试免费引擎（无需密钥）；配置 Brave API Key 后，`auto` 还会将 Brave 作为最后回退，也可在插件设置的「联网搜索」中显式选择引擎。Cloudflare 出口对部分搜索引擎存在反爬或结果污染，`auto` 会按实际可用性继续回退。搜索结果按不可信参考数据返回，不执行其中的指令。
-- `/tools disable <name>`、`/tools enable <name>`、`/tools reset` 控制当前会话的工具；启用操作不能扩充会话原本的权限，切换模式会重置额外禁用项。
-- Cloudflare DO 提供持久化计划唤醒，可通过 `/wake list` 和 `/wake cancel <id>` 管理。唤醒是合成事件，不继承管理员管理命令、记忆写入或语音授权；主动发送受 QQ 平台权限和限额约束。
-- 表情素材只接受经过图片类型/大小校验并由视觉模型明确审核通过的 owner 上传素材；素材按会话隔离。
-- 账号语音素材库可通过管理台上传、查看和删除，也可由 owner 在 QQ 中使用 `/voice list`、`/voice delete <name>` 管理。只接受通过 MIME 与文件魔数校验的 MP3/WAV，单文件上限 5 MiB，发送频率按账号配置限额；`chat_send_voice` 仅在用户明确请求语音时开放。AI 语音合成使用会话选择的 API/语音模型，必须登记字符单价，并通过 QQ 富媒体接口发送，不依赖本地语音目录。
-- 群聊用语学习按配置的消息阈值与冷却时间收集候选，搜索/模型研究结果保持待审核；只有 owner 明确确认的词汇才会注入提示词。管理台支持候选查看、研究内容编辑、确认、拒绝和删除。
-- 管理台「会话管理」提供运行状态、模式/静默/一次性提示/工具限制、上下文重置、审批、计划唤醒、表情素材、账号语音素材和群聊用语的管理入口。页面会话列表只从已保存的群聊策略及其群/私聊 OpenID 生成，不会自动扫描历史聊天；为空时按提示先配置平台账号和会话策略。模型/供应商/白名单/预算等策略设置仍在「群聊策略」页编辑。生产接口受管理会话鉴权与账号/会话范围校验保护。
-
-`src/server/plugins/dispatcher.ts` 提供 TypeScript 事件调度：优先级、传播阻断、规则与权限、依赖缓存、生命周期以及 `finish/pause/reject/receive/got` 交互会话。`onMessage()` 复用 NoneBot 的消息 matcher 默认阻断，`MatcherContext.skip()` 只跳过当前 handler 并继续执行同 matcher 的下一个 handler。交互 session 默认在下一条 message 上续接；matcher 可用 `resumeType` 指定其他续接事件类型。D1 会话适配器原子消费待续会话。该实现是 Worker 内的行为移植，不支持直接导入和执行任意 Python NoneBot 插件；Python driver/adapter 生态及本地 shell/文件系统工具不能因此宣称完全兼容。Cloudflare Worker 也不运行 `pyttsx3` 等本地 Python 语音引擎，语音依赖兼容供应商 API。
-
-上述为项目内可执行的 TypeScript 行为移植，并不代表与上游 Python 插件生态 100% 等价。真实 QQ 收发、主动消息权限、AI/Brave/TTS 供应商行为和平台媒体能力仍需使用测试账号及真实服务完成外部联调。
-
-管理台右上角提供「中 / EN」切换，导航、页面标题、表格、表单和插件字段标签/说明会跟随语言切换。语言选择保存在浏览器本地。
-
-## 群聊预算与一致性
-
-群配置的 `dailyCostLimit`、`monthlyCostLimit`、`totalCostLimit` 单位为 USD，默认 `0` 表示不限制。支出使用独立模型单价的输入、缓存输入、输出价格，乘以 AI API 的 `priceMultiplier`；工具循环和摘要请求逐次计费。价格单位可选择每百万 token 或每百万字符，字符单位供语音 API 使用。没有有效价格记录且没有可用旧价格时，运行时拒绝无价模型调用，而不是按零成本绕过预算。日限额按 UTC 日期重置，月限额按 UTC 月份重置，总额不重置；达到任一适用限额后，会在下一次模型调用前停止处理。
-
-群管理 API 响应头 `X-Chatbot-Cost-Consistency` 标明成本 adapter：D1 使用原子累计写入，KV 为 eventual consistency，Blob 为 provider-defined。检查发生在模型调用前，实际 usage 在模型返回后累计，因此检查和计费不是同一事务；并发调用可能超额。这是使用量控制，不是严格财务防护。
-
-## 对话日志清理
-
-`LOG_RECORD` 默认关闭。启用后记录用户/会话 OpenID、消息内容、插件类型、事件、模型/工具状态、usage、费用及错误，保留 30 天。日志的 `details` 支持不同插件的嵌套扩展字段，后台按插件双语声明展示，未知字段仍可展开查看和搜索；不会把 token 用量数字误脱敏为密钥。密钥和内联媒体数据不会进入日志。
-
-已有 D1 尚未应用 `0004` 时，扩展字段暂存现有 `records` 表的内部元数据类型，迁移后仍能读取过渡日志，避免代码发布先于迁移时丢数据或报列不存在。建议部署后通过 `/setup` 或 CLI 应用迁移；不会自动执行生产 DDL。
-
-Cloudflare Worker 保留 `scheduled` handler，可在控制台为 Worker 添加每日 `03:00 UTC` 的 Cron Trigger；若账户的 Cron 配额已满，可不配置 Cron，改用外部调度器调用下方受保护接口。`wrangler.example.jsonc` 默认不声明 Cron，避免免费账户触发配额导致部署失败。其他平台或手动触发时，配置清理节流所需 KV，然后使用 `SYS_SECRET` 调用：
+### 文档站 / Documentation site
 
 ```sh
-curl -X POST "$SERVICE_URL/api/internal/logs/purge" \
-  -H "Authorization: Bearer $SYS_SECRET"
+npm run docs:dev
+npm run docs:build
+npm run docs:preview
 ```
 
-手动 endpoint 每 24 小时最多实际清理一次；Cloudflare 的 scheduled cleanup 不经过该节流 endpoint。
+VitePress 双语静态站源文件位于 `docs/`，静态产物位于 `docs/.vitepress/dist/`。当前 VitePress 固定为 `2.0.0-alpha.21`，是为避开 VitePress 1.x 已知开发工具链漏洞而选用的 alpha 版本；升级时应重新审计依赖并验证构建。
+The bilingual VitePress site lives in `docs/` and builds to `docs/.vitepress/dist/`. VitePress is pinned to `2.0.0-alpha.21` to avoid known development-toolchain advisories in VitePress 1.x. Re-audit dependencies and verify the build when upgrading.
+
+更完整的[本地开发与测试](docs/development/setup.md)和[多平台部署](docs/development/deployment.md)指南包含本地入口限制、平台 bindings、迁移与安全检查。
+The [local development and test](docs/development/setup.md) and [platform deployment](docs/development/deployment.md) guides cover local-entry limitations, platform bindings, migrations, and security checks.
+
+## 参考项目 | References
+
+- [NoneBot2](https://github.com/nonebot/nonebot2)：参考事件、matcher 和 session 等概念；本项目用 TypeScript 实现可移植行为，不加载上游 Python 插件。 / Reference for event, matcher, and session concepts; this project ports selected behavior to TypeScript and does not load upstream Python plugins.
+- [VitePress](https://vitepress.dev/)：本项目双语技术文档站的静态站点生成器。 / Static site generator for this bilingual documentation site.
+- 平台 SDK/API 与存储行为以 [Cloudflare Workers](https://developers.cloudflare.com/workers/)、[EdgeOne](https://edgeone.ai/document) 和 [阿里云 ESA](https://help.aliyun.com/product/58613.html) 官方文档为准。 / Refer to the official Cloudflare Workers, EdgeOne, and Alibaba Cloud ESA documentation for platform APIs and storage behavior.
+
+## 开源许可 | Open Source License
+
+本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）**，详见 [`LICENSE`](LICENSE)。分发或通过网络提供修改版本时，请遵循许可证要求。
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [`LICENSE`](LICENSE). Follow the license requirements when distributing modified versions or making them available over a network.
