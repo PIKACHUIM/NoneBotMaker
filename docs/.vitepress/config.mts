@@ -51,7 +51,6 @@ const enSidebar = [
 ];
 
 export default defineConfig({
-  base: '/NoneBotMaker/',
   title: 'NoneBotMaker',
   description: '面向 QQ 官方机器人的 Serverless 管理与聊天服务',
   cleanUrls: true,

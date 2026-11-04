@@ -4,7 +4,7 @@
 
 面向 QQ 官方机器人的 Serverless 管理与 AI 聊天服务
 
-[在线文档站](https://pikachuim.github.io/NoneBotMaker/) · [English](README.en.md) · [AGPL-3.0](LICENSE)
+[在线文档站](https://cfnbot.opkg.cn/) · [English](README.en.md) · [AGPL-3.0](LICENSE)
 
 </div>
 
@@ -68,7 +68,7 @@ npm run build:esa
 
 `build:worker` 只运行 dry-run。EdgeOne 与 ESA 使用 Webhook，不支持 WebSocket Gateway。本地 Node 入口不会自动创建 D1/KV；持久化功能需在配置了存储 binding 的环境验证。
 
-本地预览文档站：`npm run docs:dev`；构建：`npm run docs:build`。源文件位于 `docs/`，推送到 `main` 后由 GitHub Actions 自动发布到[在线文档站](https://pikachuim.github.io/NoneBotMaker/)。首次发布需在仓库 Settings → Pages → Build and deployment 中将 Source 设为 GitHub Actions。
+本地预览文档站：`npm run docs:dev`；构建：`npm run docs:build`。源文件位于 `docs/`，推送到 `main` 后由 GitHub Actions 自动发布到[在线文档站](https://cfnbot.opkg.cn/)。
 
 ## 参考项目
 
