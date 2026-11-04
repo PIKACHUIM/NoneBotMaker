@@ -12,6 +12,10 @@ A serverless management and AI chat service for official QQ bots
 
 Built with TypeScript, Hono, and React, NoneBotMaker manages QQ bot accounts, group/private conversation policies, and AI chat. It supports Cloudflare Workers, EdgeOne, and Alibaba Cloud ESA. Cloudflare can also use a Durable Objects WebSocket Gateway.
 
+<div align="center">
+  <img src="docs/index.png" alt="NoneBotMaker admin console overview" width="100%">
+</div>
+
 ### Compatibility
 
 This is a TypeScript service for serverless runtimes, not a Python NoneBot runtime. It cannot load arbitrary Python plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.

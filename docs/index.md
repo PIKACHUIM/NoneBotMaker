@@ -29,6 +29,10 @@ features:
     details: 提供 Worker 内的事件调度实现；不等同于可原样加载任意 Python NoneBot 插件或驱动。
 ---
 
+## 界面预览
+
+![NoneBotMaker 管理台运行总览](./index.png)
+
 ## 文档导航
 
 - [快速部署](/guide/quick-start)：准备存储资源、密钥、迁移并配置 QQ Webhook。

@@ -29,6 +29,10 @@ features:
     details: Includes an event-dispatch implementation for Workers; it does not load arbitrary Python NoneBot plugins or drivers unchanged.
 ---
 
+## Interface Preview
+
+![NoneBotMaker admin console overview](../index.png)
+
 ## Documentation
 
 - [Quick deployment](/en/guide/quick-start): storage, secrets, migrations, and QQ Webhook setup.

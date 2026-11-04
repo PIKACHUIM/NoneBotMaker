@@ -12,6 +12,10 @@
 
 NoneBotMaker 使用 TypeScript、Hono 和 React，提供 QQ 机器人账号、群聊/私聊策略和 AI 对话管理。支持 Cloudflare Workers、EdgeOne 和阿里云 ESA；Cloudflare 还可使用 Durable Objects WebSocket Gateway。
 
+<div align="center">
+  <img src="docs/index.png" alt="NoneBotMaker 管理台运行总览" width="100%">
+</div>
+
 ### 兼容性边界
 
 本项目是在 Serverless 环境中实现的 TypeScript 服务，不是 Python NoneBot 运行时。它不能直接加载任意 Python 插件、driver/adapter 或本地 shell、文件系统工具。真实 QQ、AI、Brave、TTS 和媒体能力需要使用真实账号与服务联调。
