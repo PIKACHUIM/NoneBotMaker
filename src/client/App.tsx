@@ -39,10 +39,12 @@ import {
   CheckCircleOutlined,
   CodeOutlined,
   CloudServerOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   DesktopOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
   GithubOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -1325,14 +1327,14 @@ function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: Pr
 function IntegrationsPage({ providers, prices, libraries, policies, accounts, memories, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; accounts: BotAccountRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
-  return <section className="data-page integrations-page"><Tabs className="integration-tabs" items={[
-    { key: 'providers', label: <span><ApiOutlined /> {tr('AI供应商')} <Tag>{providers.length}</Tag></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'prices', label: <span><DatabaseOutlined /> {tr('单价')} <Tag>{prices.length}</Tag></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'identity', label: <span><SafetyCertificateOutlined /> {tr('身份')} <Tag>{count('identity')}</Tag></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'dialog', label: <span><ThunderboltOutlined /> {tr('对话')} <Tag>{count('dialog')}</Tag></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'voice', label: <span><MessageOutlined /> {tr('语音')} <Tag>{count('voice')}</Tag></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
-    { key: 'memories', label: <span><BookOutlined /> {tr('记忆')} <Tag>{memories.length}</Tag></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
-    ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span><ToolOutlined /> {tr(libraryNames[kind])} <Tag>{libraries[kind].length}</Tag></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
+  return <section className="data-page integrations-page"><Tabs className="integration-tabs" size="small" tabBarGutter={12} items={[
+    { key: 'providers', label: <span className="integration-tab-label"><ApiOutlined /> {tr('AI供应商')} <small>{providers.length}</small></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'prices', label: <span className="integration-tab-label"><DatabaseOutlined /> {tr('单价')} <small>{prices.length}</small></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'identity', label: <span className="integration-tab-label"><SafetyCertificateOutlined /> {tr('身份')} <small>{count('identity')}</small></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'dialog', label: <span className="integration-tab-label"><ThunderboltOutlined /> {tr('对话')} <small>{count('dialog')}</small></span>, children: <PolicyPanel type="dialog" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'voice', label: <span className="integration-tab-label"><MessageOutlined /> {tr('语音')} <small>{count('voice')}</small></span>, children: <PolicyPanel type="voice" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },
+    { key: 'memories', label: <span className="integration-tab-label"><BookOutlined /> {tr('记忆')} <small>{memories.length}</small></span>, children: <ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={onRefresh} onError={onError} /> },
+    ...(['skills', 'mcps', 'rules'] as LibraryKind[]).map((kind) => ({ key: kind, label: <span className="integration-tab-label"><ToolOutlined /> {tr(libraryNames[kind])} <small>{libraries[kind].length}</small></span>, children: <LibraryPanel kind={kind} data={libraries[kind]} onRefresh={onRefresh} onError={onError} /> })),
   ]} />
   </section>;
 }
@@ -1682,12 +1684,46 @@ function logFieldValue(row: ConversationLog, key: string): unknown {
   return value;
 }
 
+function logErrorText(row: ConversationLog): string {
+  const details = row.details ?? {};
+  const value = details.error ?? details.message ?? details.detail;
+  if (typeof value === 'string') return value;
+  if (value !== undefined) return JSON.stringify(value);
+  return '';
+}
+
+function logErrorCode(row: ConversationLog): string | undefined {
+  const details = row.details ?? {};
+  for (const key of ['errorCode', 'code', 'statusCode', 'httpStatus']) {
+    const value = details[key];
+    if (typeof value === 'number' || typeof value === 'string' && value.trim()) return String(value).trim();
+  }
+  return /(?:^|\D)([1-5]\d{2})(?:\D|$)/.exec(logErrorText(row))?.[1];
+}
+
+function CopyId({ value, label }: { value?: string; label: string }) {
+  const { tr } = useI18n();
+  const { message } = AntApp.useApp();
+  if (!value) return <span className="muted">—</span>;
+  const short = value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      message.success(tr('已复制'));
+    } catch {
+      message.error(tr('复制失败，请手动选择文本'));
+    }
+  };
+  return <span className="copy-id"><Tooltip title={<span className="table-mono">{value}</span>}><span className="copy-id-short">{short}</span></Tooltip><Tooltip title={tr('复制 openid')}><Button type="text" size="small" icon={<CopyOutlined />} aria-label={`${tr('复制')} ${label}`} onClick={() => void copy()} /></Tooltip></span>;
+}
+
 function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter, onCleared }: {
   data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void; onCleared: () => void;
 }) {
   const { language, tr, localized } = useI18n();
   const { message } = AntApp.useApp();
   const [clearing, setClearing] = useState(false);
+  const [errorRow, setErrorRow] = useState<ConversationLog | null>(null);
   const clearLogs = async () => {
     setClearing(true);
     try {
@@ -1706,17 +1742,35 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
     for (const field of definition?.logFields ?? []) fields.set(field.key, field);
   }
   const label = (key: string, fallback: string) => fields.has(key) ? localized(fields.get(key)!.label) : tr(fallback);
-  const fixedKeys = new Set(['id', 'createdAt', 'pluginId', 'pluginType', 'userId', 'groupExternalId', 'content', 'reply', 'status', 'expiresAt']);
   const columns: TableColumnsType<ConversationLog> = [
-    { title: label('createdAt', '时间'), dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (value: number) => prettyDate(value, language) },
-    { title: label('pluginId', '插件'), key: 'plugin', width: 180, render: (_, row) => <div className="model-cell">{rowPlugin(row)?.name || row.pluginType || tr('未知插件')}<small>{row.pluginType || rowPlugin(row)?.type || row.pluginId || '—'}</small></div> },
-    { title: label('userId', '用户 openid'), dataIndex: 'userId', key: 'userId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
-    { title: label('groupExternalId', '群 openid'), dataIndex: 'groupExternalId', key: 'groupExternalId', width: 180, render: (value: unknown) => typeof value === 'string' && value ? <Text className="detail-text" copyable={{ text: value, tooltips: [tr('复制 openid'), tr('已复制')] }}>{value}</Text> : <DetailValue value={value} /> },
-    { title: label('content', '收到内容'), dataIndex: 'content', key: 'content', width: 260, render: (value: unknown) => <div className="log-content"><DetailValue value={value} /></div> },
-    { title: label('reply', '发送内容'), key: 'reply', width: 320, render: (_, row) => <div className="log-content"><DetailValue value={logFieldValue(row, 'details.reply')} /></div> },
-    { title: label('status', '处理状态'), key: 'status', width: 120, render: (_, row) => <Tag color={row.status === 'error' || row.status === 'failed' ? 'error' : row.status === 'success' || row.status === 'sent' ? 'success' : 'default'}>{row.status ? tr(({ success: '成功', sent: '已发出', received: '已收到', error: '错误', failed: '失败', skipped: '已跳过', rejected: '已拒绝', processing: '处理中', completed: '已完成' } as Record<string, string>)[row.status] ?? row.status) : row.direction === 'in' ? tr('收到') : tr('发出')}</Tag> },
-    ...[...fields.values()].filter((field) => !fixedKeys.has(field.key)).map((field) => ({ title: localized(field.label), key: field.key, width: 180, render: (_: unknown, row: ConversationLog) => <div className="log-field-preview"><DetailValue value={logFieldValue(row, field.key)} /></div> })),
+    { title: label('createdAt', '时间'), dataIndex: 'createdAt', key: 'createdAt', width: 150, render: (value: number) => prettyDate(value, language) },
+    { title: label('status', '处理状态'), key: 'status', width: 90, render: (_, row) => <Tag color={row.status === 'error' || row.status === 'failed' ? 'error' : row.status === 'success' || row.status === 'sent' ? 'success' : 'default'}>{row.status ? tr(({ success: '成功', sent: '已发出', received: '已收到', error: '错误', failed: '失败', skipped: '已跳过', rejected: '已拒绝', processing: '处理中', completed: '已完成' } as Record<string, string>)[row.status] ?? row.status) : row.direction === 'in' ? tr('收到') : tr('发出')}</Tag> },
+    { title: tr('会话'), key: 'group', width: 130, render: (_, row) => {
+      const group = groups.find((item) => item.id === row.groupId);
+      return <div className="log-group-cell"><strong>{group?.name || tr('未知会话')}</strong><small>{group?.conversationType === 'private' ? tr('私聊') : tr('群聊')}</small></div>;
+    } },
+    { title: label('userId', '用户 openid'), dataIndex: 'userId', key: 'userId', width: 125, render: (value: unknown) => <CopyId value={typeof value === 'string' ? value : undefined} label="user openid" /> },
+    { title: label('content', '收到内容'), dataIndex: 'content', key: 'content', render: (value: unknown) => <div className="log-content"><DetailValue value={value} /></div> },
+    { title: label('reply', '发送内容'), key: 'reply', render: (_, row) => <div className="log-content"><DetailValue value={logFieldValue(row, 'details.reply')} /></div> },
+    { title: tr('错误'), key: 'error', width: 96, render: (_, row) => {
+      const error = logErrorText(row);
+      if (!error) return <span className="muted">—</span>;
+      const code = logErrorCode(row);
+      return <Tooltip title={tr('查看错误详情')}><Button type="text" danger size="small" className="log-error-button" icon={<ExclamationCircleOutlined />} onClick={() => setErrorRow(row)}>{code ? `API ${code}` : tr('错误')}</Button></Tooltip>;
+    } },
   ];
+  const errorText = errorRow ? logErrorText(errorRow) : '';
+  const errorCode = errorRow ? logErrorCode(errorRow) : undefined;
+  const errorDetails: JsonObject = errorRow ? {
+    ...(errorRow.details ?? {}),
+    eventId: errorRow.eventId,
+    pluginId: errorRow.pluginId,
+    accountId: errorRow.accountId,
+    groupId: errorRow.groupId,
+    groupExternalId: errorRow.groupExternalId,
+    userId: errorRow.userId,
+  } : {};
+  delete errorDetails.error;
   if (enabled === false) return <section className="logs-disabled"><div className="disabled-icon"><MessageOutlined /></div><div className="eyebrow"><span className="eyebrow-line" /> OBSERVABILITY / DISABLED</div><Title level={2}>{tr('对话日志已关闭')}</Title><Paragraph>{tr('服务端未启用 LOG_RECORD。如需记录对话，请在部署环境启用该配置；现有日志保留策略为 30 天。')}</Paragraph><div className="disabled-meta"><span>LOG_RECORD</span><b>OFF</b><span>RETENTION</span><b>30 DAYS</b></div></section>;
   return <section className="data-page logs-page">
     <div className="log-toolbar"><Form form={form} layout="inline" onFinish={onFilter} className="log-filter-form">
@@ -1728,14 +1782,24 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
       <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
       <Form.Item name="groupId"><Select allowClear placeholder={tr('全部群聊')} options={groups.map((item) => ({ label: item.name || item.externalId, value: item.id }))} /></Form.Item>
       <Form.Item className="log-actions"><Space size={8} wrap={false}>
-        <Button type="primary" htmlType="submit">{tr('应用筛选')}</Button>
-        <Button onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button>
+        <Button size="small" type="primary" htmlType="submit">{tr('应用筛选')}</Button>
+        <Button size="small" onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button>
         <Popconfirm title={tr('清除全部对话日志？')} description={tr('将删除所有对话日志记录，且无法恢复。')} okText={tr('清除')} cancelText={tr('取消')} okButtonProps={{ danger: true }} onConfirm={() => void clearLogs()}>
-          <Button danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
+          <Button size="small" danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
         </Popconfirm>
       </Space></Form.Item>
-    </Form><div className="log-count"><span className="online-dot" /> {total} RECORDS / 30D</div></div>
-    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: Math.max(1140, columns.length * 180) }} className="data-table logs-table" expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('完整消息与插件详情')}</h3><DetailFields values={{ content: row.content, ...Object.fromEntries(Object.entries(row).filter(([key]) => !fixedKeys.has(key))) }} labels={{ content: tr('收到内容'), reply: tr('发送内容'), direction: tr('方向'), accountId: tr('账号'), groupId: tr('群聊'), details: tr('插件详情'), ...Object.fromEntries((rowDefinition(row)?.logFields ?? []).map((field) => [field.key, localized(field.label)])) }} /></div> }} /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`}</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
+    </Form></div>
+    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 1050 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`} · {total} RECORDS / 30D</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
+    <Modal open={Boolean(errorRow)} title={tr('错误详情')} width={760} onCancel={() => setErrorRow(null)}
+      footer={<Space><Button icon={<CopyOutlined />} onClick={() => { void navigator.clipboard.writeText(errorText).then(() => message.success(tr('已复制'))).catch(() => message.error(tr('复制失败，请手动选择文本'))); }}>{tr('复制错误')}</Button><Button type="primary" onClick={() => setErrorRow(null)}>{tr('关闭')}</Button></Space>}>
+      {errorRow && <div className="log-error-detail">
+        <div className="log-error-code"><span>{tr('错误代码')}</span><Tag color={errorCode ? 'error' : 'default'}>{errorCode ?? tr('未提供')}</Tag><span className="muted">{errorRow.status}</span></div>
+        <h3>{tr('错误内容')}</h3>
+        <pre className="log-error-message">{errorText || tr('无错误文本')}</pre>
+        <h3>{tr('详细信息')}</h3>
+        <DetailFields values={errorDetails} labels={{ eventId: tr('事件 ID'), messageId: tr('消息 ID'), pluginId: tr('插件'), accountId: tr('账号'), groupId: tr('群聊'), groupExternalId: tr('群 openid'), userId: tr('用户 openid'), model: tr('模型'), providerId: tr('AI供应商') }} />
+      </div>}
+    </Modal>
   </section>;
 }
 

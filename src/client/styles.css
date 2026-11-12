@@ -422,9 +422,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .discover-row > span { color: var(--muted-strong); font-size: 9px; }
 .integration-tabs { margin-top: 0; }
 .integration-tabs > .ant-tabs-nav { margin-bottom: 0; }
-.integration-tabs .ant-tabs-tab { padding: 12px 10px; }
-.integration-tabs .ant-tabs-tab .anticon { margin-right: 6px; color: var(--accent); }
-.integration-tabs .ant-tabs-tab .ant-tag { margin-left: 7px; color: var(--text-soft); border-color: var(--line-strong); background: var(--surface-inset); font: 8px var(--mono); }
+.integration-tabs .ant-tabs-tab { padding: 10px 6px; }
+.integration-tabs .ant-tabs-tab-btn { font-size: 11px; }
+.integration-tabs .ant-tabs-tab .anticon { margin-right: 4px; color: var(--accent); }
+.integration-tab-label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.integration-tab-label small { color: var(--muted); font: 8px var(--mono); }
 .tab-panel { padding-top: 12px; }
 .id-list { display: grid; gap: 0; }
 .id-list-row { display: flex; gap: 8px; align-items: flex-start; }
@@ -449,11 +451,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .runtime-prompt-field { display: grid; gap: 8px; margin: 16px 0 12px; color: var(--muted); font-size: 11px; }
 .runtime-control-card .ant-table { background: transparent; }
 .runtime-control-card .ant-table-cell { overflow-wrap: anywhere; }
-.log-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 13px; }
-.log-filter-form { row-gap: 8px; }
-.log-filter-form .ant-form-item { margin-inline-end: 0; }
-.log-filter-form .ant-input-affix-wrapper { width: 245px; }
-.log-filter-form .ant-select { min-width: 145px; }
+.log-toolbar { display: block; margin-bottom: 13px; }
+.log-filter-form { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; overflow-x: auto; padding-bottom: 2px; }
+.log-filter-form .ant-form-item { flex: 0 0 auto; margin: 0; }
+.log-filter-form .ant-form-item:nth-child(1) { flex: 1 1 180px; min-width: 160px; }
+.log-filter-form .ant-form-item:nth-child(2) { flex-basis: 120px; }
+.log-filter-form .ant-form-item:nth-child(3) { flex-basis: 150px; }
+.log-filter-form .ant-form-item:nth-child(4), .log-filter-form .ant-form-item:nth-child(5) { flex-basis: 155px; }
+.log-filter-form .ant-form-item:nth-child(6) { flex-basis: 120px; }
+.log-filter-form .ant-form-item:nth-child(7) { flex-basis: 130px; }
+.log-filter-form .ant-form-item:nth-child(8) { flex: 0 0 auto; }
+.log-filter-form .ant-input-affix-wrapper, .log-filter-form .ant-select, .log-filter-form .ant-input { width: 100%; min-width: 0; }
 .log-filter-form .ant-btn { font-size: 10px; }
 .log-count { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: var(--muted); font: 8px var(--mono); }
 .direction-tag { min-width: 58px; text-align: center; font-size: 9px; }
@@ -462,6 +470,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .log-content { display: block; max-width: 520px; max-height: 64px; overflow: hidden; color: var(--text); }
 .log-field-preview { max-height: 64px; overflow: hidden; }
 .log-field-preview .detail-fields > div { grid-template-columns: 1fr; gap: 4px; }
+.log-group-cell { display: grid; gap: 3px; min-width: 0; }
+.log-group-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.log-group-cell small { color: var(--muted); font: 9px var(--mono); }
+.copy-id { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.copy-id-short { overflow: hidden; color: var(--text-soft); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.copy-id .ant-btn { height: 22px; padding-inline: 4px; }
+.log-error-button { padding-inline: 4px; }
+.log-error-detail { display: grid; gap: 4px; }
+.log-error-code { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.log-error-code > span:first-child { color: var(--muted); font: 9px var(--mono); letter-spacing: .06em; }
+.log-error-detail h3 { margin: 18px 0 8px; color: var(--accent); font: 9px var(--mono); letter-spacing: .08em; }
+.log-error-message { max-height: 260px; padding: 12px; margin: 0; overflow: auto; border: 1px solid var(--line); background: var(--surface-inset); color: var(--text); font: 11px/1.7 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .logs-pagination { display: flex; justify-content: space-between; align-items: center; padding-top: 15px; color: var(--muted); font: 9px var(--mono); }
 .logs-disabled { max-width: 620px; min-height: 330px; padding: 48px 36px; margin-top: 30px; border: 1px solid var(--line); background: var(--surface); }
 .disabled-icon { width: 44px; height: 44px; margin-bottom: 28px; display: grid; place-items: center; border: 1px solid var(--line-strong); color: var(--muted); }
@@ -480,7 +500,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .flow-row { grid-template-columns: 32px 1fr 24px 12px 32px 1fr 24px 12px 32px 1fr 24px; gap: 6px; }
   .flow-icon { width: 32px; height: 32px; }
   .overview-columns { grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); }
-  .log-toolbar { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 850px) {
   .landing-shell, .login-shell { padding: 0 22px; }
@@ -585,13 +604,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .integration-tabs .ant-tabs-tab { padding-inline: 4px; }
   .integration-tabs .ant-tabs-tab-btn { font-size: 9px; }
   .integration-tabs .ant-tabs-tab .anticon { margin-right: 2px; }
-  .integration-tabs .ant-tabs-tab .ant-tag { display: none; }
-  .log-filter-form { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
-  .log-filter-form .ant-form-item:first-child { grid-column: 1 / -1; }
-  .log-filter-form .ant-input-affix-wrapper, .log-filter-form .ant-select { width: 100%; min-width: 0; }
-  .log-filter-form .ant-form-item:last-child { grid-column: 1 / -1; width: 100%; }
-  .log-filter-form .log-actions .ant-space { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 8px !important; }
-  .log-filter-form .ant-form-item .ant-btn { width: 100%; padding-inline: 5px; }
+  .integration-tab-label small { display: none; }
+  .log-filter-form .ant-btn { padding-inline: 6px; }
   .logs-pagination { align-items: flex-start; flex-direction: column; gap: 10px; }
   .logs-disabled { padding: 30px 22px; }
   .disabled-meta { gap: 8px; flex-wrap: wrap; }
