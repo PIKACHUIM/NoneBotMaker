@@ -345,7 +345,7 @@ const EN: Record<string, string> = {
   '保存后仍需点击“批准”才会执行。参数必须为 JSON 对象，且不能包含密钥。': 'You must still approve the call to execute it. Arguments must be a JSON object and must not contain secrets.',
   '工具参数 JSON': 'Tool arguments JSON',
   '提示词组装顺序': 'Prompt composition order',
-  '人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“模型调用”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。': 'Persona → identity policy / conversation system rules → role card → conversation memory → Skills/Rules → mode instructions. Edit the persona in the Model requests extension settings; manage role cards with /role or account-shared role cards.',
+  '人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“人设与提示词”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。': 'Persona → identity policy / conversation system rules → role card → conversation memory → Skills/Rules → mode instructions. Edit the persona in the Persona & prompts extension settings; manage role cards with /role or account-shared role cards.',
   '保存模式': 'Save mode',
   '静默模式': 'Silent mode',
   '一次性提示': 'One-time prompt',

@@ -1255,7 +1255,7 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
         </div>
         <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
-        <Alert type="info" showIcon message={tr('提示词组装顺序')} description={tr('人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“模型调用”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。')} />
+        <Alert type="info" showIcon message={tr('提示词组装顺序')} description={tr('人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“人设与提示词”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。')} />
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">

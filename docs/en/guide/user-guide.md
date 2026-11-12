@@ -38,7 +38,7 @@ In **Conversation Policies**, select the account, enter the external conversatio
 - owner/admin/user allowlists or the relevant access policy;
 - context budget, summary ratio, message batching/chunking, rate limits, and spending limits.
 
-Each conversation can also define a **Persona** in the Model requests extension settings of its policy. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
+Each conversation can also define a **Persona** in the Persona & prompts extension settings of its policy. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
 
 Create policies only for conversations you are authorized to manage. Group OpenIDs and user OpenIDs have different scopes; do not interchange them.
 
