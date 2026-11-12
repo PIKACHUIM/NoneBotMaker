@@ -38,6 +38,7 @@ const boolean = (
 const group = (zh: string, en: string): LocalizedText => ({ zh, en });
 
 const agentGroup = group('模型调用', 'Model requests');
+const personaGroup = group('人设与提示词', 'Persona & prompts');
 const bridgeGroup = group('消息与访问', 'Messages & Access');
 const contextGroup = group('上下文与媒体', 'Context & Media');
 const searchGroup = group('联网搜索', 'Web search');
@@ -80,7 +81,7 @@ const chatbotDefinition: PluginDefinition = {
     text('agent_persona', ['人设', 'Persona'], [
       '该会话的角色设定，例如身份、语气和表达习惯；会排在系统规则与角色卡之前。留空则不额外注入。',
       'Role definition for this conversation, such as identity, tone and speaking style. It is injected before system rules and role cards. Empty means no extra persona.',
-    ], { group: agentGroup, default: '', multiline: true }),
+    ], { group: personaGroup, default: '', multiline: true }),
     boolean('agent_stream', ['流式模型响应', 'Streaming model response'], [
       '按流式协议读取模型文本、工具调用和用量。须由所选 AI API 支持；聊天平台仍按完整分段发送。',
       'Reads model text, tool calls and usage through streaming. Requires API support; the chat platform still receives complete message parts.',
