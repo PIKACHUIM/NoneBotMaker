@@ -1,5 +1,6 @@
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE, LOG_RETENTION_DAYS, type ChatContentPart, type ChatMessage, type ConversationLog, type ConversationType, type GroupRecord, type JsonObject, type LibraryKind, type LibraryRecord, type ModelPriceRecord, type NormalizedMessage, type ProjectMemoryRecord, type ProviderRecord } from '../../../shared/types';
 import { configBoolean, configIdSet, configNumber, configString, effectiveGroupConfig } from '../../../shared/plugin-catalog';
+import { DEFAULT_MODEL_PRICE } from '../../../shared/model-pricing';
 import { readBoolean } from '../../env';
 import type { ConversationLogRepository } from '../../storage/conversation-log-repository';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
@@ -486,9 +487,11 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     const model = group.model || configString(config, 'agent_model');
     if (!model) { if (approvedResult) { await send(`审批已执行；未配置后续模型。\n${approvedResult.content}`); return; } throw new Error('Chat model is not configured.'); }
     const price = await dependencies.findPrice?.(model, 'tokens');
-    const inputPrice = price?.enabled ? price.inputCostPerMillion : group.inputCostPerMillion ?? configNumber(config, 'bridge_input_cost_per_million', 0, 0);
-    const outputPrice = price?.enabled ? price.outputCostPerMillion : group.outputCostPerMillion ?? configNumber(config, 'bridge_output_cost_per_million', 0, 0);
-    if (!price?.enabled && !(inputPrice > 0 || outputPrice > 0) || price?.unit && price.unit !== 'tokens' || !Number.isFinite(inputPrice) || !Number.isFinite(outputPrice) || inputPrice < 0 || outputPrice < 0) {
+    const legacyInput = group.inputCostPerMillion ?? configNumber(config, 'bridge_input_cost_per_million', 0, 0);
+    const legacyOutput = group.outputCostPerMillion ?? configNumber(config, 'bridge_output_cost_per_million', 0, 0);
+    const inputPrice = price?.enabled ? price.inputCostPerMillion : legacyInput > 0 ? legacyInput : DEFAULT_MODEL_PRICE.inputCostPerMillion;
+    const outputPrice = price?.enabled ? price.outputCostPerMillion : legacyOutput > 0 ? legacyOutput : DEFAULT_MODEL_PRICE.outputCostPerMillion;
+    if (price?.unit && price.unit !== 'tokens' || !Number.isFinite(inputPrice) || !Number.isFinite(outputPrice) || inputPrice < 0 || outputPrice < 0) {
       await log('out', '', 'pricing_unavailable', { model, requiredUnit: 'tokens' });
       if (approvedResult) { await send(`审批已执行；后续模型缺少单价。\n${approvedResult.content}`); return; }
       throw new Error('Model pricing is unavailable; refusing an unpriced model call.');
@@ -518,7 +521,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const cached = Math.min(completion.promptTokens, completion.cachedPromptTokens);
       const amount = ((completion.promptTokens - cached) * inputPrice + cached * (price?.cacheInputCostPerMillion ?? inputPrice) + completion.completionTokens * outputPrice) * multiplier / 1_000_000;
       await dependencies.recordGroupCost(group!, amount, now());
-      await log('out', '', status, { model, providerId: provider!.id, usage: { promptTokens: completion.promptTokens, completionTokens: completion.completionTokens, cachedPromptTokens: cached }, cost: amount, priceId: price?.id, toolCalls: completion.toolCalls });
+      await log('out', '', status, { model, providerId: provider!.id, usage: { promptTokens: completion.promptTokens, completionTokens: completion.completionTokens, cachedPromptTokens: cached }, cost: amount, priceId: price?.id, pricingSource: price?.enabled ? 'price' : 'default', toolCalls: completion.toolCalls });
       return completion;
     }
     const slangResearchKey = configString(config, 'brave_api_key').trim();

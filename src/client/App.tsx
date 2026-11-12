@@ -1499,6 +1499,7 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
   const [form] = Form.useForm<ModelPriceRecord>();
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingAll, setImportingAll] = useState(false);
   const [presetIds, setPresetIds] = useState<string[]>([]);
   const editing = data.find((item) => item.id === drawer.editingId);
   useEffect(() => {
@@ -1531,6 +1532,24 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
       if (imported > 0) onRefresh();
     }
   };
+  const importAllPresets = async () => {
+    const missing = MODEL_PRICE_PRESETS.filter((item) => !data.some((saved) => saved.model === item.model));
+    if (!missing.length) { message.info(tr('所有预置模型都已有单价')); return; }
+    setImportingAll(true);
+    let imported = 0;
+    try {
+      for (const preset of missing) {
+        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
+        imported += 1;
+      }
+      message.success(`${tr('已导入预置单价')}：${imported}`);
+    } catch (reason) {
+      onError(new Error(`${tr('已导入预置单价')}：${imported}；${formatError(reason)}`));
+    } finally {
+      setImportingAll(false);
+      if (imported > 0) onRefresh();
+    }
+  };
   const columns: TableColumnsType<ModelPriceRecord> = [
     { title: tr('模型'), dataIndex: 'model', key: 'model', render: (value: string, row) => <div className="model-cell">{value}<small>{row.name}</small></div> },
     { title: tr('计价单位'), dataIndex: 'unit', key: 'unit', render: (value?: string) => value === 'characters' ? tr('百万字符') : tr('百万 token') },
@@ -1542,8 +1561,9 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Button size="small" aria-label={`${tr('编辑')} ${row.model}`} icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /><Switch checked={row.enabled} aria-label={`${row.model} ${tr('启用状态')}`} onChange={(enabled) => void api.savePrice({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除模型单价')} ${row.model}？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePrice(row.id).then(onRefresh).catch(onError)}><Button danger size="small" aria-label={`${tr('删除')} ${row.model}`} icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun="USD / 1M UNITS" action={tr('新增模型单价')} onCreate={() => drawer.edit()} />
-    <p className="form-note">{tr('预置为官方标准模型价格快照，不会自动更新；导入前请核对来源。')} {tr('核对日期')}：{MODEL_PRICE_CHECKED_AT}</p>
-    <div className="preset-import"><Select mode="multiple" virtual={false} optionFilterProp="label" value={presetIds} onChange={setPresetIds} aria-label={tr('选择预置模型单价')} placeholder={tr('选择预置模型单价')} options={MODEL_PRICE_PRESETS.map((item) => ({ label: `${item.name} · $${item.inputCostPerMillion} / $${item.outputCostPerMillion}`, value: item.id, disabled: data.some((saved) => saved.model === item.model) }))} /><Button loading={importing} disabled={!presetIds.length} onClick={() => void importPresets()}>{tr('导入所选预置')}</Button></div>
+    <p className="form-note">{tr('预置为公开价目快照，可能包含第三方比价，不会自动更新；导入前请核对来源。')} {tr('核对日期')}：{MODEL_PRICE_CHECKED_AT}</p>
+    <p className="form-note">{tr('未登记单价的文本模型按默认 $3 输入 / $15 输出每百万 token 计费，不再拒绝执行。')}</p>
+    <div className="preset-import"><Select mode="multiple" virtual={false} optionFilterProp="label" value={presetIds} onChange={setPresetIds} aria-label={tr('选择预置模型单价')} placeholder={tr('选择预置模型单价')} options={MODEL_PRICE_PRESETS.map((item) => ({ label: `${item.name} · $${item.inputCostPerMillion} / $${item.outputCostPerMillion}`, value: item.id, disabled: data.some((saved) => saved.model === item.model) }))} /><Button loading={importing} disabled={!presetIds.length} onClick={() => void importPresets()}>{tr('导入所选预置')}</Button><Popconfirm title={tr('导入全部缺少的预置？')} okText={tr('导入')} cancelText={tr('取消')} onConfirm={() => void importAllPresets()}><Button loading={importingAll}>{tr('导入全部缺少的预置')}</Button></Popconfirm></div>
     {data.length ? <Table<ModelPriceRecord> rowKey="id" dataSource={data} columns={columns} className="data-table" scroll={{ x: 1000 }} pagination={{ pageSize: 8, showSizeChanger: false }} /> : <EmptyTable title={tr('还没有模型单价')} description={tr('手动登记或选择官方预置导入，再在群聊选择模型。')} />}
     <Drawer title={<DrawerTitle label="MODEL PRICING" title={editing ? tr('编辑模型单价') : tr('新增模型单价')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>

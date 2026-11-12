@@ -21,7 +21,7 @@ In **Plugins**, add the Group Chatbot plugin (`elysia-best/plugin-chatbot`). Fie
 
 ### 3. Configure an AI provider and prices
 
-In **AI Providers**, enter a provider name, compatible API URL, API key, and model information. Then use **API Capabilities / Model Pricing** to record input/output rates and billing units. Pricing participates in budget checks; without a valid rate, the runtime does not assume a model request is free.
+In **AI Providers**, enter a provider name, compatible API URL, API key, and model information. Then use **API Capabilities / Model Pricing** to record input/output rates and billing units. Pricing participates in budget checks; text models without a registered price are billed at the default $3 input / $15 output per million tokens instead of being rejected. The pricing page offers public price presets for common models; import them and adjust against your actual bill.
 
 Declare media capabilities for the actual provider and model. Attachments unsupported by the selected model are not reported as read. The provider still controls external requests and billing.
 

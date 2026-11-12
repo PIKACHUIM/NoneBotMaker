@@ -332,7 +332,7 @@ describe('model prices and provider multipliers', () => {
   it('offers dated presets without populating the price library and allows manual CRUD', async () => {
     const setup = createApp();
     const presets = await json(await setup.app.request('/prices/presets', {}, setup.bindings));
-    expect(presets).toMatchObject({ checkedAt: '2026-11-02', realtime: false });
+    expect(presets).toMatchObject({ checkedAt: '2026-11-12', realtime: false });
     expect((presets.data as JsonObject[]).every((price) => typeof price.sourceUrl === 'string' && price.currency === 'USD')).toBe(true);
     expect(await json(await setup.app.request('/prices', {}, setup.bindings))).toEqual({ data: [] });
     const response = await writeRequest(setup, '/prices', MODEL_PRICE_PRESETS[0] as unknown as JsonObject);

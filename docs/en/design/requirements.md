@@ -26,7 +26,7 @@ NoneBotMaker provides a serverless management and chat service for official QQ b
 1. Unauthenticated requests to management APIs are rejected. Authenticated administrators can perform only server-validated management operations.
 2. A QQ Webhook enters the chat handler only after signature validation, account resolution by AppID, and applicable account/policy checks.
 3. After an administrator saves an account and a valid conversation policy, the policy appears in Conversation Management. Historical QQ chats are not discovered automatically.
-4. AI requests honor the selected model, media capabilities, registered prices, budget, and conversation tool permissions. Requests without pricing evidence are not treated as free.
+4. AI requests honor the selected model, media capabilities, registered prices, budget, and conversation tool permissions. A missing price uses the default rate rather than treating the request as free or rejecting it.
 5. Untrusted MCP tools require approval; approval is persisted before execution continues. Pending execution is unavailable where safe atomic claiming cannot be guaranteed.
 6. Missing persistence bindings produce an explicit configuration error rather than pretending process-local state is durable.
 7. `LOG_RECORD` defaults to off. When enabled, logs follow the retention period and are cleaned by a platform schedule or protected endpoint.

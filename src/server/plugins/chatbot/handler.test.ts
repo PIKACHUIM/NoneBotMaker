@@ -564,10 +564,12 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.0001, 1000);
   });
 
-  it('fails closed on unknown prices instead of silently bypassing budgets', async () => {
+  it('charges the default price when no price is registered', async () => {
     const { deps, fetch } = dependencies({ findGroup: vi.fn(async () => ({ ...group, inputCostPerMillion: 0, outputCostPerMillion: 0 })) });
-    await expect(createChatbotHandler(deps)(account, message())).rejects.toThrow('pricing');
-    expect(fetch).not.toHaveBeenCalled();
+    await createChatbotHandler(deps)(account, message());
+    expect(fetch).toHaveBeenCalledOnce();
+    const amount = vi.mocked(deps.recordGroupCost).mock.calls[0][1];
+    expect(amount).toBeGreaterThan(0);
   });
 
   it('caps the agent loop at 25 model rounds with complete error messages', async () => {
