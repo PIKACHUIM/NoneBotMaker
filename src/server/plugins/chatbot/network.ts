@@ -90,7 +90,14 @@ export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl
   // Workers边缘不支持redirect:'error'，只支持follow/manual；3xx手动判定为失败。
   const response = await fetchImpl(url.toString(), { ...init, redirect: 'manual', signal: AbortSignal.timeout(20_000) });
   if (response.redirected || response.status >= 300 && response.status < 400) throw new Error('Redirects are not allowed.');
-  if (!response.ok) throw new Error(`Remote request failed (${response.status}).`);
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const text = (await boundedText(response, 4_096)).replace(/\s+/g, ' ').trim();
+      if (text) detail = text.replace(/((?:api[_-]?key|authorization|token|secret)"?\s*[:=]\s*)[^\s,}]+/gi, '$1[redacted]').slice(0, 500);
+    } catch { /* response body is optional diagnostics */ }
+    throw new Error(`Remote request failed (${response.status}).${detail ? ` ${detail}` : ''}`);
+  }
   return response;
 }
 

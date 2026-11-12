@@ -280,6 +280,17 @@ describe('createChatbotHandler', () => {
     expect(system.indexOf('PERSONA TEXT')).toBeLessThan(system.indexOf('SYSTEM RULES'));
   });
 
+  it('merges a text-only message batch into one model user turn', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'batched' } }] }));
+    const { deps } = dependencies({ fetch });
+    const batch = Array.from({ length: 5 }, (_, index) => message({ id: `batch-${index}`, eventId: `batch-event-${index}`, text: `您好 ${index}` }));
+    await createChatbotHandler(deps)(account, message({ id: 'batch-last', eventId: 'batch-last', text: '您好 5', batchMessages: batch }));
+    const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const userMessages = request.messages.filter((entry) => entry.role === 'user');
+    expect(userMessages).toHaveLength(1);
+    for (const item of batch) expect(userMessages[0].content).toContain(item.text);
+  });
+
   it('persists chat_wait and resumes its pending tool call with the next conversation message', async () => {
     let state: Record<string, unknown> = {};
     const requests: Array<Record<string, unknown>> = [];
@@ -527,9 +538,9 @@ describe('createChatbotHandler', () => {
     ] }));
     const request = JSON.parse(String(fetch.mock.calls[0][1]?.body));
     const users = request.messages.filter((entry: { role: string }) => entry.role === 'user');
-    expect(users).toHaveLength(2);
+    expect(users).toHaveLength(1);
     expect(users[0].content).toContain('allowed-user');
-    expect(users[1].content).toContain('owner');
+    expect(users[0].content).toContain('owner');
     expect(JSON.stringify(users)).not.toContain('excluded');
   });
 

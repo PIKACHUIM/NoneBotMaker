@@ -1,4 +1,4 @@
-import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE, LOG_RETENTION_DAYS, type ChatMessage, type ConversationLog, type ConversationType, type GroupRecord, type JsonObject, type LibraryKind, type LibraryRecord, type ModelPriceRecord, type NormalizedMessage, type ProjectMemoryRecord, type ProviderRecord } from '../../../shared/types';
+import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE, LOG_RETENTION_DAYS, type ChatContentPart, type ChatMessage, type ConversationLog, type ConversationType, type GroupRecord, type JsonObject, type LibraryKind, type LibraryRecord, type ModelPriceRecord, type NormalizedMessage, type ProjectMemoryRecord, type ProviderRecord } from '../../../shared/types';
 import { configBoolean, configIdSet, configNumber, configString, effectiveGroupConfig } from '../../../shared/plugin-catalog';
 import { readBoolean } from '../../env';
 import type { ConversationLogRepository } from '../../storage/conversation-log-repository';
@@ -559,7 +559,13 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }) : undefined;
     try {
       const incoming: ChatMessage[] = [];
-      for (const entry of approvalIntent || resumeWait || slangOnlyTurn ? [] : permitted) incoming.push({ role: 'user', content: await incomingContent(message.isWake ? { ...entry, text: `[计划唤醒，非新用户消息]\n${message.wakeReason ?? entry.text}` } : entry, model, configNumber(config, 'bridge_max_media_bytes', 8 * 1024 * 1024, 1024, 32 * 1024 * 1024), fetchImpl, provider.mediaCapabilities ?? ['image']) });
+      const incomingContents: Array<string | ChatContentPart[]> = [];
+      for (const entry of approvalIntent || resumeWait || slangOnlyTurn ? [] : permitted) incomingContents.push(await incomingContent(message.isWake ? { ...entry, text: `[计划唤醒，非新用户消息]\n${message.wakeReason ?? entry.text}` } : entry, model, configNumber(config, 'bridge_max_media_bytes', 8 * 1024 * 1024, 1024, 32 * 1024 * 1024), fetchImpl, provider.mediaCapabilities ?? ['image']));
+      for (const content of incomingContents) {
+        const previous = incoming.at(-1);
+        if (typeof content === 'string' && previous && typeof previous.content === 'string') previous.content = `${previous.content}\n\n${content}`;
+        else incoming.push({ role: 'user', content });
+      }
       const maxContext = configNumber(config, 'max_context', 262_144, 4096, 2_000_000);
       const threshold = maxContext * configNumber(config, 'compact_rate', 0.8, 0.1, 0.99);
       const maxRounds = Math.trunc(configNumber(config, 'agent_max_rounds', 25, 1, 25));
