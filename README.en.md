@@ -45,6 +45,7 @@ See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 - **Persona and prompts:** Per-conversation personas layered with identity policy, system rules, role cards, memory, and Skills/Rules.
 - **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval, and pending arguments can be edited before approval.
 - **Runtime management:** Conversation modes, allowlists, budgets, context, logs, scheduled wakeups, and media assets.
+- **Cost control:** Presets for common models; text models without a registered price use a default $3 input / $15 output per million tokens.
 - **Multi-platform storage:** Cloudflare D1/KV/DO, EdgeOne Blob/KV, and ESA KV adapters.
 
 ## How It Works
