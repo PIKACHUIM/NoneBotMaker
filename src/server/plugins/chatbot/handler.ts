@@ -563,8 +563,12 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       for (const entry of approvalIntent || resumeWait || slangOnlyTurn ? [] : permitted) incomingContents.push(await incomingContent(message.isWake ? { ...entry, text: `[计划唤醒，非新用户消息]\n${message.wakeReason ?? entry.text}` } : entry, model, configNumber(config, 'bridge_max_media_bytes', 8 * 1024 * 1024, 1024, 32 * 1024 * 1024), fetchImpl, provider.mediaCapabilities ?? ['image']));
       for (const content of incomingContents) {
         const previous = incoming.at(-1);
-        if (typeof content === 'string' && previous && typeof previous.content === 'string') previous.content = `${previous.content}\n\n${content}`;
-        else incoming.push({ role: 'user', content });
+        if (!previous) { incoming.push({ role: 'user', content }); continue; }
+        if (typeof previous.content === 'string') {
+          if (typeof content === 'string') previous.content = `${previous.content}\n\n${content}`;
+          else previous.content = [{ type: 'text', text: previous.content }, ...content];
+        } else if (typeof content === 'string') previous.content.push({ type: 'text', text: content });
+        else previous.content.push(...content);
       }
       const maxContext = configNumber(config, 'max_context', 262_144, 4096, 2_000_000);
       const threshold = maxContext * configNumber(config, 'compact_rate', 0.8, 0.1, 0.99);
