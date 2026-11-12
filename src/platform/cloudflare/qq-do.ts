@@ -251,6 +251,9 @@ export class QQGatewayDurableObject {
     if (action === 'reconnect') {
       if ((this.env.API_METHOD ?? 'webhook') !== 'websocket') return Response.json({ error: 'gateway_disabled' }, { status: 409 });
       try {
+        // Force a fresh QQ Gateway handshake even if the previous socket looks OPEN but is stale.
+        await this.closeSocket();
+        this.reconnectAttempt = 0;
         await this.connectAccount(accountId);
         return Response.json({ data: { connected: this.socket?.readyState === WebSocket.OPEN } });
       } catch (error) {
