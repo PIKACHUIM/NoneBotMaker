@@ -89,6 +89,22 @@ describe('chatbot conversation management API', () => {
     expect(JSON.parse(f.values.get(stateKey)!).toolApprovals[0].status).toBe('rejected');
   });
 
+  it('edits a pending approval argument before the owner decides it', async () => {
+    const f = fixture();
+    const scope = JSON.stringify(['account-1', 'group', 'group-openid']);
+    const stateKey = `nonebotmaker:chatbot:context:state:${encodeURIComponent(scope)}`;
+    f.values.set(stateKey, JSON.stringify({ toolApprovals: [{ id: 'approval-edit', call: { id: 'call-edit', type: 'function', function: { name: 'mcp_write', arguments: '{"value":"old"}' } }, requestedBy: 'member', requestedAt: 1, expiresAt: Date.now() + 60_000, status: 'pending' }] }));
+    const path = '/chatbot/conversations/account-1/group-1/control';
+    const invalid = await authorized(f, path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approvalUpdate', approvalId: 'approval-edit', arguments: 'not-json' }) });
+    expect(invalid.status).toBe(400);
+    const response = await authorized(f, path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approvalUpdate', approvalId: 'approval-edit', arguments: '{"value":"new","nested":{"ok":true}}' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { approval: { id: 'approval-edit', tool: 'mcp_write', arguments: { value: 'new', nested: { ok: true } }, editedBy: 'console-admin' } } });
+    const saved = JSON.parse(f.values.get(stateKey)!).toolApprovals[0];
+    expect(saved.status).toBe('pending');
+    expect(JSON.parse(saved.call.function.arguments)).toEqual({ value: 'new', nested: { ok: true } });
+  });
+
   it('lists and deletes only the approved meme metadata for the selected conversation', async () => {
     const f = fixture();
     const store = createKVMemeStore(f.bindings)!;

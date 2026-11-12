@@ -529,7 +529,7 @@ describe('capability policies', () => {
       'max_context', 'compact_rate', 'bridge_max_media_bytes', 'context_history_limit', 'memory_enabled',
     ]);
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
-      'bridge_owner_ids', 'bridge_allowed_private', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
+      'agent_persona', 'bridge_owner_ids', 'bridge_allowed_private', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
     ]);
 
     const setup = configuredApp();

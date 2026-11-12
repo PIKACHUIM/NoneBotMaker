@@ -6,6 +6,7 @@ import { resolveQQAccountById } from '../protocols/qq/accounts';
 import { createRepository } from '../storage/repository';
 import { sanitizeLogDetails } from '../storage/conversation-log-repository';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from '../plugins/chatbot/runtime';
+import { ToolApprovalManager } from '../plugins/chatbot/approval';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
 import { createMemeLibrary } from '../plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../plugins/chatbot/meme-storage';
@@ -14,13 +15,14 @@ import { SlangWorkflow } from '../plugins/chatbot/slang';
 import { ApiError } from './management';
 
 interface ConversationControlRequest {
-  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalDecision' | 'memeList' | 'memeDelete' | 'slangList' | 'slangCreate' | 'slangApprove' | 'slangReject' | 'slangDelete' | 'slangUpdate' | 'voiceList' | 'voiceUpload' | 'voiceDelete';
+  action: 'status' | 'reset' | 'mode' | 'silent' | 'initialPrompt' | 'tools' | 'reconnect' | 'wakeList' | 'wakeCancel' | 'approvals' | 'approvalUpdate' | 'approvalDecision' | 'memeList' | 'memeDelete' | 'slangList' | 'slangCreate' | 'slangApprove' | 'slangReject' | 'slangDelete' | 'slangUpdate' | 'voiceList' | 'voiceUpload' | 'voiceDelete';
   mode?: string;
   silent?: boolean;
   prompt?: string | null;
   disabledTools?: string[];
   wakeId?: string;
   approvalId?: string;
+  arguments?: string;
   decision?: 'approve' | 'reject';
   externalId?: string;
   memeName?: string;
@@ -150,6 +152,21 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
       return { disabledTools: state.disabledTools };
     case 'approvals':
       return { items: safeApprovalSummary(state) };
+    case 'approvalUpdate': {
+      if (!input.approvalId || typeof input.arguments !== 'string') throw new ApiError(400, 'invalid_approvalUpdate');
+      if (!stores.conversationStore.getState || !stores.conversationStore.setState) throw new ApiError(503, 'conversation_control_unavailable');
+      const manager = new ToolApprovalManager({ scopeKey: scope, getState: async () => await stores.conversationStore.getState!(scope),
+        setState: async (next) => { await stores.conversationStore.setState!(scope, next); } });
+      try {
+        const updated = await manager.updateArguments(input.approvalId, input.arguments, 'console-admin', true);
+        return { approval: { id: updated.id, tool: updated.call.function.name, arguments: JSON.parse(updated.call.function.arguments), editedBy: updated.editedBy, editedAt: updated.editedAt } };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '';
+        throw new ApiError(reason.includes('does not exist') ? 404 : reason.includes('cannot be edited') ? 409 : 400, 'invalid_approvalUpdate');
+      }
+    }
+    case 'reconnect':
+      throw new ApiError(503, 'gateway_reconnect_unavailable');
     case 'approvalDecision':
       return executeConsoleApproval(bindings, group, externalId, input, stores);
     case 'memeList': {
@@ -273,7 +290,7 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     try { body = await context.req.json() as Record<string, unknown>; }
     catch { throw new ApiError(400, 'invalid_json'); }
     const action = requiredValue(body.action, 'action') as ConversationControlRequest['action'];
-    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
+    if (!['reset', 'mode', 'silent', 'initialPrompt', 'tools', 'reconnect', 'wakeList', 'wakeCancel', 'approvalUpdate', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) throw new ApiError(400, 'invalid_action');
     const repository = createRepository(context.env);
     const group = await repository.get('groups', groupId) as unknown as GroupRecord | null;
     if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');
@@ -282,6 +299,7 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     const input: ConversationControlRequest = {
       action, externalId,
       ...(typeof body.approvalId === 'string' ? { approvalId: body.approvalId } : {}),
+      ...(typeof body.arguments === 'string' ? { arguments: body.arguments } : {}),
       ...(body.decision === 'approve' || body.decision === 'reject' ? { decision: body.decision } : {}),
       ...(typeof body.mode === 'string' ? { mode: body.mode } : {}),
       ...(typeof body.silent === 'boolean' ? { silent: body.silent } : {}),

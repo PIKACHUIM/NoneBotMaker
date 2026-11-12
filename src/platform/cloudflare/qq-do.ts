@@ -8,6 +8,7 @@ import { createKVVoiceAssetStore, createVoiceLibrary } from '../../server/plugin
 import { SlangWorkflow } from '../../server/plugins/chatbot/slang';
 import { createConversationLogRepository, sanitizeLogDetails } from '../../server/storage/conversation-log-repository';
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
+import { ToolApprovalManager } from '../../server/plugins/chatbot/approval';
 import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from '../../server/plugins/chatbot/policies';
 import { createRepository } from '../../server/storage/repository';
 import { decryptSecrets } from '../../server/storage/secrets';
@@ -229,7 +230,7 @@ export class QQGatewayDurableObject {
     const accountId = typeof body.accountId === 'string' ? body.accountId : '';
     const groupId = typeof body.groupId === 'string' ? body.groupId : '';
     const action = typeof body.action === 'string' ? body.action : '';
-    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'wakeList', 'wakeCancel', 'approvals', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) {
+    if (!accountId || !groupId || !['status', 'reset', 'mode', 'silent', 'initialPrompt', 'tools', 'reconnect', 'wakeList', 'wakeCancel', 'approvals', 'approvalUpdate', 'approvalDecision', 'memeList', 'memeDelete', 'slangList', 'slangCreate', 'slangApprove', 'slangReject', 'slangDelete', 'slangUpdate', 'voiceList', 'voiceUpload', 'voiceDelete'].includes(action)) {
       return Response.json({ error: 'invalid_request' }, { status: 400 });
     }
     const repository = createRepository(this.env);
@@ -247,6 +248,29 @@ export class QQGatewayDurableObject {
     if (!store.getState || !store.setState) return Response.json({ error: 'conversation_control_unavailable' }, { status: 503 });
     const readState = store.getState.bind(store);
     const writeState = store.setState.bind(store);
+    if (action === 'reconnect') {
+      if ((this.env.API_METHOD ?? 'webhook') !== 'websocket') return Response.json({ error: 'gateway_disabled' }, { status: 409 });
+      try {
+        await this.connectAccount(accountId);
+        return Response.json({ data: { connected: this.socket?.readyState === WebSocket.OPEN } });
+      } catch (error) {
+        await this.recordGatewayState(false, errorMessage(error));
+        return Response.json({ error: 'gateway_reconnect_failed' }, { status: 503 });
+      }
+    }
+    if (action === 'approvalUpdate') {
+      if (typeof body.approvalId !== 'string' || typeof body.arguments !== 'string') return Response.json({ error: 'invalid_approvalUpdate' }, { status: 400 });
+      const manager = new ToolApprovalManager({ scopeKey: scope, getState: async () => await readState(scope),
+        setState: async (next) => { await writeState(scope, next); }, now: this.now });
+      try {
+        const updated = await manager.updateArguments(body.approvalId, body.arguments, 'console-admin', true);
+        return Response.json({ data: { approval: { id: updated.id, tool: updated.call.function.name,
+          arguments: JSON.parse(updated.call.function.arguments), editedBy: updated.editedBy, editedAt: updated.editedAt } } });
+      } catch (error) {
+        const reason = errorMessage(error);
+        return Response.json({ error: 'invalid_approvalUpdate' }, { status: reason.includes('does not exist') ? 404 : reason.includes('cannot be edited') ? 409 : 400 });
+      }
+    }
     const state = await readState(scope);
     const approvals = Array.isArray(state.toolApprovals) ? state.toolApprovals.flatMap((value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
@@ -262,7 +286,7 @@ export class QQGatewayDurableObject {
     if (action === 'status') {
       return Response.json({ data: {
         accountId, groupId, externalId: group.externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled,
-        connected: this.socket?.readyState === WebSocket.OPEN, mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
+        connected: this.socket?.readyState === WebSocket.OPEN, gatewayMode: this.env.API_METHOD === 'websocket' ? 'websocket' : 'webhook', mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
         silent: state.silent === true, model: group.model, providerId: group.providerId,
         contextMessages: (await store.getRecent(scope, 1000)).length, initialPromptPending: typeof state.initialPrompt === 'string',
         ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}),

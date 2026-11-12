@@ -464,6 +464,10 @@ describe('Cloudflare QQ gateway Durable Object', () => {
     const scopeA = JSON.stringify([bot.account.id, 'group', 'group-a']);
     const conversationStore = (durable as unknown as { conversationStore(): GroupConversationStore }).conversationStore();
     await conversationStore.setState!(scopeA, { toolApprovals: [{ id: 'approval-a', call: { id: 'call-a', type: 'function', function: { name: 'mcp_write', arguments: '{"value":"safe"}' } }, requestedBy: 'member', requestedAt: 1000, expiresAt: Date.now() + 60_000, status: 'pending' }] });
+    const edited = await post({ action: 'approvalUpdate', externalId: 'group-a', approvalId: 'approval-a', arguments: '{"value":"edited"}' });
+    expect(edited.status).toBe(200);
+    expect(JSON.parse(((await conversationStore.getState!(scopeA)).toolApprovals as Array<{ call: { function: { arguments: string } } }>)[0].call.function.arguments)).toEqual({ value: 'edited' });
+    expect((await post({ action: 'reconnect', externalId: 'group-a' })).status).toBe(409);
     const decision = await post({ action: 'approvalDecision', externalId: 'group-a', approvalId: 'approval-a', decision: 'reject' });
     expect(decision.status).toBe(200);
     expect(await decision.json()).toMatchObject({ data: { decision: 'reject', actingOwnerId: 'owner-openid', messages: ['工具请求已拒绝。'] } });

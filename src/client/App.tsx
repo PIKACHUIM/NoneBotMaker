@@ -13,6 +13,7 @@ import {
   InputNumber,
   Layout,
   Menu,
+  Modal,
   Pagination,
   Popconfirm,
   Segmented,
@@ -891,6 +892,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
   const [statusError, setStatusError] = useState('');
   const [status, setStatus] = useState<ChatbotConversationStatus | null>(null);
   const [approvals, setApprovals] = useState<ChatbotConversationStatus['pendingApprovals']>([]);
+  const [approvalDraft, setApprovalDraft] = useState<{ id: string; tool: string; arguments: string } | null>(null);
   const [wakes, setWakes] = useState<ChatbotWake[]>([]);
   const [memes, setMemes] = useState<ChatbotMemeSummary[]>([]);
   const [memeError, setMemeError] = useState('');
@@ -983,6 +985,14 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
     }
     finally { setBusy(false); }
   };
+  const saveApprovalDraft = async (): Promise<void> => {
+    if (!approvalDraft) return;
+    let parsed: unknown;
+    try { parsed = JSON.parse(approvalDraft.arguments); } catch { message.error(tr('参数必须是有效 JSON')); return; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { message.error(tr('参数必须是 JSON 对象')); return; }
+    const result = await runControl({ action: 'approvalUpdate', approvalId: approvalDraft.id, arguments: approvalDraft.arguments });
+    if (result) { setApprovalDraft(null); message.success(tr('工具参数已更新，批准后按新参数执行')); }
+  };
   const uploadVoice = async (file: File): Promise<void> => {
     if (!selectedGroup) return;
     if (!file.size || file.size > 5 * 1024 * 1024) {
@@ -1012,7 +1022,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
     { title: tr('工具'), dataIndex: 'tool', key: 'tool' },
     { title: tr('请求者'), dataIndex: 'requestedBy', key: 'requestedBy' },
     { title: tr('状态'), dataIndex: 'status', key: 'status', render: (value: string) => <Tag>{tr(value === 'pending' ? '待审批' : value)}</Tag> },
-    { title: tr('操作'), key: 'actions', render: (_, row) => row.status === 'pending' ? <Space><Popconfirm title={tr('批准后会在当前会话继续执行该工具，并产生模型/API调用。继续？')} okText={tr('批准')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'approve' })}><Button size="small" type="primary" loading={busy}>{tr('批准')}</Button></Popconfirm><Popconfirm title={tr('拒绝此工具请求？')} okText={tr('拒绝')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'reject' })}><Button size="small" danger loading={busy}>{tr('拒绝')}</Button></Popconfirm></Space> : <span className="muted">—</span> },
+    { title: tr('操作'), key: 'actions', render: (_, row) => row.status === 'pending' ? <Space wrap><Button size="small" icon={<EditOutlined />} loading={busy} onClick={() => setApprovalDraft({ id: row.id, tool: row.tool, arguments: JSON.stringify(row.arguments ?? {}, null, 2) })}>{tr('编辑参数')}</Button><Popconfirm title={tr('批准后会在当前会话继续执行该工具，并产生模型/API调用。继续？')} okText={tr('批准')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'approve' })}><Button size="small" type="primary" loading={busy}>{tr('批准')}</Button></Popconfirm><Popconfirm title={tr('拒绝此工具请求？')} okText={tr('拒绝')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'approvalDecision', approvalId: row.id, decision: 'reject' })}><Button size="small" danger loading={busy}>{tr('拒绝')}</Button></Popconfirm></Space> : <span className="muted">—</span> },
   ];
   const wakeColumns: TableColumnsType<ChatbotWake> = [
     { title: tr('计划唤醒'), dataIndex: 'reason', key: 'reason' },
@@ -1045,6 +1055,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
       {selectedGroup && <Button size="small" icon={<SettingOutlined />} onClick={() => onNavigate('groups')}>{tr('打开群聊策略')}</Button>}
       <Button icon={<ReloadOutlined />} onClick={onRefresh}>{tr('刷新会话列表')}</Button>
       {selectedConversation && <Button size="small" onClick={() => void refresh()}>{tr('刷新状态')}</Button>}
+      {status && status.gatewayMode === 'websocket' && <Button size="small" loading={busy} onClick={() => void runControl({ action: 'reconnect' })}>{tr('重连 Gateway')}</Button>}
     </Space>}>
       <Select className="full-width" loading={conversationLoading} value={selectedConversationKey || undefined} onChange={setSelectedConversationKey} placeholder={tr('选择账号和会话')} notFoundContent={conversationLoading ? tr('正在加载会话…') : tr('没有可管理会话')} options={conversationTargets.map((item) => ({ value: JSON.stringify([item.id, item.externalId]), label: `${item.accountName} · ${item.name || item.externalId} · ${item.conversationType === 'private' ? tr('私聊') : tr('群聊')}${item.enabled ? '' : ` · ${tr('已停用')}`} · ${item.externalId}` }))} />
       {conversationListError && <Alert className="runtime-empty-alert" type="error" showIcon message={tr('会话列表读取失败')} description={conversationListError} action={<Button size="small" onClick={() => onRefresh()}>{tr('重试')}</Button>} />}
@@ -1056,6 +1067,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
       {status && <div className="runtime-status-grid">
         <div><span>{tr('会话策略')}</span><strong>{status.enabled ? tr('启用') : tr('已停用')}</strong></div><div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
         <div><span>{tr('对话上下文')}</span><strong>{status.contextMessages}</strong></div><div><span>{tr('静默')}</span><strong>{status.silent ? tr('启用') : tr('停用')}</strong></div>
+        <div><span>{tr('QQ 连接')}</span><strong>{status.connected ? tr('已连接') : tr('未连接')}</strong></div>
         <div><span>{tr('待审批工具')}</span><strong>{approvals.filter((item) => item.status === 'pending').length}</strong></div><div><span>{tr('待继续等待')}</span><strong>{status.pendingAgentWait ? tr('是') : tr('否')}</strong></div>
       </div>}
     </Card>
@@ -1090,6 +1102,14 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh }
         <Button loading={busy} onClick={() => void runControl({ action: 'slangCreate', slangTerm, slangContext }).then((result) => { if (result) { setSlangTerm(''); setSlangContext(''); } })}>{tr('提交候选')}</Button>
         <Table<ChatbotSlangCandidate> rowKey="id" columns={slangColumns} dataSource={slang} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 850 }} locale={{ emptyText: tr('当前没有群聊用语候选。') }} expandable={{ expandedRowRender: (row) => <SlangReviewEditor candidate={row} onSave={(slangDetails) => void runControl({ action: 'slangUpdate', slangId: row.id, slangDetails })} /> }} />
       </Card>}
+      <Modal open={Boolean(approvalDraft)} title={`${tr('编辑工具参数')} · ${approvalDraft?.tool ?? ''}`} width={720}
+        okText={tr('保存参数')} cancelText={tr('取消')} confirmLoading={busy}
+        onOk={() => void saveApprovalDraft()} onCancel={() => setApprovalDraft(null)}>
+        <Alert type="warning" showIcon message={tr('仅修改待审批调用的参数，不会直接执行工具')}
+          description={tr('保存后仍需点击“批准”才会执行。参数必须为 JSON 对象，且不能包含密钥。')} />
+        <Input.TextArea className="approval-json-editor" aria-label={tr('工具参数 JSON')} rows={14} spellCheck={false}
+          value={approvalDraft?.arguments ?? ''} onChange={(event) => setApprovalDraft((current) => current ? { ...current, arguments: event.target.value } : current)} />
+      </Modal>
     </>}
   </section>;
 }
@@ -1235,6 +1255,7 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
         </div>
         <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
+        <Alert type="info" showIcon message={tr('提示词组装顺序')} description={tr('人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“模型调用”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。')} />
         <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
         <div className="form-grid two-cols">

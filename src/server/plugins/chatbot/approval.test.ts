@@ -88,6 +88,28 @@ describe('persistent tool approval lifecycle', () => {
     expect(await manager.list()).toEqual([]);
   });
 
+  it('allows an owner to correct arguments before approval and executes the edited call', async () => {
+    const { manager } = fixture();
+    const pending = await manager.request(call('call-edit', 'mcp_side_effect', { text: 'wrong recipient' }), 'member');
+    const edited = await manager.updateArguments(pending.id, JSON.stringify({ text: 'correct recipient' }), 'owner', true);
+    expect(edited.call.function.arguments).toBe(JSON.stringify({ text: 'correct recipient' }));
+    expect(edited).toMatchObject({ status: 'pending', editedBy: 'owner', editedAt: 1000 });
+    const execute = vi.fn(async (callValue: ToolCall) => ({ content: callValue.function.arguments, isError: false }));
+    expect(await manager.decide(pending.id, true, 'owner', true, execute)).toMatchObject({ content: JSON.stringify({ text: 'correct recipient' }), isError: false });
+    expect(execute.mock.calls[0][0].function.arguments).toBe(JSON.stringify({ text: 'correct recipient' }));
+  });
+
+  it('rejects editing by non-owners, invalid JSON, secrets and decided approvals', async () => {
+    const { manager } = fixture();
+    const pending = await manager.request(call('call-edit-guard'), 'member');
+    await expect(manager.updateArguments(pending.id, '{"text":"x"}', 'member', false)).rejects.toThrow('owner');
+    await expect(manager.updateArguments(pending.id, 'not json', 'owner', true)).rejects.toThrow('valid JSON');
+    await expect(manager.updateArguments(pending.id, '[]', 'owner', true)).rejects.toThrow('object');
+    await expect(manager.updateArguments(pending.id, '{"apiKey":"do-not-persist"}', 'owner', true)).rejects.toThrow('Sensitive');
+    await manager.decide(pending.id, false, 'owner', true, async () => ({ content: '', isError: false }));
+    await expect(manager.updateArguments(pending.id, '{"text":"late"}', 'owner', true)).rejects.toThrow('rejected');
+  });
+
   it('survives restart in executing state without repeating a tool', async () => {
     const { manager, context } = fixture();
     const pending = await manager.request(call(), 'member');

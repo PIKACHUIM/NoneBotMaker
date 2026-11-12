@@ -42,7 +42,8 @@ NoneBotMaker 使用 TypeScript、Hono 和 React，提供 QQ 机器人账号、�
 
 - **管理台**：管理插件、QQ 账号、会话策略、AI 供应商、模型价格、MCP、Skills/Rules 和记忆。
 - **AI 对话**：支持兼容 OpenAI 的 API、多轮工具调用、流式响应、会话上下文与角色卡。
-- **工具与审批**：提供联网搜索、消息和媒体工具；MCP 工具受 allowlist 与 owner 审批控制。
+- **人设与提示词**：每个会话可单独设置人设，和身份策略、系统规则、角色卡、记忆及 Skills/Rules 分层组装。
+- **工具与审批**：提供联网搜索、消息和媒体工具；MCP 工具受 allowlist 与 owner 审批控制，待审批调用可先编辑参数再批准。
 - **运行管理**：支持会话模式、白名单、预算、上下文、日志、计划唤醒和素材管理。
 - **多平台存储**：适配 Cloudflare D1/KV/DO、EdgeOne Blob/KV 与 ESA KV。
 

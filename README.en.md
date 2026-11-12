@@ -42,7 +42,8 @@ See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 
 - **Admin console:** Manage plugins, QQ accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
 - **AI chat:** OpenAI-compatible APIs, multi-round tool calls, streaming, conversation context, and role cards.
-- **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval.
+- **Persona and prompts:** Per-conversation personas layered with identity policy, system rules, role cards, memory, and Skills/Rules.
+- **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval, and pending arguments can be edited before approval.
 - **Runtime management:** Conversation modes, allowlists, budgets, context, logs, scheduled wakeups, and media assets.
 - **Multi-platform storage:** Cloudflare D1/KV/DO, EdgeOne Blob/KV, and ESA KV adapters.
 

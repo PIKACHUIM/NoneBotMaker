@@ -9,6 +9,8 @@ export interface PendingToolApproval {
   expiresAt: number;
   status: 'pending' | 'executing' | 'approved' | 'rejected' | 'expired' | 'failed';
   decidedBy?: string;
+  editedBy?: string;
+  editedAt?: number;
   result?: string;
   isError?: boolean;
 }
@@ -69,6 +71,32 @@ export class ToolApprovalManager {
       requestedAt: at, expiresAt: at + APPROVAL_TTL_MS, status: 'pending',
     };
     await this.context.setState({ ...state, toolApprovals: [...entries.filter((entry) => entry.status === 'pending' || entry.status === 'executing'), approval] });
+    return approval;
+  }
+
+  async updateArguments(
+    id: string,
+    argumentsText: string,
+    editedBy: string,
+    isOwner: boolean,
+    secrets: string[] = [],
+  ): Promise<PendingToolApproval> {
+    if (!isOwner) throw new Error('Only a conversation owner can edit tool approvals.');
+    if (typeof argumentsText !== 'string' || argumentsText.length > 16_384) throw new Error('Invalid tool approval arguments.');
+    let args: unknown;
+    try { args = JSON.parse(argumentsText); } catch { throw new Error('Tool approval arguments must be valid JSON.'); }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool approval arguments must be an object.');
+    const safe = sanitize(args, secrets);
+    if (JSON.stringify(args) !== JSON.stringify(safe)) throw new Error('Sensitive tool arguments cannot be stored in an approval request.');
+    const state = await this.context.getState();
+    const entries = this.entries(state);
+    const approval = entries.find((entry) => entry.id === id);
+    if (!approval) throw new Error('Tool approval does not exist in this conversation.');
+    if (approval.status !== 'pending') throw new Error(`Tool approval is ${approval.status}; it cannot be edited.`);
+    approval.call = { ...approval.call, function: { ...approval.call.function, arguments: JSON.stringify(args) } };
+    approval.editedBy = editedBy.slice(0, 256);
+    approval.editedAt = this.now();
+    await this.context.setState({ ...state, toolApprovals: entries });
     return approval;
   }
 

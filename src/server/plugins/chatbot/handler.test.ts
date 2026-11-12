@@ -270,6 +270,16 @@ describe('createChatbotHandler', () => {
     expect(secondSystem).not.toContain('reserved2-only send policy');
   });
 
+  it('places the conversation persona before system rules in the system prompt', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'hello' } }] }));
+    const { deps } = dependencies({ fetch, findGroup: vi.fn(async () => ({ ...group, systemPrompt: 'SYSTEM RULES', config: { agent_persona: 'PERSONA TEXT' } })) });
+    await createChatbotHandler(deps)(account, message());
+    const system = JSON.parse(String(fetch.mock.calls[0][1]?.body)).messages[0].content as string;
+    expect(system).toContain('PERSONA TEXT');
+    expect(system).toContain('SYSTEM RULES');
+    expect(system.indexOf('PERSONA TEXT')).toBeLessThan(system.indexOf('SYSTEM RULES'));
+  });
+
   it('persists chat_wait and resumes its pending tool call with the next conversation message', async () => {
     let state: Record<string, unknown> = {};
     const requests: Array<Record<string, unknown>> = [];

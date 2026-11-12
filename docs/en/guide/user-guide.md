@@ -38,6 +38,8 @@ In **Conversation Policies**, select the account, enter the external conversatio
 - owner/admin/user allowlists or the relevant access policy;
 - context budget, summary ratio, message batching/chunking, rate limits, and spending limits.
 
+Each conversation can also define a **Persona** in the Model requests extension settings of its policy. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
+
 Create policies only for conversations you are authorized to manage. Group OpenIDs and user OpenIDs have different scopes; do not interchange them.
 
 ### 6. Verify message delivery
@@ -63,7 +65,7 @@ Common commands (permissions depend on the policy and sender identity):
 | `/wake` | List or cancel persistent scheduled wakeups where supported |
 | `/tools` | Further restrict tools within policy permissions |
 
-A remote MCP `readOnlyHint` is not proof of trust. A tool runs directly only when both the admin allowlist and the remote read-only marker permit it; other available calls require owner approval.
+A remote MCP `readOnlyHint` is not proof of trust. A tool runs directly only when both the admin allowlist and the remote read-only marker permit it; other available calls require owner approval. In the console, **Pending approvals** lets you edit arguments before approval: saving only changes the pending call and never executes the tool; an owner must still approve it. Arguments must be a JSON object and must not contain secrets.
 
 ## Role cards and memory
 
