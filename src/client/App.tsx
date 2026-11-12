@@ -1327,7 +1327,7 @@ function ProjectMemoriesPanel({ data, accounts, onRefresh, onError }: { data: Pr
 function IntegrationsPage({ providers, prices, libraries, policies, accounts, memories, onRefresh, onError }: { providers: ProviderRecord[]; prices: ModelPriceRecord[]; libraries: LibraryData; policies: PolicyRecord[]; accounts: BotAccountRecord[]; memories: ProjectMemoryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr } = useI18n();
   const count = (type: PolicyType) => policies.filter((item) => item.type === type).length;
-  return <section className="data-page integrations-page"><Tabs className="integration-tabs" size="small" tabBarGutter={12} items={[
+  return <section className="data-page integrations-page"><Tabs className="integration-tabs" size="small" tabBarGutter={8} items={[
     { key: 'providers', label: <span className="integration-tab-label"><ApiOutlined /> {tr('AI供应商')} <small>{providers.length}</small></span>, children: <ProvidersPanel data={providers} onRefresh={onRefresh} onError={onError} /> },
     { key: 'prices', label: <span className="integration-tab-label"><DatabaseOutlined /> {tr('单价')} <small>{prices.length}</small></span>, children: <PricesPanel data={prices} onRefresh={onRefresh} onError={onError} /> },
     { key: 'identity', label: <span className="integration-tab-label"><SafetyCertificateOutlined /> {tr('身份')} <small>{count('identity')}</small></span>, children: <PolicyPanel type="identity" data={policies} providers={providers} libraries={libraries} onRefresh={onRefresh} onError={onError} /> },

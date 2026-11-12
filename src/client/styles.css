@@ -427,6 +427,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .integration-tabs .ant-tabs-tab .anticon { margin-right: 4px; color: var(--accent); }
 .integration-tab-label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .integration-tab-label small { color: var(--muted); font: 8px var(--mono); }
+@media (max-width: 1200px) {
+  .integration-tabs .ant-tabs-tab .anticon { display: none; }
+  .integration-tab-label small { display: none; }
+  .integration-tabs .ant-tabs-tab { padding-inline: 5px; }
+  .integration-tabs .ant-tabs-tab-btn { font-size: 10px; }
+}
 .tab-panel { padding-top: 12px; }
 .id-list { display: grid; gap: 0; }
 .id-list-row { display: flex; gap: 8px; align-items: flex-start; }
@@ -460,7 +466,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .log-filter-form .ant-form-item:nth-child(4), .log-filter-form .ant-form-item:nth-child(5) { flex-basis: 155px; }
 .log-filter-form .ant-form-item:nth-child(6) { flex-basis: 120px; }
 .log-filter-form .ant-form-item:nth-child(7) { flex-basis: 130px; }
-.log-filter-form .ant-form-item:nth-child(8) { flex: 0 0 auto; }
+.log-filter-form .ant-form-item:nth-child(8) { flex: 0 0 auto; position: sticky; right: 0; z-index: 1; padding-left: 8px; background: var(--page); box-shadow: -8px 0 8px var(--page); }
 .log-filter-form .ant-input-affix-wrapper, .log-filter-form .ant-select, .log-filter-form .ant-input { width: 100%; min-width: 0; }
 .log-filter-form .ant-btn { font-size: 10px; }
 .log-count { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: var(--muted); font: 8px var(--mono); }
