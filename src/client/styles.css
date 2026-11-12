@@ -457,8 +457,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .runtime-prompt-field { display: grid; gap: 8px; margin: 16px 0 12px; color: var(--muted); font-size: 11px; }
 .runtime-control-card .ant-table { background: transparent; }
 .runtime-control-card .ant-table-cell { overflow-wrap: anywhere; }
-.log-toolbar { display: block; margin-bottom: 13px; }
-.log-filter-form { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; overflow-x: auto; padding-bottom: 2px; }
+.log-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; }
+.log-filter-form { display: flex; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.log-actions { flex: 0 0 auto; }
 .log-filter-form .ant-form-item { flex: 0 0 auto; margin: 0; }
 .log-filter-form .ant-form-item:nth-child(1) { flex: 1 1 180px; min-width: 160px; }
 .log-filter-form .ant-form-item:nth-child(2) { flex-basis: 120px; }
@@ -466,7 +467,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .log-filter-form .ant-form-item:nth-child(4), .log-filter-form .ant-form-item:nth-child(5) { flex-basis: 155px; }
 .log-filter-form .ant-form-item:nth-child(6) { flex-basis: 120px; }
 .log-filter-form .ant-form-item:nth-child(7) { flex-basis: 130px; }
-.log-filter-form .ant-form-item:nth-child(8) { flex: 0 0 auto; position: sticky; right: 0; z-index: 1; padding-left: 8px; background: var(--page); box-shadow: -8px 0 8px var(--page); }
 .log-filter-form .ant-input-affix-wrapper, .log-filter-form .ant-select, .log-filter-form .ant-input { width: 100%; min-width: 0; }
 .log-filter-form .ant-btn { font-size: 10px; }
 .log-count { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: var(--muted); font: 8px var(--mono); }

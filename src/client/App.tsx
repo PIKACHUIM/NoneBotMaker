@@ -1781,14 +1781,13 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
       <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
       <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
       <Form.Item name="groupId"><Select allowClear placeholder={tr('全部群聊')} options={groups.map((item) => ({ label: item.name || item.externalId, value: item.id }))} /></Form.Item>
-      <Form.Item className="log-actions"><Space size={8} wrap={false}>
-        <Button size="small" type="primary" htmlType="submit">{tr('应用筛选')}</Button>
-        <Button size="small" onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button>
-        <Popconfirm title={tr('清除全部对话日志？')} description={tr('将删除所有对话日志记录，且无法恢复。')} okText={tr('清除')} cancelText={tr('取消')} okButtonProps={{ danger: true }} onConfirm={() => void clearLogs()}>
-          <Button size="small" danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
-        </Popconfirm>
-      </Space></Form.Item>
-    </Form></div>
+    </Form><Space className="log-actions" size={8} wrap={false}>
+      <Button size="small" type="primary" onClick={() => form.submit()}>{tr('应用筛选')}</Button>
+      <Button size="small" onClick={() => { form.resetFields(); onFilter({}); }}>{tr('重置')}</Button>
+      <Popconfirm title={tr('清除全部对话日志？')} description={tr('将删除所有对话日志记录，且无法恢复。')} okText={tr('清除')} cancelText={tr('取消')} okButtonProps={{ danger: true }} onConfirm={() => void clearLogs()}>
+        <Button size="small" danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
+      </Popconfirm>
+    </Space></div>
     {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 1050 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`} · {total} RECORDS / 30D</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
     <Modal open={Boolean(errorRow)} title={tr('错误详情')} width={760} onCancel={() => setErrorRow(null)}
       footer={<Space><Button icon={<CopyOutlined />} onClick={() => { void navigator.clipboard.writeText(errorText).then(() => message.success(tr('已复制'))).catch(() => message.error(tr('复制失败，请手动选择文本'))); }}>{tr('复制错误')}</Button><Button type="primary" onClick={() => setErrorRow(null)}>{tr('关闭')}</Button></Space>}>
