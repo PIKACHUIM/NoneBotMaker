@@ -27,7 +27,7 @@ describe('QQ credential resolution', () => {
     expect(account).toMatchObject({ appId: '11111', appSecret: 'same-app-secret', pluginEnabled: true });
     expect(account?.botSecret).toBeUndefined();
     expect((await resolveQQAccountById('canonical', bindings))?.appSecret).toBe('same-app-secret');
-    expect(account?.pluginConfig).toEqual({ brave_api_key: 'brave-key', agent_api_key: 'agent-key' });
+    expect(account?.pluginConfig).toEqual({ web_search_engine: 'auto', web_search_results: 5, brave_api_key: 'brave-key' });
     expect((await resolveQQAccountById('canonical', bindings))?.pluginConfig).toEqual(account?.pluginConfig);
   });
 

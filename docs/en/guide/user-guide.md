@@ -1,19 +1,17 @@
 # Admin Console Guide
 
-This guide takes a new installation through its first test message. “Conversation Management” and “Conversation Policies” serve different purposes: the former operates on runtime state for saved policies; the latter defines the provider, model, prompt, allowlist, and budget for a conversation.
+The path to the first reply is: initialize → Model Capabilities (interfaces, policies, tools) → Runtime Platform (account, group) → Conversation Management. **Group Management** holds persistent settings; **Conversation Management** shows live status, approvals, chat records, costs and individual memory entries.
 
 ## Recommended setup order
 
-The admin sidebar follows this order. Work through it once to send the first message:
+1. On first deployment, initialize the database and default policies/prices with `SYS_SECRET`. Existing deployments may explicitly **Fill Missing Defaults** on the setup page. Both operations only fill missing entries, without overwriting manual prices or policies. The default identity needs a model, default voice has no TTS model, and image generation is disabled.
+2. **Model Capabilities → Interface Management → AI Providers**: enter the compatible API URL, key and actual models; review **Model Prices**. Existing price snapshots comprise 50 text models, two TTS models and four image models. Your gateway's actual bill may differ.
+3. **Policy Management → Identity**: define one reusable **default persona**, base system rules, model and authorized Skills/MCP/Rules/tools. **Dialogue** configures streaming, rounds and output. Group Management requires both an identity and a dialogue policy. **Voice** is optional; **Budget** defines reusable USD limits (`0/0/0` is unlimited); **Memory** configures how to remember, capacity and expiry.
+4. **Runtime Platform → Plugins / Platform Accounts**: enable the chatbot plugin and enter the QQ AppID and AppSecret.
+5. **Runtime Platform → Group Management**: bind the account and group/private OpenID, then select identity and dialogue policies. Voice, budget and memory are optional. Enter only group-specific owner, access rules and tool approvals; groups cannot grant tools beyond the identity policy.
+6. **Runtime Platform → Conversation Management**: mention the bot in the group, then inspect connectivity, approvals, records, per-event costs and errors. Manage actual memory entries here, not the memory policy.
 
-1. **Integrations → AI Providers**: enter the compatible API URL, key, and models.
-2. **Integrations → Prices**: import presets or register your actual rates; budgets use these prices.
-3. **Integrations → Identity**: create an identity policy with a model, system prompt, and tools.
-4. **Plugins / Platform Accounts**: confirm the chatbot plugin, then enter the QQ AppID and AppSecret.
-5. **Group Policies**: select the account, enter the group openid, and choose the identity policy; leave everything else empty to inherit.
-6. **Conversation Management / Logs**: mention the bot in the group and check connection state and errors.
-
-A group policy only links an account and conversation IDs to an identity policy. Models, system prompts, Skills/MCP/Rules, and similar shared settings live in the identity policy, so you do not repeat them for every group. The **05 / Advanced** section can stay untouched.
+A saved policy name alone does not make a provider usable: configure the default identity's model explicitly; an empty voice model or disabled image tool remains unavailable.
 
 ## Before you start
 
@@ -28,45 +26,31 @@ A group policy only links an account and conversation IDs to an identity policy.
 
 Open the admin entry point at your deployed domain and sign in with `SYS_PASSWD`. Management APIs require an authenticated admin session. Initialize the database first if this is a fresh deployment.
 
-### 2. Configure an AI provider and prices
+### 2. Configure provider, identity and dialogue
 
-In **Integrations → AI Providers**, enter a provider name, compatible API URL, API key, and model information. Then use **Prices** to import common presets or register input/output rates and billing units from your actual bill. Pricing participates in budget checks; text models without a registered price are billed at the default $3 input / $15 output per million tokens instead of being rejected.
+Under **Model Capabilities → Interface Management → AI Providers**, register the provider's actual models and review **Model Prices**. Missing **text-chat** prices use the default $3 input / $15 output per million tokens; generated images use their modality rates or the administrator-configured per-image fallback, never a silently free request. Image presets are public snapshots, not your gateway's guaranteed invoice.
 
-Declare media capabilities for the actual provider and model. Attachments unsupported by the selected model are not reported as read. The provider still controls external requests and billing.
+Under **Policy Management → Identity**, set the reusable **default persona** separately from **base system rules**, then choose the provider/model and authorized Skills/MCP/Rules/tools. Under **Dialogue**, configure streaming, tool rounds and output parameters. Both are required when binding a group. A selected conversation `/role` persona **replaces**, rather than appends to, the identity's default persona; clearing it restores the default.
 
-### 3. Create an identity policy
+A Budget policy supplies reusable daily/monthly/total limits (`0` means unlimited). A Memory policy chooses manual owner `/save`, candidate extraction awaiting admin review, or explicitly enabled automatic saving. The default is 100 memories per conversation, each expiring seven days after its last update; automatic direct saving currently considers owner messages only. No selected memory policy means memory is off. An empty Voice policy synthesis model leaves TTS disabled.
 
-In **Integrations → Identity**, create a policy with the provider, model, system prompt, and optional Skills, MCP servers, and Rules. An identity policy is the shared default for group policies: a group policy references it instead of repeating the model and tools. Without an identity policy, a group policy can still override the model and prompt, but the configuration is harder to reuse across groups.
+### 3. Confirm the chatbot plugin and account
 
-### 4. Confirm the plugin
+Under **Runtime Platform → Plugins**, confirm the Group Chatbot plugin (`elysia-best/plugin-chatbot`) is enabled. Under **Platform Accounts**, bind the QQ AppID and AppSecret. The server encrypts secrets with `SYS_SECRET`; plan recovery before rotating it.
 
-In **Plugins**, confirm that the Group Chatbot plugin (`elysia-best/plugin-chatbot`) is registered and enabled. Fields are rendered from declared types. Secret fields are not echoed as ordinary text. Do not paste credentials into non-secret fields.
+### 4. Bind the group and choose policies
 
-### 5. Add a QQ account
+Under **Runtime Platform → Group Management**, select an account and conversation type, then enter the group/user OpenID and owner IDs. **Identity and Dialogue are required and always visible; Voice, Budget and Memory remain visible but optional.** Group-specific rules are appended to identity base rules; overriding a model requires selecting the provider and model together. A group cannot add a tool the identity does not authorize. Tool approval supports per-tool rules, approve all, or allow all; allowing all skips manual approval and must be reviewed carefully before saving.
 
-In **Platform Accounts**, create a QQ account, select the chatbot plugin, and enter the QQ AppID and AppSecret. The server encrypts secrets using `SYS_SECRET`; consider existing encrypted data before rotating this secret.
+One group-management record may bind multiple OpenIDs, but conversation history and memory stay isolated by actual OpenID. Group and user OpenIDs are different scopes. Advanced options contain only rare settings, never core policies.
 
-### 6. Add a group or private-chat policy
+### 5. Verify behavior and billed usage
 
-In **Group Policies**, select the account, enter the external conversation ID/OpenID and conversation type, then follow the form order:
-
-- **01 / Basics**: account, conversation IDs, owner IDs, name, and enabled state;
-- **02 / AI and prompts**: choose the identity policy; add a persona or conversation prompt only when this conversation needs a different role; empty overrides inherit the identity policy;
-- **03 / Spending limits**: daily, monthly, and total limits; 0 means unlimited;
-- **04 / Extensions**: append Skills, MCP servers, and Rules on top of the identity policy;
-- **05 / Advanced**: expand only for dialogue/voice policies, the user allowlist, reserved modes, or a custom time zone.
-
-Each conversation can also define a **Persona** under **02 / AI and prompts**. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
-
-Create policies only for conversations you are authorized to manage. Group OpenIDs and user OpenIDs have different scopes; do not interchange them.
-
-### 7. Verify message delivery
-
-Point the QQ callback at `/webhook/qq`; ensure proxies preserve signature headers and the original JSON body. Send a message from an allowlisted test account in the configured conversation. Use `/help` to inspect available commands and `/openid` to verify the current user and group IDs. Never send credentials or private data to public groups.
+Check `API_METHOD`: `websocket` uses QQ Gateway and **does not** receive events at `/webhook/qq`; `webhook` requires its QQ callback URL, signature headers and original JSON body. Mention the bot in a bound conversation, then inspect connections, approvals, chat records, costs and errors in Conversation Management. Use `/openid` to confirm QQ identifiers. Do not post keys or private information in public chats.
 
 ## Conversation Management and commands
 
-**Conversation Management** displays state for saved policies and can configure runtime mode, silence, one-time prompts, additional tool restrictions, context reset, pending tool approvals, scheduled wakeups, and media assets. If the list is empty, check the account, policy, and valid OpenID; it is not a chat-history browser.
+**Conversation Management** shows connectivity, approvals, conversation-specific chat records and charges, memory entries, emergency silence, one-time prompts and context reset. Persistent mode and approval rules belong in Group Management. Per-event cost sums all model/image/voice calls; hover to inspect token usage, price source and estimated charges. If the conversation list is empty, check the account and bound OpenIDs; historical messages do not automatically create a policy.
 
 Common commands (permissions depend on the policy and sender identity):
 
@@ -76,18 +60,19 @@ Common commands (permissions depend on the policy and sender identity):
 | `/status` | Inspect conversation runtime status |
 | `/reset` | Reset conversation context |
 | `/mode` | Manage runtime mode |
-| `/role` | Manage conversation role cards |
-| `/memory` | Manage current-conversation memory |
+| `/role` | Let an owner select a conversation persona in place of the identity default |
+| `/save <name> <content>` | Let an owner explicitly save a conversation memory when memory is enabled |
+| `/memory` | Query and manage this conversation's memories, not account-shared project memories |
 | `/openid` | Show the current user and group OpenID |
 | `/approvals`, `/approval`, `/approve`, `/reject` | Inspect, approve, or reject pending tool calls |
 | `/wake` | List or cancel persistent scheduled wakeups where supported |
 | `/tools` | Further restrict tools within policy permissions |
 
-A remote MCP `readOnlyHint` is not proof of trust. A tool runs directly only when both the admin allowlist and the remote read-only marker permit it; other available calls require owner approval. In the console, **Pending approvals** lets you edit arguments before approval: saving only changes the pending call and never executes the tool; an owner must still approve it. Arguments must be a JSON object and must not contain secrets.
+A remote MCP `readOnlyHint` is not proof of trust: MCP calls must pass the administrator's allowlist and the identity's authorization first. Groups may then disable an authorized tool or require approval. Side-effecting tools require owner approval by default; choosing **Allow all** for a group skips manual approval and should be restricted to trusted conversations with audit logs. In **Pending approvals**, saving edited JSON arguments does not execute the tool; the owner must still approve it.
 
-## Role cards and memory
+## Persona and memory
 
-Conversation role cards can be managed with `/role` or the console. Account-shared role cards and project memory have a different scope from conversation memory; shared data does not grant arbitrary write access to each conversation. `MemoryWrite`, `MemoryForget`, and shared writes/deletes are owner-restricted.
+The identity sets the **default persona**. A persona chosen with `/role` replaces that default until cleared; the two are never concatenated. Base system rules and group-only appended rules live in separate fields. Tool/security authorization must not rely on prompt wording alone. Account-shared project memory has a different scope from conversation memory; the latter uses a separate database table and can be listed, edited, approved or deleted per conversation. Explicit `/save`, `MemoryWrite` and `MemoryForget` are owner-only; automatic direct capture currently considers owner messages, while member messages may only become review candidates.
 
 Before enabling memory or MCP, review participants, data scope, and retention. Model output, web search results, Skills/Rules, and external documents are untrusted content.
 
@@ -99,6 +84,6 @@ Before enabling memory or MCP, review participants, data scope, and retention. M
 
 - **Empty conversation list:** Check for a platform account, a saved group/private policy, and a valid OpenID. An account alone does not discover chat history.
 - **Model request fails:** Check the API URL, key, model ID, declared media capabilities, and provider quota. Do not expose secrets in logs.
-- **No reply is sent:** Check QQ callback signatures, account status, conversation OpenID, allowlists, and platform send permissions.
-- **Tool requires approval:** Review its name and arguments in the console, then have an owner approve or reject it. Do not trust a tool's self-declared read-only status alone.
-- **Missing pricing or rejected request:** Check that an active price exists for the model and billing unit, and review the conversation budget.
+- **No reply is sent:** Check whether the instance uses WebSocket Gateway or Webhook, then verify the account, required identity/dialogue policies, OpenID, allowlists and QQ send permissions. Only Webhook mode uses callback signatures.
+- **Tool requires approval:** Inspect the authorized tool and arguments in Conversation Management, then have an owner approve or reject it; a self-declared read-only marker is insufficient.
+- **An estimated charge appears:** Unpriced text uses the default rate. Images with only `total_tokens` use an average-rate estimate; images without billable usage use the configured per-image fallback. Estimates may differ from your actual provider bill; verify whether the Budget policy is unlimited.

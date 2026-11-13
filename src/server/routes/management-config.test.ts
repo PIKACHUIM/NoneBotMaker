@@ -30,7 +30,7 @@ async function json(response: Response): Promise<Record<string, unknown>> {
 }
 
 describe('declared plugin configuration', () => {
-  it('normalizes legacy group fields while preserving unexposed configuration', async () => {
+  it('stores only declared plugin-wide settings and strips hidden legacy group authorization', async () => {
     const { app, bindings } = createApp();
     const response = await app.request('/plugins', {
       method: 'POST',
@@ -49,15 +49,9 @@ describe('declared plugin configuration', () => {
     }, bindings);
 
     expect(response.status).toBe(201);
-    expect((await json(response)).data).toMatchObject({
-      config: {
-        bridge_max_message_chars: 4000,
-        bridge_slang_enabled: false,
-        agent_model: 42,
-        bridge_allowed_groups: 'group-a, group-b',
-        undeclared: 'ignored',
-      },
-    });
+    const saved = (await json(response)).data as JsonObject;
+    expect(saved).toMatchObject({ config: { web_search_engine: 'auto', web_search_results: 5, brave_api_key: '********' } });
+    expect(JSON.stringify(saved)).not.toContain('bridge_allowed_groups');
   });
 
   it('requires declared account credential fields and preserves blank edits', async () => {
@@ -126,6 +120,8 @@ function configuredApp(pluginConfig: JsonObject = {}) {
     credentials: { appId: '10001', appSecret: 'existing-secret' }, config: {},
   });
   seed(setup.values, 'providers', { id: 'provider-1', name: 'Provider', baseUrl: '', apiKey: '', models: [] });
+  seed(setup.values, 'policies', { id: 'identity-default', type: 'identity', name: 'Default identity', enabled: true, config: {}, providerId: 'provider-1', model: 'base-model', persona: '', systemPrompt: '', skillIds: [], mcpIds: [], ruleIds: [], toolIds: [] });
+  seed(setup.values, 'policies', { id: 'dialog-default', type: 'dialog', name: 'Default dialog', enabled: true, config: {} });
   return setup;
 }
 
@@ -135,7 +131,7 @@ function writeRequest(setup: ReturnType<typeof createApp>, path: string, data: J
   }, setup.bindings);
 }
 
-const baseGroup = { id: 'group-1', accountId: 'account-1', externalId: 'external-1', providerId: 'provider-1', name: 'Group' };
+const baseGroup = { id: 'group-1', accountId: 'account-1', externalId: 'external-1', identityPolicyId: 'identity-default', dialogPolicyId: 'dialog-default', name: 'Group' };
 
 describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
@@ -157,25 +153,23 @@ describe('configuration scopes and defaults', () => {
     const config = effectiveGroupConfig({ bridge_max_message_chars: 900, brave_api_key: 'secret', agent_model: 'old-model' }, {
       agent_max_rounds: '', agent_temperature: null, bridge_max_message_chars: 200,
     });
-    expect(config).toMatchObject({ bridge_max_message_chars: 200, agent_max_rounds: 5, agent_temperature: 0.7, context_history_limit: 50, memory_enabled: false });
+    expect(config).toMatchObject({ bridge_max_message_chars: 500, agent_max_rounds: 5, agent_temperature: 0.7, context_history_limit: 50, memory_enabled: false });
     expect(config).not.toHaveProperty('brave_api_key');
     expect(config).not.toHaveProperty('agent_model');
   });
 
-  it('stores and returns output token budgets as numbers rather than secrets', async () => {
+  it('ignores hidden group token overrides and does not materialize policy defaults', async () => {
     const setup = configuredApp();
     const created = await writeRequest(setup, '/groups', { ...baseGroup, config: { agent_max_output_tokens: 8192 } });
     expect(created.status).toBe(201);
-    expect((await json(created)).data).toMatchObject({ config: { agent_max_output_tokens: 8192 } });
+    expect((await json(created)).data).toMatchObject({ config: {}, effective: { config: { agent_max_output_tokens: 4096 } } });
     const stored = JSON.parse(setup.values.get('nonebotmaker:records:groups:group-1')!) as JsonObject;
-    expect(stored.config).toMatchObject({ agent_max_output_tokens: 8192 });
-    const fetched = await setup.app.request('/groups/group-1', {}, setup.bindings);
-    expect((await json(fetched)).data).toMatchObject({ config: { agent_max_output_tokens: 8192 } });
+    expect(stored.config).toEqual({});
     const saved = await writeRequest(setup, '/groups/group-1', { name: 'Renamed' }, 'PATCH');
-    expect((await json(saved)).data).toMatchObject({ config: { agent_max_output_tokens: 8192 } });
+    expect((await json(saved)).data).toMatchObject({ config: {}, effective: { config: { agent_max_output_tokens: 4096 } } });
   });
 
-  it('recovers formerly encrypted token counts without decrypting other visible plugin secrets', async () => {
+  it('does not expose or re-save legacy encrypted group token counts', async () => {
     const setup = configuredApp();
     const oldCount = (await encryptSecrets({ token: 8192 }, undefined, setup.bindings)).token;
     const pluginSecrets = await encryptSecrets({ brave_api_key: 'private-brave-key' }, undefined, setup.bindings);
@@ -183,54 +177,78 @@ describe('configuration scopes and defaults', () => {
     seed(setup.values, 'groups', { ...baseGroup, config: { agent_max_output_tokens: oldCount } });
     const before = setup.values.get('nonebotmaker:records:groups:group-1');
     const fetched = await setup.app.request('/groups/group-1', {}, setup.bindings);
-    expect((await json(fetched)).data).toMatchObject({ config: { agent_max_output_tokens: 8192 } });
+    expect((await json(fetched)).data).toMatchObject({ config: {}, effective: { config: { agent_max_output_tokens: 4096 } } });
     expect(setup.values.get('nonebotmaker:records:groups:group-1')).toBe(before);
     const plugin = (await json(await setup.app.request('/plugins/plugin-1', {}, setup.bindings))).data as JsonObject;
-    expect(plugin.config).toMatchObject({ agent_max_output_tokens: 8192, brave_api_key: '********' });
-    const inherited = await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2' });
-    expect((await json(inherited)).data).toMatchObject({ config: { agent_max_output_tokens: 8192 } });
+    expect(plugin.config).toMatchObject({ brave_api_key: '********' });
+    expect(plugin.config).not.toHaveProperty('agent_max_output_tokens');
     expect((await writeRequest(setup, '/groups/group-1', { name: 'Renamed' }, 'PATCH')).status).toBe(200);
-    expect((JSON.parse(setup.values.get('nonebotmaker:records:groups:group-1')!) as JsonObject).config).toMatchObject({ agent_max_output_tokens: 8192 });
+    expect((JSON.parse(setup.values.get('nonebotmaker:records:groups:group-1')!) as JsonObject).config).toEqual({});
     expect((await writeRequest(setup, '/plugins/plugin-1', { name: 'Renamed plugin' }, 'PATCH')).status).toBe(200);
     const storedPlugin = JSON.parse(setup.values.get('nonebotmaker:records:plugins:plugin-1')!) as JsonObject;
-    expect(storedPlugin.config).toMatchObject({ agent_max_output_tokens: 8192 });
+    expect(storedPlugin.config).not.toHaveProperty('agent_max_output_tokens');
     expect(JSON.stringify(storedPlugin)).not.toContain('private-brave-key');
     expect((await decryptSecrets(storedPlugin, setup.bindings)).config).toMatchObject({ brave_api_key: 'private-brave-key' });
   });
 
-  it('preserves legacy plugin group configuration on partial edits without exposing removed fields', async () => {
-    const setup = configuredApp({ bridge_mode: 'reserved', bridge_max_message_chars: 1200, agent_model: 'legacy', retained: true });
+  it('strips hidden plugin group fields on partial edits instead of retaining invisible authorization', async () => {
+    const setup = configuredApp({ bridge_mode: 'reserved', bridge_max_message_chars: 1200, agent_model: 'legacy', retained: true, bridge_owner_ids: 'old-owner' });
     const response = await writeRequest(setup, '/plugins/plugin-1', { config: { brave_api_key: 'new-secret' } }, 'PATCH');
     expect(response.status).toBe(200);
-    expect((await json(response)).data).toMatchObject({ config: { bridge_mode: 'reserved', bridge_max_message_chars: 1200, agent_model: 'legacy', retained: true, brave_api_key: '********' } });
+    const saved = (await json(response)).data as JsonObject;
+    expect(saved.config).toMatchObject({ brave_api_key: '********', web_search_engine: 'auto' });
+    expect(JSON.stringify(saved)).not.toContain('old-owner');
+    expect((JSON.parse(setup.values.get('nonebotmaker:records:plugins:plugin-1')!) as JsonObject).config).not.toHaveProperty('bridge_owner_ids');
   });
 
-  it('returns legacy group overrides on reads without writing and retains them on save', async () => {
+  it('keeps inherited values separate and strips legacy group overrides on save', async () => {
     const setup = configuredApp({ bridge_max_message_chars: 1200, bridge_mode: 'reserved', agent_temperature: 0.2, brave_api_key: 'not-inherited' });
-    seed(setup.values, 'groups', { ...baseGroup, inputCostPerMillion: 2, outputCostPerMillion: 4 });
+    seed(setup.values, 'groups', { ...baseGroup, config: { agent_max_rounds: 22 } });
     const before = setup.values.get('nonebotmaker:records:groups:group-1');
     const response = await setup.app.request('/groups/group-1', {}, setup.bindings);
     expect(response.status).toBe(200);
     const group = (await json(response)).data as JsonObject;
-    expect(group).toMatchObject({ conversationType: 'group', config: { bridge_max_message_chars: 1200, bridge_mode: 'reserved', agent_temperature: 0.2 } });
-    expect(group.config).not.toHaveProperty('brave_api_key');
+    expect(group).toMatchObject({ conversationType: 'group', config: {}, effective: { config: { bridge_mode: 'chat', agent_temperature: 0.7, agent_max_rounds: 5 } } });
+    expect(group).not.toHaveProperty('inputCostPerMillion');
     expect(setup.values.get('nonebotmaker:records:groups:group-1')).toBe(before);
-    const saved = await writeRequest(setup, '/groups/group-1', { config: { agent_max_rounds: 100, bridge_max_message_chars: 700 } }, 'PATCH');
+    const saved = await writeRequest(setup, '/groups/group-1', { config: { agent_max_rounds: 100, bridge_mode: 'chat' } }, 'PATCH');
     expect(saved.status).toBe(200);
-    expect((await json(saved)).data).toMatchObject({ inputCostPerMillion: 2, outputCostPerMillion: 4, config: { bridge_max_message_chars: 700, bridge_mode: 'reserved', agent_temperature: 0.2, agent_max_rounds: 25 } });
-    const listed = (await json(await setup.app.request('/groups', {}, setup.bindings))).data as JsonObject[];
-    expect(listed[0]).toMatchObject({ config: { bridge_mode: 'reserved', agent_max_rounds: 25 } });
+    expect((await json(saved)).data).toMatchObject({ config: { bridge_mode: 'chat' }, effective: { config: { agent_max_rounds: 5, bridge_mode: 'chat' } } });
+    const persisted = JSON.parse(setup.values.get('nonebotmaker:records:groups:group-1')!) as JsonObject;
+    expect(persisted.config).toEqual({ bridge_mode: 'chat' });
   });
 
-  it('does not add old group prices on new records and inherits only the associated plugin', async () => {
+  it('fails closed instead of silently dropping legacy prices and spending limits', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'groups', { ...baseGroup, inputCostPerMillion: 8, outputCostPerMillion: 16, dailyCostLimit: 1, config: {} });
+    const read = (await json(await setup.app.request('/groups/group-1', {}, setup.bindings))).data as JsonObject;
+    expect(read.migrationRequired).toEqual(['legacy_model_price', 'legacy_budget']);
+    expect(read).not.toHaveProperty('effective');
+    const update = await writeRequest(setup, '/groups/group-1', { name: 'Must migrate' }, 'PATCH');
+    expect(update.status).toBe(409);
+    expect(await json(update)).toEqual({ error: 'legacy_model_price_requires_migration' });
+    seed(setup.values, 'groups', { ...baseGroup, dailyCostLimit: 1, config: {} });
+    const oldBudget = await writeRequest(setup, '/groups/group-1', { name: 'Must choose budget' }, 'PATCH');
+    expect(oldBudget.status).toBe(409);
+    expect(await json(oldBudget)).toEqual({ error: 'legacy_budget_requires_cost_policy' });
+    seed(setup.values, 'policies', { id: 'budget-1', type: 'cost', name: 'One dollar per day', enabled: true,
+      config: { dailyCostLimit: 1, monthlyCostLimit: 0, totalCostLimit: 0 } });
+    const migrated = await writeRequest(setup, '/groups/group-1', { costPolicyId: 'budget-1' }, 'PATCH');
+    expect(migrated.status).toBe(200);
+    expect((await json(migrated)).data).toMatchObject({ costPolicyId: 'budget-1', effective: { dailyCostLimit: 1 } });
+  });
+
+  it('does not materialize plugin or policy fields in new conversation records', async () => {
     const setup = configuredApp({ bridge_max_message_chars: 1300 });
     seed(setup.values, 'plugins', { id: 'other-plugin', type: 'elysia-best/plugin-chatbot', config: { bridge_max_message_chars: 3000 } });
-    const response = await writeRequest(setup, '/groups', { ...baseGroup, config: { agent_temperature: 0 } });
+    const response = await writeRequest(setup, '/groups', { ...baseGroup, config: { agent_temperature: 0, bridge_owner_ids: 'owner-1' } });
     expect(response.status).toBe(201);
     const group = (await json(response)).data as JsonObject;
-    expect(group).toMatchObject({ config: { bridge_max_message_chars: 1300, agent_temperature: 0 } });
+    expect(group).toMatchObject({ config: { bridge_owner_ids: 'owner-1' }, effective: { config: { agent_temperature: 0.7, bridge_max_message_chars: 500 } } });
     expect(group).not.toHaveProperty('inputCostPerMillion');
     expect(group).not.toHaveProperty('outputCostPerMillion');
+    const stored = JSON.parse(setup.values.get('nonebotmaker:records:groups:group-1')!) as JsonObject;
+    expect(stored.config).toEqual({ bridge_owner_ids: 'owner-1' });
   });
 });
 
@@ -524,12 +542,13 @@ describe('capability policies', () => {
     expect(policyFields('dialog').map((field) => field.key)).toEqual(['agent_stream', 'agent_max_rounds', 'agent_max_output_tokens', 'agent_temperature']);
     expect(policyFields('voice').map((field) => field.key)).toEqual(['voice_model', 'voice_id', 'voice_speed', 'voice_max_text_chars', 'voice_max_bytes', 'voice_sends_per_hour']);
     expect(policyFields('identity').map((field) => field.key)).toEqual([
-      'bridge_mode', 'bridge_max_message_chars', 'bridge_max_messages_per_minute', 'bridge_group_batch_seconds',
+      'bridge_max_message_chars', 'bridge_max_messages_per_minute', 'bridge_group_batch_seconds',
       'bridge_slang_enabled', 'bridge_slang_min_messages', 'bridge_slang_cooldown_seconds',
-      'max_context', 'compact_rate', 'bridge_max_media_bytes', 'context_history_limit', 'memory_enabled',
+      'max_context', 'compact_rate', 'bridge_max_media_bytes', 'context_history_limit',
     ]);
+    expect(policyFields('memory').map((field) => field.key)).toEqual(['memory_enabled']);
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
-      'agent_persona', 'bridge_owner_ids', 'bridge_allowed_private', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
+      'bridge_owner_ids', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
     ]);
 
     const setup = configuredApp();
@@ -554,7 +573,7 @@ describe('capability policies', () => {
     expect(created.status).toBe(201);
     const group = (await json(created)).data as JsonObject;
     expect(group).toMatchObject({ identityPolicyId: identity.id, dialogPolicyId: dialog.id });
-    expect(group.config).toMatchObject({ bridge_max_message_chars: 900, max_context: 32768, bridge_mode: 'chat', agent_temperature: 0.7 });
+    expect(group).toMatchObject({ config: { bridge_mode: 'reserved' }, effective: { config: { bridge_max_message_chars: 900, max_context: 32768, bridge_mode: 'reserved', agent_temperature: 0.7 } } });
 
     expect((await setup.app.request(`/policies/${identity.id}`, { method: 'DELETE' }, setup.bindings)).status).toBe(409);
     expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', identityPolicyId: dialog.id })).status).toBe(400);
@@ -570,23 +589,19 @@ describe('capability policies', () => {
     expect((await setup.app.request('/skills/skill-1', { method: 'DELETE' }, setup.bindings)).status).toBe(200);
   });
 
-  it('merges identity overrides with additive extension ids', () => {
+  it('resolves only identity-owned tools and always appends conversation-specific rules', () => {
     const identity: PolicyRecord = {
       id: 'policy-1', type: 'identity', name: 'Identity', description: '', enabled: true,
-      providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY', reasoningEffort: 'high',
+      persona: 'PERSONA', providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY', reasoningEffort: 'high',
       skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'], config: {}, createdAt: '', updatedAt: '',
     };
-    const base = { providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default' as const, skillIds: [], mcpIds: [], ruleIds: [] };
-    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL', systemPromptMode: 'append', skillIds: ['skill-2', 'skill-1'] }, identity)).toEqual({
-      providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY\n\nLOCAL', reasoningEffort: 'high',
-      skillIds: ['skill-1', 'skill-2'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'],
+    const base = { providerId: '', model: '', systemPrompt: '' };
+    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL' }, identity)).toEqual({
+      persona: 'PERSONA', providerId: 'provider-1', model: 'policy-model', systemPrompt: 'POLICY\n\nLOCAL', reasoningEffort: 'high',
+      skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'],
     });
-    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL', systemPromptMode: 'override' }, identity).systemPrompt).toBe('LOCAL');
-    expect(resolveGroupIdentity({ ...base, systemPrompt: 'LOCAL' }, identity).systemPrompt).toBe('LOCAL');
-    expect(resolveGroupIdentity({ ...base, providerId: 'provider-2', model: 'local-model', reasoningEffort: 'low' }, identity))
-      .toMatchObject({ providerId: 'provider-2', model: 'local-model', reasoningEffort: 'low', systemPrompt: 'POLICY' });
-    expect(resolveGroupIdentity(base, undefined)).toEqual({
-      providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', skillIds: [], mcpIds: [], ruleIds: [],
-    });
+    expect(resolveGroupIdentity({ ...base, providerId: 'provider-2', model: 'local-model' }, identity))
+      .toMatchObject({ providerId: 'provider-2', model: 'local-model', reasoningEffort: 'high', systemPrompt: 'POLICY' });
+    expect(() => resolveGroupIdentity(base, undefined)).toThrow('identity_policy_unavailable');
   });
 });

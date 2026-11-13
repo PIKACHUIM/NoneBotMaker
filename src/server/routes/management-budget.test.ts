@@ -29,6 +29,9 @@ function setup() {
   const values = new Map([
     ['nonebotmaker:records:accounts:account-1', JSON.stringify(account)],
     ['nonebotmaker:records:providers:provider-1', JSON.stringify(provider)],
+    ['nonebotmaker:records:policies:identity-1', JSON.stringify({ id: 'identity-1', type: 'identity', name: 'Identity', enabled: true, config: {}, providerId: 'provider-1', model: 'test-model' })],
+    ['nonebotmaker:records:policies:dialog-1', JSON.stringify({ id: 'dialog-1', type: 'dialog', name: 'Dialogue', enabled: true, config: {} })],
+    ['nonebotmaker:records:policies:cost-1', JSON.stringify({ id: 'cost-1', type: 'cost', name: 'Budget', enabled: true, config: { dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0 } })],
   ]);
   const KV: KVNamespaceLike = {
     get: async (key) => values.get(key) ?? null,
@@ -52,12 +55,13 @@ const baseGroup = {
   accountId: 'account-1',
   externalId: 'qq-group-1',
   name: 'Test group',
-  providerId: 'provider-1',
-  model: 'test-model',
+  identityPolicyId: 'identity-1',
+  dialogPolicyId: 'dialog-1',
+  costPolicyId: 'cost-1',
 };
 
-describe('group cost limit management fields', () => {
-  it('defaults all USD limits to zero', async () => {
+describe('reusable cost policy management fields', () => {
+  it('reads zero USD limits from the selected cost policy without duplicating them in the group', async () => {
     const { app, bindings } = setup();
     const response = await app.request('/groups', {
       method: 'POST',
@@ -67,7 +71,8 @@ describe('group cost limit management fields', () => {
 
     expect(response.status).toBe(201);
     const body = await response.json() as { data: Record<string, unknown> };
-    expect(body.data).toMatchObject({ dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0 });
+    expect(body.data).toMatchObject({ costPolicyId: 'cost-1', effective: { dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0 } });
+    expect(body.data).not.toHaveProperty('dailyCostLimit');
     expect(response.headers.get('X-Chatbot-Cost-Consistency')).toBe('kv-eventual; concurrent-overage-possible');
   });
 
@@ -75,10 +80,10 @@ describe('group cost limit management fields', () => {
     'rejects a negative %s value',
     async (field) => {
       const { app, bindings } = setup();
-      const response = await app.request('/groups', {
+      const response = await app.request('/policies', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...baseGroup, [field]: -0.01 }),
+        body: JSON.stringify({ type: 'cost', name: 'Invalid', config: { [field]: -0.01 } }),
       }, bindings);
 
       expect(response.status).toBe(400);

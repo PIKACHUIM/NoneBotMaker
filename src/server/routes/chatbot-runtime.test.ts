@@ -3,6 +3,7 @@ import type { KVNamespaceLike, RuntimeBindings } from '../../shared/types';
 import { createSessionToken, SESSION_COOKIE } from '../auth';
 import { createApiRouter } from './index';
 import { createMemeLibrary } from '../plugins/chatbot/meme-library';
+import { createConversationLogRepository } from '../storage/conversation-log-repository';
 import { createKVMemeStore } from '../plugins/chatbot/meme-storage';
 
 function fixture() {
@@ -16,11 +17,14 @@ function fixture() {
   const bindings = { PLATFORM: 'edgeone', KV, SYS_SECRET: 'chatbot-runtime-api-test' } as RuntimeBindings;
   const group = {
     id: 'group-1', accountId: 'account-1', externalId: 'group-openid', conversationType: 'group', name: 'Group', enabled: true,
-    providerId: 'provider-1', model: 'test-model', systemPrompt: '', reasoningEffort: 'default', nonMentionReplyRate: 1,
+    identityPolicyId: 'test-identity', dialogPolicyId: 'test-dialog',
+    providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', nonMentionReplyRate: 1,
     whitelistEnabled: false, whitelistUserIds: [], dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0,
     skillIds: [], mcpIds: [], ruleIds: [], config: { bridge_mode: 'chat', bridge_owner_ids: 'console-owner' }, createdAt: '', updatedAt: '',
   };
   values.set('nonebotmaker:records:groups:group-1', JSON.stringify(group));
+  values.set('nonebotmaker:records:policies:test-identity', JSON.stringify({ id: 'test-identity', type: 'identity', name: 'Identity', enabled: true, providerId: 'provider-1', model: 'test-model', systemPrompt: '', persona: '', skillIds: [], mcpIds: [], ruleIds: [], toolIds: [], config: {}, createdAt: '', updatedAt: '' }));
+  values.set('nonebotmaker:records:policies:test-dialog', JSON.stringify({ id: 'test-dialog', type: 'dialog', name: 'Dialog', enabled: true, config: {}, createdAt: '', updatedAt: '' }));
   values.set('nonebotmaker:records:plugins:plugin-1', JSON.stringify({ id: 'plugin-1', type: 'elysia-best/plugin-chatbot', enabled: true, config: {}, createdAt: '', updatedAt: '' }));
   values.set('nonebotmaker:records:accounts:account-1', JSON.stringify({ id: 'account-1', pluginId: 'plugin-1', protocol: 'qq', enabled: true, credentials: { appId: 'test-app', appSecret: 'test-secret' }, config: {}, createdAt: '', updatedAt: '' }));
   const api = createApiRouter();
@@ -36,6 +40,27 @@ async function authorized(f: ReturnType<typeof fixture>, path: string, init: Req
 }
 
 describe('chatbot conversation management API', () => {
+  it('aggregates actual scoped records and costs without claiming all-time completeness', async () => {
+    const f = fixture();
+    f.bindings.LOG_RECORD = 'true';
+    const at = Date.now();
+    const repository = createConversationLogRepository(f.bindings);
+    await repository.append([
+      { id: 'incoming', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'group-openid', userId: 'member', direction: 'in', status: 'received', content: 'hello', createdAt: at, expiresAt: at + 60_000 },
+      { id: 'charged', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'group-openid', userId: 'member', direction: 'out', status: 'model_completed', content: '', details: { cost: 0.12, usage: { promptTokens: 14 } }, createdAt: at + 1, expiresAt: at + 60_000 },
+      { id: 'other-id', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'unrelated-openid', userId: 'member', direction: 'out', status: 'sent', content: 'ignore', details: { cost: 3 }, createdAt: at + 2, expiresAt: at + 60_000 },
+      { id: 'reply', accountId: 'account-1', groupId: 'group-1', groupExternalId: 'group-openid', userId: 'member', direction: 'out', status: 'sent', content: 'reply', createdAt: at + 3, expiresAt: at + 60_000 },
+    ]);
+    expect((await f.api.request('/chatbot/conversations/account-1/group-1/stats?externalId=group-openid', {}, f.bindings)).status).toBe(401);
+    const response = await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=group-openid');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { enabled: true, scanned: 4, truncated: false, messagesIn: 1, repliesOut: 1, errors: 0, costUsd: 0.12, charges: 1 } });
+    expect((await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=outside')).status).toBe(404);
+    f.bindings.LOG_RECORD = 'false';
+    expect(await (await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=group-openid')).json())
+      .toMatchObject({ data: { enabled: false, costUsd: 0 } });
+  });
+
   it('requires a management session and lists only records owned by the requested account', async () => {
     const f = fixture();
     expect((await f.api.request('/chatbot/conversations', {}, f.bindings)).status).toBe(401);

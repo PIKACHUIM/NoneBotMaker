@@ -1,6 +1,7 @@
 import { CHATBOT_PLUGIN_TYPE, type JsonObject, type RuntimeBindings } from '../../../shared/types';
 import type { BotAccountRecord } from '../../../shared/types';
 import { createRepository } from '../../storage/repository';
+import { normalizeFieldValues, pluginDefinition } from '../../../shared/plugin-catalog';
 import { decryptSecrets } from '../../storage/secrets';
 import type { QQAccountContext } from './types';
 
@@ -54,6 +55,6 @@ function toQQAccountContext(
     appId,
     appSecret,
     pluginEnabled: plugin.enabled === true,
-    pluginConfig: plugin.config as JsonObject | undefined,
+    pluginConfig: normalizeFieldValues(pluginDefinition(CHATBOT_PLUGIN_TYPE)?.configFields ?? [], plugin.config as JsonObject | undefined),
   };
 }

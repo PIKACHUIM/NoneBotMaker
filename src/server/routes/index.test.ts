@@ -31,7 +31,7 @@ describe('admin route protections', () => {
     expect(models.status).toBe(403);
   });
 
-  it.each(['/prices', '/prices/presets', '/prices/price-1'])('requires authentication for price reads: %s', async (path) => {
+  it.each(['/prices', '/prices/presets', '/prices/price-1', '/tools', '/tools/builtin-chat-generate-image', '/chatbot/conversations/account-1/group-1/memories?externalId=group-1'])('requires authentication for billing, tool and memory reads: %s', async (path) => {
     const response = await createApiRouter().request(path, {}, { SYS_SECRET: 'test-secret' });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'unauthorized' });
@@ -54,7 +54,7 @@ describe('admin route protections', () => {
     expect(crossOrigin.status).toBe(403);
   });
 
-  it.each(['memories'])('requires a session and same-origin mutations for shared records: %s', async (kind) => {
+  it.each(['memories', 'tools'])('requires a session and same-origin mutations for shared records and tools: %s', async (kind) => {
     const router = createApiRouter();
     const bindings = { SYS_SECRET: 'test-secret' };
     const read = await router.request(`/${kind}?accountId=account-1`, {}, bindings);

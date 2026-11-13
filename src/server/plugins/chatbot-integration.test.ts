@@ -51,13 +51,18 @@ async function setup() {
   const plugin = await save('plugins', { name: 'QQ plugin', type: CHATBOT_PLUGIN_TYPE });
   const provider = await save('providers', { name: 'AI gateway', baseUrl: 'https://api.vendor.dev/v1', apiKey: 'integration-ai-secret', enabled: true, models: ['integration-model'], priceMultiplier: 3, mediaCapabilities: ['image', 'speech'] });
   await save('prices', { name: 'Integration model price', model: 'integration-model', currency: 'USD', inputCostPerMillion: 2, outputCostPerMillion: 6, cacheInputCostPerMillion: 0.5, enabled: true });
+  const identity = await save('policies', { id: 'integration-identity', type: 'identity', name: 'Integration identity', enabled: true,
+    providerId: provider.id, model: 'integration-model', reasoningEffort: 'high', toolIds: [],
+    config: { bridge_group_batch_seconds: 0, max_context: 4096 } });
+  const dialog = await save('policies', { id: 'integration-dialog', type: 'dialog', name: 'Integration dialog', enabled: true });
   const createBot = (appId: string) => save('accounts', { pluginId: plugin.id, protocol: 'qq', name: `QQ ${appId}`, credentials: { appId, appSecret: `integration-app-${appId}` } });
-  const createGroup = async (accountId: string, config: Record<string, unknown> = {}) => await save('groups', {
-    accountId, externalId: 'room-openid', name: 'Room', providerId: provider.id, model: 'integration-model', reasoningEffort: 'high',
-    config: { bridge_group_batch_seconds: 0, bridge_owner_ids: 'alice', bridge_mode: 'chat', max_context: 4096, ...config },
+  const createGroup = async (accountId: string, config: Record<string, unknown> = {}, voicePolicyId = '') => await save('groups', {
+    accountId, externalId: 'room-openid', name: 'Room', identityPolicyId: identity.id, dialogPolicyId: dialog.id, voicePolicyId,
+    providerId: '', model: '', reasoningEffort: 'default',
+    config: { bridge_owner_ids: 'alice', bridge_mode: 'chat', ...config },
     nonMentionReplyRate: 1,
   }) as unknown as GroupRecord;
-  return { database, DB, bindings, api, token, save, createBot, createGroup, plugin, provider };
+  return { database, DB, bindings, api, token, save, createBot, createGroup, plugin, provider, identity };
 }
 
 describe('management to chatbot persistent integration', () => {
@@ -163,9 +168,16 @@ describe('management to chatbot persistent integration', () => {
   });
 
   it('runs management to TTS to QQ binary upload and records model plus speech costs', async () => {
-    const { bindings, database, save, createBot, createGroup } = await setup();
+    const { bindings, database, api, token, identity, save, createBot, createGroup } = await setup();
     const accountRecord = await createBot('2001');
-    const group = await createGroup(accountRecord.id as string, { voice_model: 'integration-tts' });
+    const authorizedSpeech = await api.request(`https://local.nonebot.dev/policies/${identity.id}`, {
+      method: 'PATCH',
+      headers: { origin: 'https://local.nonebot.dev', cookie: `nbm_session=${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ toolIds: ['chat_tts'] }),
+    }, bindings);
+    expect(authorizedSpeech.status, JSON.stringify(await authorizedSpeech.json())).toBe(200);
+    const voice = await save('policies', { type: 'voice', name: 'Integration speech', enabled: true, config: { voice_model: 'integration-tts' } });
+    const group = await createGroup(accountRecord.id as string, { voice_model: 'legacy-voice-must-not-override' }, voice.id as string);
     await save('prices', { name: 'Speech price', model: 'integration-tts', currency: 'USD', unit: 'characters', inputCostPerMillion: 15, outputCostPerMillion: 0, enabled: true });
     const account = await resolveQQAccountByAppId('2001', bindings);
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];

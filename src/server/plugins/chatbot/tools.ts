@@ -5,6 +5,7 @@ import { MAX_SEARCH_RESULTS, webSearch } from './search';
 export interface AgentTool {
   definition: ChatTool;
   mcp?: { serviceId: string; remoteName: string; readOnly: boolean; explicitlyAllowed: boolean };
+  custom?: { id: string; host: string; approvalRequired: boolean };
   execute(argumentsValue: JsonObject): Promise<string>;
 }
 

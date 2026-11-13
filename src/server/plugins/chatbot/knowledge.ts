@@ -5,6 +5,8 @@ import { tool, validateToolArguments, type AgentTool } from './tools';
 export interface KnowledgeContext {
   owner: boolean;
   memoryEnabled: boolean;
+  /** Confirmed memories are persisted separately from the conversation control state. */
+  externalMemories?: boolean;
   mode: string;
   getState: () => Promise<JsonObject>;
   setState: (state: JsonObject) => Promise<void>;
@@ -47,13 +49,13 @@ function name(value: unknown, action: 'role' | 'memory'): string {
 function memoryEntry(args: JsonObject, updatedAt = new Date().toISOString()): MemoryEntry {
   if (!MEMORY_TYPES.includes(args.type as MemoryEntry['type'])) throw new Error('记忆类型须为 user/feedback/project/reference。');
   return { name: name(args.name, 'memory'), title: text(args.title, KNOWLEDGE_LIMITS.title, '标题', false, true),
-    description: text(args.description, KNOWLEDGE_LIMITS.description, '描述', false, true), type: args.type as MemoryEntry['type'],
+    description: text(args.description ?? '', KNOWLEDGE_LIMITS.description, '描述', true, true), type: args.type as MemoryEntry['type'],
     content: text(args.content, KNOWLEDGE_LIMITS.memoryContent, '记忆内容'), updatedAt };
 }
 
-function checkSize(state: KnowledgeState): void {
-  if (state.roles.length > KNOWLEDGE_LIMITS.roles || state.memories.length > KNOWLEDGE_LIMITS.memories) throw new Error('角色卡或记忆条数超过上限。');
-  if (encoder.encode(JSON.stringify(state)).byteLength > KNOWLEDGE_LIMITS.stateBytes) throw new Error('会话知识数据超过总大小上限。');
+function checkSize(state: KnowledgeState, externalMemories = false): void {
+  if (state.roles.length > KNOWLEDGE_LIMITS.roles || state.memories.length > (externalMemories ? 1000 : KNOWLEDGE_LIMITS.memories)) throw new Error('角色卡或记忆条数超过上限。');
+  if (encoder.encode(JSON.stringify(externalMemories ? { ...state, memories: [] } : state)).byteLength > KNOWLEDGE_LIMITS.stateBytes) throw new Error('会话知识数据超过总大小上限。');
 }
 
 function readKnowledge(state: JsonObject): KnowledgeState {
@@ -61,7 +63,8 @@ function readKnowledge(state: JsonObject): KnowledgeState {
   if (state.knowledge !== undefined) {
     const saved = object(state.knowledge);
     if (!Array.isArray(saved.roles) || !Array.isArray(saved.memories) || typeof saved.activeRole !== 'string') throw new Error('持久知识状态格式无效。');
-    if (saved.roles.length > KNOWLEDGE_LIMITS.roles || saved.memories.length > KNOWLEDGE_LIMITS.memories || encoder.encode(JSON.stringify(saved)).byteLength > KNOWLEDGE_LIMITS.stateBytes) throw new Error('持久知识状态超过大小或条数上限。');
+    if (saved.roles.length > KNOWLEDGE_LIMITS.roles || saved.memories.length > (state.knowledgeExternal === true ? 1000 : KNOWLEDGE_LIMITS.memories) ||
+        encoder.encode(JSON.stringify(state.knowledgeExternal === true ? { ...saved, memories: [] } : saved)).byteLength > KNOWLEDGE_LIMITS.stateBytes) throw new Error('持久知识状态超过大小或条数上限。');
     result.roles = saved.roles.map((value) => {
       const card = object(value);
       return { name: name(card.name, 'role'), content: text(card.content, KNOWLEDGE_LIMITS.roleContent, '角色内容'),
@@ -82,7 +85,7 @@ function readKnowledge(state: JsonObject): KnowledgeState {
       result.memories.push(memoryEntry({ name: 'default', title: '旧会话记忆', description: '兼容旧 /memory 文本', type: 'project', content: state.memory }, '1970-01-01T00:00:00.000Z'));
     }
   }
-  checkSize(result);
+  checkSize(result, state.knowledgeExternal === true);
   return result;
 }
 
@@ -95,11 +98,11 @@ function requireOwner(context: KnowledgeContext): void {
   if (!context.owner) throw new Error('仅 owner 可写入、删除、清空或切换角色/记忆。');
 }
 
-async function persist(context: KnowledgeContext, knowledge: KnowledgeState): Promise<void> {
+async function persist(context: KnowledgeContext, knowledge: KnowledgeState, originalState: JsonObject): Promise<void> {
   requireOwner(context);
-  checkSize(knowledge);
-  // callback 仅绑定当前会话；并发串行化由现有 runtime/store 负责。
-  const state: JsonObject = { ...await context.getState(), knowledge };
+  checkSize(knowledge, context.externalMemories);
+  // Preserve the version snapshot used when computing this mutation; a second read could delete newer DB memories.
+  const state: JsonObject = { ...originalState, knowledge };
   delete state.role;
   delete state.memory;
   await context.setState(state);
@@ -212,31 +215,33 @@ export function createKnowledgeTools(context: KnowledgeContext): AgentTool[] {
     }, ['name', 'title', 'description', 'type', 'content'], async (args) => {
       requireOwner(context);
       const entry = memoryEntry(args);
-      const knowledge = readKnowledge(await context.getState());
+      const state = await context.getState();
+      const knowledge = readKnowledge(state);
       knowledge.memories = [...knowledge.memories.filter((item) => item.name !== entry.name), entry];
-      await persist(context, knowledge);
+      await persist(context, knowledge, state);
       return response({ saved: entry.name, updatedAt: entry.updatedAt });
     });
     add('MemoryForget', 'owner 删除一条当前会话的具名记忆。', { name: { type: 'string', minLength: 1, maxLength: 64 } }, ['name'], async (args) => {
       requireOwner(context);
-      const knowledge = readKnowledge(await context.getState());
+      const state = await context.getState();
+      const knowledge = readKnowledge(state);
       const target = name(args.name, 'memory');
       if (!knowledge.memories.some((entry) => entry.name === target)) throw new Error('记忆不存在。');
       knowledge.memories = knowledge.memories.filter((entry) => entry.name !== target);
-      await persist(context, knowledge);
+      await persist(context, knowledge, state);
       return response({ deleted: target });
     });
   }
   return tools;
 }
 
-export function knowledgePrompt(state: JsonObject, mode: string, memoryEnabled: boolean): string {
+export function knowledgePrompt(state: JsonObject, mode: string, memoryEnabled: boolean, includeRole = true): string {
   if (!MODES.includes(mode as typeof MODES[number])) throw new Error('角色模式无效。');
   // 关闭记忆时不解析、不暴露记忆内容（包括旧状态字段）。
   const knowledge = readKnowledge(memoryEnabled ? state : { ...state, memory: undefined, knowledge: state.knowledge ? { ...object(state.knowledge), memories: [] } : undefined });
   const card = knowledge.roles.find((entry) => entry.name === knowledge.activeRole);
   const parts: string[] = [];
-  if (card) parts.push(`当前角色卡：${card.name}\n${renderedRole(card.content, mode).content}`);
+  if (card && includeRole) parts.push(`当前人设：${card.name}\n${renderedRole(card.content, mode).content}`);
   if (memoryEnabled) {
     const lines: string[] = [];
     let bytes = 0;
@@ -325,7 +330,7 @@ export async function handleKnowledgeCommand(action: 'role' | 'memory', argument
         knowledge.memories = [...knowledge.memories.filter((item) => item.name !== target), entry];
       }
     } else throw new Error('不支持的知识命令。');
-    await persist(context, knowledge);
+    await persist(context, knowledge, state);
     return operation === 'delete' || operation === 'forget' ? '已删除。' : operation === 'clear' ? '已清空。' : '设置已保存。';
   } catch (error) {
     if (error instanceof SyntaxError) return '错误：命令 JSON 无效。';

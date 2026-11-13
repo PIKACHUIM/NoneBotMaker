@@ -17,11 +17,12 @@ import { findModelPrice } from '../../../shared/model-pricing';
 import { matchesConversationId } from '../../../shared/plugin-catalog';
 import { createD1MatcherSessionStore, PluginRuntime } from '../dispatcher';
 import { createConversationLogRepository, type ConversationLogRepository } from '../../storage/conversation-log-repository';
+import { createConversationMemoryRepository } from '../../storage/conversation-memory-repository';
 import type { EdgeOneBlobStoreLike } from '../../storage/edgeone-blob-repository';
 import { createRepository, type StoredRecord } from '../../storage/repository';
 import { decryptSecrets } from '../../storage/secrets';
 import { createChatbotHandler, type ChatbotHandlerDependencies } from './handler';
-import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from './policies';
+import { applyGroupPolicies, loadPolicyLayers } from './policies';
 import { completeRecentTurns } from './tools';
 import { createKVMemeStore } from './meme-storage';
 import { createKVVoiceAssetStore } from './voice-library';
@@ -296,7 +297,6 @@ export function createStoredChatbotHandler(
       const group = recordsForAccount.find((record) => record.accountId === accountId && matchesConversationId(record.externalId, groupOpenId) && (record.conversationType ?? 'group') === conversationType);
       if (!group) return null;
       const resolved = await decryptSecrets(group as JsonObject, bindings) as unknown as GroupRecord;
-      if (!hasPolicySelection(group)) return resolved;
       const policies = await loadPolicyLayers(records, group);
       const account = await records.get('accounts', accountId);
       const plugin = account?.pluginId ? await records.get('plugins', String(account.pluginId)) : null;
@@ -314,6 +314,10 @@ export function createStoredChatbotHandler(
     findLibrary: async (kind, id) => {
       const library = await records.get(kind, id);
       return library ? await decryptSecrets(library as JsonObject, bindings) as unknown as LibraryRecord : null;
+    },
+    findTool: async (id) => {
+      const record = await records.get('tools', id);
+      return record ? await decryptSecrets(record as JsonObject, bindings) as unknown as LibraryRecord : null;
     },
     findWorkspaceMemories: async (accountId) => (await records.list('memories')).filter((record) => record.accountId === accountId) as unknown as ProjectMemoryRecord[],
     saveWorkspaceMemory: async (accountId, memory) => {
@@ -341,6 +345,7 @@ export function createStoredChatbotHandler(
     clearContext: services.conversationStore.clear?.bind(services.conversationStore),
     getState: services.conversationStore.getState?.bind(services.conversationStore),
     setState: services.conversationStore.setState?.bind(services.conversationStore),
+    conversationMemories: bindings.DB ? createConversationMemoryRepository(bindings) : undefined,
     claimApproval: services.conversationStore.claimApproval?.bind(services.conversationStore),
     scheduleWake: services.scheduleWake,
     listWakes: services.listWakes,

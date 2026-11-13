@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotAccountRecord, ChatMessage, ConversationLog, GroupRecord, ProviderRecord } from '../../../shared/types';
 import type { MemeMetadata, MemeStore, MemeStoreListEntry, MemeStoreValue } from './meme-library';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
-import { createChatbotHandler, resetOutboundRateLimits, type ChatbotHandlerDependencies } from './handler';
+import type { ConversationMemory, ConversationMemoryRepository } from '../../storage/conversation-memory-repository';
+import { createChatbotHandler, resetOutboundRateLimits, type ChatbotHandlerDependencies, type OutboundMedia, type ReplyOptions } from './handler';
 
 const account: QQAccountContext = {
   appId: 'app-id',
@@ -270,14 +271,225 @@ describe('createChatbotHandler', () => {
     expect(secondSystem).not.toContain('reserved2-only send policy');
   });
 
-  it('places the conversation persona before system rules in the system prompt', async () => {
+  it('uses the identity persona before system rules and ignores hidden legacy group personas', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'hello' } }] }));
-    const { deps } = dependencies({ fetch, findGroup: vi.fn(async () => ({ ...group, systemPrompt: 'SYSTEM RULES', config: { agent_persona: 'PERSONA TEXT' } })) });
+    const { deps } = dependencies({ fetch, findGroup: vi.fn(async () => ({ ...group, persona: 'PERSONA TEXT', systemPrompt: 'SYSTEM RULES', config: { agent_persona: 'OLD GROUP PERSONA' } })) });
     await createChatbotHandler(deps)(account, message());
     const system = JSON.parse(String(fetch.mock.calls[0][1]?.body)).messages[0].content as string;
     expect(system).toContain('PERSONA TEXT');
     expect(system).toContain('SYSTEM RULES');
+    expect(system).not.toContain('OLD GROUP PERSONA');
     expect(system.indexOf('PERSONA TEXT')).toBeLessThan(system.indexOf('SYSTEM RULES'));
+  });
+
+  it('stores /save in the scoped database instead of the DO state and exposes only confirmed memory', async () => {
+    let state: Record<string, unknown> = {};
+    let entries: ConversationMemory[] = [];
+    const repository = {
+      list: vi.fn(async () => entries),
+      createIfMissing: vi.fn(async (_scope: unknown, input: { name: string; title: string; description: string; type: ConversationMemory['type']; content: string; status: ConversationMemory['status'] }) => {
+        const item: ConversationMemory = { id: 'memory-1', ...input, createdAt: 1_000, updatedAt: 1_000, expiresAt: 604_801_000 };
+        entries = [item]; return item;
+      }),
+      delete: vi.fn(async () => { entries = []; return true; }),
+    } as unknown as ConversationMemoryRepository;
+    const { deps, fetch } = dependencies({
+      findGroup: vi.fn(async () => ({ ...group, persona: 'Base persona', memoryPolicy: { memoryMode: 'manual' as const, maxEntries: 100, retentionDays: 7 }, config: { memory_enabled: true, bridge_owner_ids: 'owner' } })),
+      conversationMemories: repository,
+      getState: vi.fn(async () => structuredClone(state)),
+      setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
+    });
+    const handler = createChatbotHandler(deps);
+    await handler(account, message({ userId: 'owner', text: '/save goal Deliver a safe release' }));
+    expect(repository.createIfMissing).toHaveBeenCalledWith({ accountId: 'account-1', groupId: 'group-1', conversationType: 'group', externalId: 'group-openid' },
+      expect.objectContaining({ name: 'goal', content: 'Deliver a safe release', status: 'confirmed' }),
+      { memoryMode: 'manual', maxEntries: 100, retentionDays: 7 }, 1_000);
+    expect((state.knowledge as { memories: unknown[] }).memories).toEqual([]);
+    await handler(account, message({ userId: 'owner', id: 'next-message' }));
+    const system = JSON.parse(String(fetch.mock.calls[0][1]?.body)).messages[0].content as string;
+    expect(system).toContain('Base persona');
+    expect(system).toContain('goal');
+    expect(system).not.toContain('Deliver a safe release');
+  });
+
+  it('does not delete memory added by an admin while a role mutation holds an older snapshot', async () => {
+    let state: Record<string, unknown> = {};
+    const first: ConversationMemory = { id: 'first', name: 'first', title: 'First', description: '', type: 'reference', content: 'known', status: 'confirmed', createdAt: 100, updatedAt: 100, expiresAt: 1_000_000 };
+    const later: ConversationMemory = { ...first, id: 'later', name: 'later', title: 'Later', content: 'admin-created', updatedAt: 101 };
+    let entries = [first];
+    let reads = 0;
+    const repository = {
+      list: vi.fn(async () => { reads += 1; if (reads === 1) { entries = [first, later]; return [first]; } return entries; }),
+      deleteIfUnchanged: vi.fn(async () => true),
+      updateIfUnchanged: vi.fn(async () => first),
+      createIfMissing: vi.fn(async () => later),
+    } as unknown as ConversationMemoryRepository;
+    const { deps } = dependencies({
+      findGroup: vi.fn(async () => ({ ...group, memoryPolicy: { memoryMode: 'manual' as const, maxEntries: 100, retentionDays: 7 }, config: { memory_enabled: true, bridge_owner_ids: 'owner' } })),
+      conversationMemories: repository,
+      getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
+    });
+    await createChatbotHandler(deps)(account, message({ userId: 'owner', text: '/role add helper friendly' }));
+    expect(repository.deleteIfUnchanged).not.toHaveBeenCalled();
+    expect(repository.updateIfUnchanged).not.toHaveBeenCalled();
+    expect(repository.createIfMissing).not.toHaveBeenCalled();
+    expect(entries.map((entry) => entry.name)).toEqual(['first', 'later']);
+    expect((state.knowledge as { memories: unknown[] }).memories).toEqual([]);
+  });
+
+  it('proposes review-mode memories without exposing pending entries to the next conversation', async () => {
+    let entries: ConversationMemory[] = [];
+    const repository = {
+      list: vi.fn(async () => entries),
+      createIfMissing: vi.fn(async (_scope: unknown, input: { name: string; title: string; description: string; type: ConversationMemory['type']; content: string; status: ConversationMemory['status'] }) => {
+        const item: ConversationMemory = { id: 'candidate-1', ...input, createdAt: 1_000, updatedAt: 1_000, expiresAt: 604_801_000 };
+        entries = [item]; return item;
+      }),
+    } as unknown as ConversationMemoryRepository;
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const isExtraction = request.messages[0].content.includes('仅提取一条持久');
+      return Response.json({ choices: [{ message: { content: isExtraction ? '{"name":"goal","title":"Goal","content":"a safe release"}' : 'hello back' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }, { headers: { 'content-type': 'application/json' } });
+    });
+    const { deps } = dependencies({ fetch, conversationMemories: repository,
+      findGroup: vi.fn(async () => ({ ...group, config: { memory_enabled: true }, memoryPolicy: { memoryMode: 'review' as const, maxEntries: 100, retentionDays: 7 } })),
+      getState: vi.fn(async () => ({})), setState: vi.fn(async () => undefined),
+    });
+    const handler = createChatbotHandler(deps);
+    await handler(account, message());
+    expect(repository.createIfMissing).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'group-openid' }), expect.objectContaining({ status: 'pending' }), expect.any(Object), 1_000);
+    await handler(account, message({ id: 'next-message' }));
+    const request = JSON.parse(String(fetch.mock.calls[2][1]?.body)) as { messages: Array<{ content: string }> };
+    expect(request.messages[0].content).not.toContain('a safe release');
+  });
+
+  it('auto-saves only owner-confirmed facts while never automatically saving a member message', async () => {
+    let entries: ConversationMemory[] = [];
+    const repository = {
+      list: vi.fn(async () => entries),
+      createIfMissing: vi.fn(async (_scope: unknown, input: { name: string; title: string; description: string; type: ConversationMemory['type']; content: string; status: ConversationMemory['status'] }) => {
+        const saved: ConversationMemory = { id: 'auto-1', ...input, createdAt: 1_000, updatedAt: 1_000, expiresAt: 604_801_000 };
+        entries = [saved]; return saved;
+      }),
+    } as unknown as ConversationMemoryRepository;
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      return Response.json({ choices: [{ message: { content: request.messages[0].content.includes('仅提取一条持久')
+        ? '{"name":"goal","title":"Goal","content":"ship safely"}' : 'hello back' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }, { headers: { 'content-type': 'application/json' } });
+    });
+    const { deps } = dependencies({ fetch, conversationMemories: repository,
+      findGroup: vi.fn(async () => ({ ...group, config: { memory_enabled: true, bridge_owner_ids: 'owner' },
+        memoryPolicy: { memoryMode: 'auto' as const, maxEntries: 100, retentionDays: 7 } })),
+      getState: vi.fn(async () => ({})), setState: vi.fn(async () => undefined),
+    });
+    const handler = createChatbotHandler(deps);
+    await handler(account, message());
+    expect(repository.createIfMissing).not.toHaveBeenCalled();
+    await handler(account, message({ id: 'owner-message', userId: 'owner' }));
+    expect(repository.createIfMissing).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ status: 'confirmed', content: 'ship safely' }), expect.any(Object), 1_000);
+  });
+
+  it('runs an identity-authorized image tool, charges usage and sends validated QQ media once', async () => {
+    const image = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
+    const sendMedia = vi.fn(async (_bot: QQAccountContext, _target: string, _messageId: string, _media: OutboundMedia, _options: ReplyOptions) => undefined);
+    let chatRounds = 0;
+    const fetch = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(url).endsWith('/images/generations')) return Response.json({ data: [{ b64_json: btoa(String.fromCharCode(...image)) }], usage: { total_tokens: 1000 } });
+      chatRounds += 1;
+      return Response.json({ choices: [{ message: chatRounds === 1
+        ? { content: '', tool_calls: [{ id: 'image-call', type: 'function', function: { name: 'chat_generate_image', arguments: '{"prompt":"a sunset"}' } }] }
+        : { content: 'done' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const toolRecord = { id: 'builtin-chat-generate-image', name: 'Generate image', description: '', enabled: true,
+      config: { kind: 'builtin', name: 'chat_generate_image', providerId: 'image-provider', model: 'gpt-image-2', fallbackCostPerImage: 0.08, size: '1024x1024', quality: 'low' }, createdAt: '', updatedAt: '' };
+    const { deps, writtenLogs } = dependencies({ fetch, sendMedia, logRecord: 'true',
+      findGroup: vi.fn(async () => ({ ...group, toolIds: [toolRecord.id], toolApprovalMode: 'all-allow' as const })),
+      findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
+      findProvider: vi.fn(async (id) => id === 'image-provider' ? { ...provider, id, models: ['gpt-image-2'] } : provider),
+      findPrice: vi.fn(async (model) => model === 'gpt-image-2' ? { id: 'image-price', model, name: model, enabled: true, currency: 'USD' as const, unit: 'tokens' as const,
+        inputCostPerMillion: 5, outputCostPerMillion: 30, imageTextInputCostPerMillion: 5, imageOutputCostPerMillion: 30,
+        imageInputCostPerMillion: 8, imageCachedInputCostPerMillion: 2, createdAt: '', updatedAt: '' } : null),
+    });
+    await createChatbotHandler(deps)(account, message());
+    expect(sendMedia).toHaveBeenCalledOnce();
+    expect(sendMedia.mock.calls[0][3]).toMatchObject({ type: 'image', contentType: 'image/png', bytes: image });
+    expect(deps.recordGroupCost).toHaveBeenCalledWith(expect.any(Object), 0.0175, 1_000);
+    expect(writtenLogs.mock.calls.flatMap(([logs]) => logs).some((item) => item.status === 'image_completed' && item.details?.pricingSource === 'total_estimate')).toBe(true);
+  });
+
+  it('never exposes a disabled built-in tool even when its identity grants the function', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'normal reply' } }] }));
+    const { deps } = dependencies({ fetch,
+      findGroup: vi.fn(async () => ({ ...group, toolIds: ['WebSearch'] })),
+      findTool: vi.fn(async (id) => id === 'builtin-WebSearch' ? { id, name: 'WebSearch', description: '', enabled: false,
+        config: { kind: 'builtin', name: 'WebSearch' }, createdAt: '', updatedAt: '' } : null),
+    });
+    await createChatbotHandler(deps)(account, message());
+    const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { tools?: Array<{ function: { name: string } }> };
+    expect(request.tools?.map((item) => item.function.name)).not.toContain('WebSearch');
+  });
+
+  it('requires approval for an identity-authorized custom POST and rechecks the tool on approval', async () => {
+    let state: Record<string, unknown> = {};
+    let modelCalls = 0;
+    const remoteCalls: string[] = [];
+    const toolRecord = { id: 'custom-record', name: 'Remote action', description: 'Save a value', enabled: true,
+      config: { kind: 'https', name: 'safe_action', url: 'https://custom.example/endpoint', method: 'POST', readOnly: false,
+        parameterSchema: { type: 'object', properties: { value: { type: 'string', maxLength: 16 } }, required: ['value'], additionalProperties: false } },
+      createdAt: '', updatedAt: '' };
+    const fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('https://custom.example')) { remoteCalls.push(String(init?.body)); return Response.json({ saved: true }); }
+      modelCalls += 1;
+      return Response.json({ choices: [{ message: modelCalls === 1
+        ? { content: '', tool_calls: [{ id: 'custom-call', type: 'function', function: { name: 'custom_custom-record', arguments: '{"value":"safe"}' } }] }
+        : { content: 'completed' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const { deps } = dependencies({ fetch,
+      findGroup: vi.fn(async () => ({ ...group, toolIds: [toolRecord.id], toolApprovalMode: 'per-tool' as const })),
+      findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
+      getState: vi.fn(async () => structuredClone(state)),
+      setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
+      claimApproval: vi.fn(async () => true),
+    });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    await handler(configured, message());
+    expect(remoteCalls).toHaveLength(0);
+    const approval = (state.toolApprovals as Array<{ id: string }>)[0];
+    expect(approval?.id).toBeTruthy();
+    await handler(configured, message({ id: 'approve-message', userId: 'owner', text: `/approve ${approval.id}` }));
+    expect(remoteCalls).toEqual(['{"value":"safe"}']);
+  });
+
+  it('re-reads custom tool authorization when approving a pending external request', async () => {
+    let state: Record<string, unknown> = {};
+    let toolEnabled = true;
+    let modelCalls = 0;
+    const remote = vi.fn(async () => Response.json({ updated: true }));
+    const record = { id: 'remote-1', name: 'Update', description: 'A remote write', config: {
+      kind: 'https', name: 'write_remote', url: 'https://custom.example/action', method: 'POST', readOnly: false,
+      parameterSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } }, createdAt: '', updatedAt: '' };
+    const fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('https://custom.example')) return remote();
+      modelCalls += 1;
+      return Response.json({ choices: [{ message: modelCalls === 1
+        ? { content: '', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'custom_remote-1', arguments: '{"value":"x"}' } }] }
+        : { content: 'done' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const { deps } = dependencies({ fetch,
+      findGroup: vi.fn(async () => ({ ...group, toolIds: [record.id], toolApprovalMode: 'per-tool' as const })),
+      findTool: vi.fn(async (id) => id === record.id ? { ...record, enabled: toolEnabled } : null),
+      getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }),
+      claimApproval: vi.fn(async () => true),
+    });
+    const handler = createChatbotHandler(deps);
+    const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
+    await handler(configured, message());
+    const pendingId = (state.toolApprovals as Array<{ id: string }>)[0].id;
+    toolEnabled = false;
+    await handler(configured, message({ id: 'approval-message', userId: 'owner', text: `/approve ${pendingId}` }));
+    expect(remote).not.toHaveBeenCalled();
+    expect(state.toolApprovals).toEqual([expect.objectContaining({ id: pendingId, status: 'failed' })]);
   });
 
   it('merges a text-only message batch into one model user turn', async () => {
@@ -953,7 +1165,7 @@ describe('createChatbotHandler', () => {
 
   it('persists named role cards and injects the selected mode-specific card on subsequent model requests', async () => {
     let state: Record<string, unknown> = {};
-    const { deps, fetch } = dependencies({ claimApproval: vi.fn(async () => true), getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }) });
+    const { deps, fetch } = dependencies({ claimApproval: vi.fn(async () => true), findGroup: vi.fn(async () => ({ ...group, persona: 'DEFAULT PERSONA' })), getState: vi.fn(async () => structuredClone(state)), setState: vi.fn(async (_scope, next) => { state = structuredClone(next); }) });
     const handler = createChatbotHandler(deps);
     const configured = { ...account, pluginConfig: { bridge_owner_ids: 'owner' } };
     await handler(configured, message({ userId: 'owner', text: '/role add helper # 通用\n角色公共段\n# [reserved] 主动\n不应注入\n# [chat] 对话\n角色聊天段' }));
@@ -963,6 +1175,7 @@ describe('createChatbotHandler', () => {
     const system = JSON.parse(String(fetch.mock.calls[0][1]?.body)).messages[0].content;
     expect(system).toContain('角色公共段');
     expect(system).toContain('角色聊天段');
+    expect(system).not.toContain('DEFAULT PERSONA');
     expect(system).not.toContain('不应注入');
     expect(state.knowledge).toMatchObject({ activeRole: 'helper' });
   });

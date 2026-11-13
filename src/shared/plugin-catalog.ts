@@ -38,11 +38,21 @@ const boolean = (
 const group = (zh: string, en: string): LocalizedText => ({ zh, en });
 
 const agentGroup = group('模型调用', 'Model requests');
-const personaGroup = group('人设与提示词', 'Persona & prompts');
 const bridgeGroup = group('消息与访问', 'Messages & Access');
 const contextGroup = group('上下文与媒体', 'Context & Media');
 const searchGroup = group('联网搜索', 'Web search');
 const voiceGroup = group('AI 语音', 'AI speech');
+
+/** Built-in functions that can be exposed by an identity's tool grants. */
+export const BUILTIN_CHAT_TOOL_NAMES = [
+  'chat_status', 'chat_time', 'chat_current_datetime', 'chat_timezone_info', 'chat_history',
+  'chat_send', 'chat_wait', 'WebFetch', 'WebSearch', 'MemoryRead', 'MemorySearch',
+  'MemoryWrite', 'MemoryForget', 'ProjectMemorySearch', 'ProjectMemoryRead',
+  'ProjectMemoryWrite', 'ProjectMemoryForget', 'chat_save_meme', 'chat_list_memes',
+  'chat_send_meme', 'chat_delete_meme', 'chat_list_voices', 'chat_send_voice',
+  'chat_save_voice', 'chat_delete_voice', 'chat_send_media', 'chat_tts', 'chat_wake',
+  'chat_generate_image',
+] as const;
 
 const chatbotDefinition: PluginDefinition = {
   type: CHATBOT_PLUGIN_TYPE,
@@ -78,10 +88,6 @@ const chatbotDefinition: PluginDefinition = {
   ],
   accountFields: [],
   groupFields: [
-    text('agent_persona', ['人设', 'Persona'], [
-      '该会话的角色设定，例如身份、语气和表达习惯；会排在系统规则与角色卡之前。留空则不额外注入。',
-      'Role definition for this conversation, such as identity, tone and speaking style. It is injected before system rules and role cards. Empty means no extra persona.',
-    ], { group: personaGroup, default: '', multiline: true, placement: 'persona' }),
     boolean('agent_stream', ['流式模型响应', 'Streaming model response'], [
       '按流式协议读取模型文本、工具调用和用量。须由所选 AI API 支持；聊天平台仍按完整分段发送。',
       'Reads model text, tool calls and usage through streaming. Requires API support; the chat platform still receives complete message parts.',
@@ -112,7 +118,7 @@ const chatbotDefinition: PluginDefinition = {
     ], {
       group: bridgeGroup,
       default: 'chat',
-      scope: 'identity',
+      placement: 'basic',
       options: [
         { value: 'chat', label: { zh: 'chat / 正常回复', en: 'chat / normal' } },
         { value: 'reserved', label: { zh: 'reserved / 预留模式', en: 'reserved / simulated mode' } },
@@ -177,7 +183,7 @@ const chatbotDefinition: PluginDefinition = {
     boolean('memory_enabled', ['启用会话记忆', 'Enable conversation memory'], [
       '为当前群聊或私聊保存可选的长期记忆。不同会话之间不共享。',
       'Stores optional long-term memory for this conversation without sharing across conversations.',
-    ], { group: contextGroup, default: false, scope: 'identity' }),
+    ], { group: contextGroup, default: false, scope: 'memory' }),
     text('voice_model', ['语音合成模型', 'Speech model'], [
       '使用本会话供应商的语音合成接口；留空不开放 chat_tts。须配置对应供应商的语音能力与价格。',
       'Uses this conversation’s provider speech endpoint. Empty disables chat_tts; configure provider speech capability and pricing.',
@@ -300,9 +306,11 @@ export function effectiveGroupConfig(pluginConfig: JsonObject | undefined, group
 
 /** Policies referenced by a single conversation; missing entries mean "not selected". */
 export interface GroupPolicyLayers {
+  identity?: PolicyRecord;
   dialog?: PolicyRecord;
   voice?: PolicyRecord;
-  identity?: PolicyRecord;
+  memory?: PolicyRecord;
+  cost?: PolicyRecord;
 }
 
 /**
@@ -322,24 +330,17 @@ export function policyFields(policyType: PolicyType, type: string = CHATBOT_PLUG
   return scopedGroupFields(policyType, type);
 }
 
-/**
- * Effective conversation configuration.
- * Precedence: plugin defaults < selected capability policies < per-conversation settings.
- * Legacy records keep their stored per-conversation values only while no policy owns that scope.
- */
+/** Policy-owned fields are never overridden by stored conversation config. */
 export function effectivePolicyConfig(
-  pluginConfig: JsonObject | undefined,
+  _pluginConfig: JsonObject | undefined,
   policies: GroupPolicyLayers,
   groupConfig: JsonObject | undefined,
   type: string = CHATBOT_PLUGIN_TYPE,
 ): JsonObject {
   const fields = pluginDefinition(type)?.groupFields ?? [];
   const merged: JsonObject = {};
-  for (const field of fields) {
-    const value = pluginConfig?.[field.key];
-    if (value !== undefined) merged[field.key] = value;
-  }
-  for (const [scope, policy] of [['identity', policies.identity], ['dialog', policies.dialog], ['voice', policies.voice]] as const) {
+  // Plugin-wide search settings are merged by the handler; policy-owned settings never inherit hidden legacy plugin fields.
+  for (const [scope, policy] of [['identity', policies.identity], ['dialog', policies.dialog], ['voice', policies.voice], ['memory', policies.memory]] as const) {
     if (!policy?.config) continue;
     for (const field of fields) {
       if (field.scope !== scope) continue;
@@ -350,24 +351,14 @@ export function effectivePolicyConfig(
   for (const field of fields) {
     const value = groupConfig?.[field.key];
     if (value === undefined) continue;
-    const scope = field.scope ?? 'conversation';
-    if (scope === 'conversation' || !policies[scope]) merged[field.key] = value;
+    if (!field.scope) merged[field.key] = value;
   }
+  merged.memory_enabled = policies.memory?.config?.memory_enabled === true;
   return normalizeFieldValues(fields, merged);
 }
 
-function mergeIds(...lists: Array<string[] | undefined>): string[] {
-  const merged: string[] = [];
-  for (const list of lists) {
-    for (const id of list ?? []) {
-      const value = typeof id === 'string' ? id.trim() : '';
-      if (value && !merged.includes(value)) merged.push(value);
-    }
-  }
-  return merged;
-}
-
 export interface ResolvedGroupIdentity {
+  persona: string;
   providerId: string;
   model: string;
   systemPrompt: string;
@@ -377,29 +368,23 @@ export interface ResolvedGroupIdentity {
   ruleIds: string[];
 }
 
-/** Applies the identity policy with per-conversation overrides and additive extension ids. */
+/** Identity owns persona, tool authorization and base rules; a group may append local rules. */
 export function resolveGroupIdentity(
-  group: Pick<GroupRecord, 'providerId' | 'model' | 'systemPrompt' | 'reasoningEffort' | 'skillIds' | 'mcpIds' | 'ruleIds' | 'systemPromptMode'>,
+  group: Pick<GroupRecord, 'providerId' | 'model' | 'systemPrompt'>,
   identity?: PolicyRecord,
 ): ResolvedGroupIdentity {
-  const mode = group.systemPromptMode ?? 'inherit';
-  const localPrompt = typeof group.systemPrompt === 'string' ? group.systemPrompt : '';
-  const policyPrompt = typeof identity?.systemPrompt === 'string' ? identity.systemPrompt : '';
-  let systemPrompt = localPrompt;
-  if (identity) {
-    if (mode === 'append') systemPrompt = [policyPrompt, localPrompt].filter((value) => value.trim() !== '').join('\n\n');
-    else if (mode === 'override') systemPrompt = localPrompt;
-    else systemPrompt = localPrompt.trim() !== '' ? localPrompt : policyPrompt;
-  }
-  const localReasoning = group.reasoningEffort ?? 'default';
+  if (!identity?.enabled) throw new Error('identity_policy_unavailable');
+  const providerId = group.providerId && group.model ? group.providerId : identity.providerId ?? '';
+  const model = group.providerId && group.model ? group.model : identity.model ?? '';
   return {
-    providerId: group.providerId || identity?.providerId || '',
-    model: group.model || identity?.model || '',
-    systemPrompt,
-    reasoningEffort: localReasoning !== 'default' ? localReasoning : identity?.reasoningEffort ?? 'default',
-    skillIds: mergeIds(identity?.skillIds, group.skillIds),
-    mcpIds: mergeIds(identity?.mcpIds, group.mcpIds),
-    ruleIds: mergeIds(identity?.ruleIds, group.ruleIds),
+    persona: identity.persona ?? '',
+    providerId,
+    model,
+    systemPrompt: [identity.systemPrompt, group.systemPrompt].filter((part) => typeof part === 'string' && part.trim()).join('\n\n'),
+    reasoningEffort: identity.reasoningEffort ?? 'default',
+    skillIds: [...new Set(identity.skillIds ?? [])],
+    mcpIds: [...new Set(identity.mcpIds ?? [])],
+    ruleIds: [...new Set(identity.ruleIds ?? [])],
   };
 }
 

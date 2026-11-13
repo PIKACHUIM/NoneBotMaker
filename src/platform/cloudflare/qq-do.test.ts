@@ -242,12 +242,16 @@ describe('durable QQ webhook queue', () => {
     expect(storage.values.get('pendingMessages')).toMatchObject([{ message: { eventId: 'wake:unique' } }]);
   });
 
-  it('honors the group batch window override instead of the inherited plugin value', async () => {
+  it('uses the selected identity batch window instead of plugin or legacy group overrides', async () => {
     const bot = { ...account('window'), pluginConfig: { bridge_group_batch_seconds: 3 } };
     const storage = state();
-    const statement = { bind: vi.fn(), all: vi.fn(async () => ({ results: [{ value: JSON.stringify({ id: 'group', accountId: bot.account.id, externalId: 'same-openid', config: { bridge_group_batch_seconds: 0 } }) }] })) };
-    statement.bind.mockImplementation(() => statement);
-    const env = { ...bindings, DB: { prepare: () => statement } } as unknown as RuntimeBindings;
+    const values = new Map<string, string>([
+      ['nonebotmaker:records:groups:group', JSON.stringify({ id: 'group', accountId: bot.account.id, externalId: 'same-openid', identityPolicyId: 'identity-window', dialogPolicyId: 'dialog-window', config: { bridge_group_batch_seconds: 9 } })],
+      ['nonebotmaker:records:policies:identity-window', JSON.stringify({ id: 'identity-window', type: 'identity', enabled: true, config: { bridge_group_batch_seconds: 0 } })],
+      ['nonebotmaker:records:policies:dialog-window', JSON.stringify({ id: 'dialog-window', type: 'dialog', enabled: true, config: {} })],
+    ]);
+    const KV = { get: async (key: string) => values.get(key) ?? null, put: async (key: string, value: string) => { values.set(key, value); }, delete: async (key: string) => { values.delete(key); }, list: async ({ prefix = '' } = {}) => ({ keys: [...values.keys()].filter((key) => key.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };
+    const env = { ...bindings, KV } as RuntimeBindings;
     const object = new QQGatewayDurableObject(storage as unknown as ConstructorParameters<typeof QQGatewayDurableObject>[0], env, { resolveAccount: async () => bot, now: () => 1000 });
     await enqueue(object, bot, message(bot, 'window'));
     expect(storage.values.get('pendingMessages')).toMatchObject([{ dueAt: 1001 }]);
@@ -446,7 +450,9 @@ describe('Cloudflare QQ gateway Durable Object', () => {
     bot.account.id = 'account-console';
     bot.pluginConfig = { bridge_owner_ids: 'owner-openid' };
     const values = new Map<string, string>([
-      ['nonebotmaker:records:groups:group-record', JSON.stringify({ id: 'group-record', accountId: bot.account.id, externalId: 'group-a,group-b', conversationType: 'group', name: 'Group', enabled: true, providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', nonMentionReplyRate: 1, whitelistEnabled: false, whitelistUserIds: [], dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0, skillIds: [], mcpIds: [], ruleIds: [], config: { bridge_owner_ids: 'owner-openid' }, createdAt: '', updatedAt: '' })],
+      ['nonebotmaker:records:groups:group-record', JSON.stringify({ id: 'group-record', accountId: bot.account.id, externalId: 'group-a,group-b', conversationType: 'group', name: 'Group', enabled: true, identityPolicyId: 'console-identity', dialogPolicyId: 'console-dialog', providerId: '', model: '', systemPrompt: '', reasoningEffort: 'default', nonMentionReplyRate: 1, whitelistEnabled: false, whitelistUserIds: [], dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0, skillIds: [], mcpIds: [], ruleIds: [], config: { bridge_owner_ids: 'owner-openid' }, createdAt: '', updatedAt: '' })],
+      ['nonebotmaker:records:policies:console-identity', JSON.stringify({ id: 'console-identity', type: 'identity', enabled: true, config: {} })],
+      ['nonebotmaker:records:policies:console-dialog', JSON.stringify({ id: 'console-dialog', type: 'dialog', enabled: true, config: {} })],
       ['nonebotmaker:records:plugins:plugin-1', JSON.stringify({ id: 'plugin-1', type: 'elysia-best/plugin-chatbot', enabled: true, config: {}, createdAt: '', updatedAt: '' })],
     ]);
     const KV = { get: async (key: string) => values.get(key) ?? null, put: async (key: string, value: string) => { values.set(key, value); }, delete: async (key: string) => { values.delete(key); }, list: async ({ prefix = '' } = {}) => ({ keys: [...values.keys()].filter((key) => key.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };

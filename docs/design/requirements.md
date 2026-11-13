@@ -11,24 +11,26 @@ NoneBotMaker 为 QQ 官方机器人提供 Serverless 管理与聊天执行服务
 | ID | 需求 | 当前实现与验证线索 |
 | --- | --- | --- |
 | FR-01 | 管理员登录后管理应用配置 | 密码验证与签名 session；管理 API 要求有效 session。`src/server/routes/index.ts`、`src/server/auth.ts` 与对应测试。 |
-| FR-02 | 按插件、平台账号、群聊/私聊策略分层配置 | 插件字段声明驱动表单；账号持有平台凭据；策略设置外部 OpenID、AI 和权限。`src/shared/plugin-catalog.ts`、`src/server/routes/management.ts`。 |
+| FR-02 | 配置字段归属唯一且按层级复用 | 插件定义技术默认；账号持有 QQ 凭据；群管理绑定 OpenID，**身份与对话策略必选且始终可见**，语音/费用/记忆可选。群不能追加身份未授权工具；继承值只读展示，不能写回群记录。`src/shared/plugin-catalog.ts`、`src/server/routes/management.ts`。 |
 | FR-03 | 接收并验证 QQ Webhook 事件 | `/webhook/qq` 按 AppID 定位账号并验证签名，然后将规范化消息交给聊天处理链。`src/server/protocols/qq/webhook.ts`、`signature.ts`。 |
 | FR-04 | 使用兼容 AI API 生成回复并支持工具调用 | 聊天运行时支持多轮工具循环、流式/非流式响应、费用统计和出站消息。`src/server/plugins/chatbot/handler.ts`、`provider.ts`。 |
-| FR-05 | 控制工具、MCP、搜索、Skills/Rules 与记忆能力 | 工具按会话权限构建；MCP 管理 allowlist 与 owner 审批；会话/账号共享记忆区分作用域。`src/server/plugins/chatbot/tools.ts`、`knowledge.ts`、`approval.ts`。 |
+| FR-05 | 控制工具、MCP、Skills/Rules 与记忆能力 | 内置/自定义 HTTPS 工具在目录配置、身份授权，群只能禁用或设置审批；MCP 保留管理员 allowlist，危险调用默认 owner 审批；群记忆独立按账号、会话类型和真实 OpenID 存数据库，仅确认内容进入上下文。`src/server/plugins/chatbot/`、`src/server/storage/conversation-memory-repository.ts`。 |
 | FR-06 | 支持媒体、语音、唤醒与会话命令 | 具体能力受 QQ 权限、插件配置、provider/model 能力及平台存储支持约束。`handler.ts`、`media.ts`、`src/platform/cloudflare/qq-do.ts`。 |
 | FR-07 | 持久化设置、上下文、日志与计划数据 | Cloudflare D1/KV/DO、EdgeOne Blob/KV、ESA KV adapters；存储不可用时不承诺跨请求持久状态。`src/server/storage/`。 |
 | FR-08 | 面向多个 Serverless 平台复用服务逻辑 | Cloudflare Worker、EdgeOne、ESA 与本地 Node 入口均调用共享 `src/server/app.ts`。平台能力并不完全相同。 |
 | FR-09 | 对敏感管理操作实施鉴权和信任边界 | session/同源校验、凭据加密、QQ 签名检查、工具权限与审批；日志默认关闭。 |
 | FR-10 | 提供中英文管理台和项目文档 | 管理台使用 i18n；VitePress 项目文档提供简体中文与英文。 |
+| FR-11 | 初始化可复用默认配置且不覆盖已有配置 | 默认身份/对话/关闭状态的语音/记忆/费用、内置工具及原有文本/TTS与图像价格按需幂等补齐；已部署站点由受保护接口显式补种。`src/server/storage/d1-setup.ts`、`src/server/routes/setup.ts`。 |
+| FR-12 | 将生图及聊天费用归入同一会话预算 | 生图默认禁用；启用需供应商、模型、每张兜底价及身份授权；有分项 usage 按模态计价，仅总 token 按均价估算，缺用量按兜底价；日志汇总每次调用费用并标识估算。`src/server/plugins/chatbot/image-generation.ts`、`src/server/routes/logs.ts`。 |
 
 ## 关键场景验收
 
 1. 未认证请求访问管理 API 时返回未授权；认证后仅能在管理台暴露的配置域执行管理操作。
 2. QQ Webhook 只有通过签名验证、AppID 可定位账号且账号/策略满足条件时才进入聊天处理链。
 3. 管理员添加账号和有效会话策略后，该策略可在会话管理列表查看；历史 QQ 聊天不会自动被发现。
-4. AI 请求遵守模型、媒体能力、费用单价、预算和会话工具权限；没有登记单价时按默认价格计费，不把请求当作零费用，也不因缺价直接拒绝执行。
-5. 未明确受信任的 MCP 工具进入审批流程，审批结果持久化后再继续执行；无法安全原子认领时不开放待审批执行。
-6. 缺失持久化 binding 时，服务报告配置错误，不以进程内临时状态伪装为可靠持久化。
+4. 文本聊天无单价时按默认价计费；生图有模态 usage 则据实分项计价，仅有总 token 按平均单价估算，无用量按启用前必填的单张兜底价计费。费用汇入选定费用策略，日志明确标注估算。
+5. MCP 的危险调用默认进入 owner 审批；群管理员可在身份授权范围内设逐工具/全部审批/全部允许，并承受全部允许的审计与外部副作用风险；无法安全原子认领时不开放待审批执行。
+6. 会话记忆需要独立 D1 表；缺失持久化 binding 时明确报不可用，不能以 DO/KV 临时 JSON 假装支持可管理记忆。
 7. `LOG_RECORD` 默认为关闭；开启后日志按设定保留期处理，并通过平台定时任务或受保护接口清理。
 8. EdgeOne 和 ESA 不支持 WebSocket Gateway 模式，配置该模式时服务明确报告不支持。
 
@@ -38,7 +40,7 @@ NoneBotMaker 为 QQ 官方机器人提供 Serverless 管理与聊天执行服务
 - **隔离**：账号、会话、会话记忆与账号共享记忆保持各自作用域，跨作用域操作由服务端校验。
 - **可移植**：共享业务逻辑不得假设每个边缘平台都有相同的数据库事务、KV 一致性或 Durable Object 能力。
 - **可验证**：主要逻辑以 Vitest 单元/路由/平台测试和 TypeScript 类型检查覆盖；真实外部平台测试另行执行。
-- **成本透明**：费用基于已登记模型价格和实际 usage；KV/Blob 一致性与并发预算超额限制需在产品使用中明确。
+- **成本透明**：费用使用已登记模型价格和实际用量；图像仅返回总 token 时使用平均价估算，并标注低估风险。KV/Blob 无条件写入、并发预算检查与扣费非原子可能超额，需在管理台和文档披露。
 
 ## 明确不包含的兼容承诺
 

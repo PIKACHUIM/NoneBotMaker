@@ -2,10 +2,12 @@ import type { PolicyRecord, PolicyType, GroupRecord, JsonObject } from '../../..
 import { effectivePolicyConfig, resolveGroupIdentity, type GroupPolicyLayers } from '../../../shared/plugin-catalog';
 import type { RecordRepository } from '../../storage/repository';
 
-const POLICY_FIELDS: Array<[PolicyType, 'dialogPolicyId' | 'voicePolicyId' | 'identityPolicyId']> = [
+const POLICY_FIELDS: Array<[PolicyType, 'identityPolicyId' | 'dialogPolicyId' | 'voicePolicyId' | 'memoryPolicyId' | 'costPolicyId']> = [
+  ['identity', 'identityPolicyId'],
   ['dialog', 'dialogPolicyId'],
   ['voice', 'voicePolicyId'],
-  ['identity', 'identityPolicyId'],
+  ['memory', 'memoryPolicyId'],
+  ['cost', 'costPolicyId'],
 ];
 
 /** Policy ids as read from a stored conversation record. */
@@ -43,9 +45,24 @@ export function resolveGroupConfig(
 
 /** Rewrites a conversation record so the chatbot runtime reads resolved policy values directly. */
 export function applyGroupPolicies(group: GroupRecord, layers: GroupPolicyLayers, pluginConfig: JsonObject | undefined): GroupRecord {
+  if (!layers.identity?.enabled || !layers.dialog?.enabled) throw new Error('required_policy_unavailable');
+  if ((group.inputCostPerMillion ?? 0) > 0 || (group.outputCostPerMillion ?? 0) > 0) throw new Error('legacy_model_price_requires_migration');
+  if (!layers.cost && ((group.dailyCostLimit ?? 0) > 0 || (group.monthlyCostLimit ?? 0) > 0 || (group.totalCostLimit ?? 0) > 0))
+    throw new Error('legacy_budget_requires_cost_policy');
+  const cost = layers.cost?.config;
   return {
     ...group,
     ...resolveGroupIdentity(group, layers.identity),
+    toolIds: [...new Set(layers.identity.toolIds ?? [])],
+    memoryPolicy: layers.memory?.enabled ? {
+      memoryMode: ['manual', 'review', 'auto'].includes(String(layers.memory.config?.memoryMode))
+        ? layers.memory.config.memoryMode as 'manual' | 'review' | 'auto' : 'manual',
+      maxEntries: typeof layers.memory.config?.maxEntries === 'number' ? layers.memory.config.maxEntries : 100,
+      retentionDays: typeof layers.memory.config?.retentionDays === 'number' ? layers.memory.config.retentionDays : 7,
+    } : undefined,
+    dailyCostLimit: typeof cost?.dailyCostLimit === 'number' ? cost.dailyCostLimit : 0,
+    monthlyCostLimit: typeof cost?.monthlyCostLimit === 'number' ? cost.monthlyCostLimit : 0,
+    totalCostLimit: typeof cost?.totalCostLimit === 'number' ? cost.totalCostLimit : 0,
     config: resolveGroupConfig(group, layers, pluginConfig),
   };
 }

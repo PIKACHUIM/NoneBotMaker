@@ -10,6 +10,7 @@ interface MergedTurn {
   replies: string[];
   errors: string[];
   details: JsonObject;
+  charges: Array<{ cost: number; model?: string; usage?: unknown; pricingSource?: unknown; estimated?: boolean; priceId?: unknown; status?: string }>;
   status?: string;
 }
 
@@ -26,7 +27,7 @@ export function mergeConversationTurns(items: ConversationLog[]): ConversationLo
     const key = turnKey(row);
     let turn = turns.get(key);
     if (!turn) {
-      turn = { base: row, inputs: [], replies: [], errors: [], details: { ...(row.details ?? {}) } };
+      turn = { base: row, inputs: [], replies: [], errors: [], details: { ...(row.details ?? {}) }, charges: [] };
       turns.set(key, turn);
     } else {
       turn.details = { ...turn.details, ...(row.details ?? {}) };
@@ -34,6 +35,15 @@ export function mergeConversationTurns(items: ConversationLog[]): ConversationLo
     if (row.direction === 'in') {
       if (row.content) turn.inputs.push(row.content);
       continue;
+    }
+    const cost = row.details?.cost;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) {
+      turn.charges.push({ cost, ...(typeof row.details?.model === 'string' ? { model: row.details.model } : {}),
+        ...(row.details?.usage !== undefined ? { usage: row.details.usage } : {}),
+        ...(row.details?.pricingSource !== undefined ? { pricingSource: row.details.pricingSource } : {}),
+        ...(row.details?.estimated === true ? { estimated: true } : {}),
+        ...(row.details?.priceId !== undefined ? { priceId: row.details.priceId } : {}),
+        ...(row.status ? { status: row.status } : {}) });
     }
     if (row.content) turn.replies.push(row.content);
     if (row.status) turn.status = row.status;
@@ -49,6 +59,7 @@ export function mergeConversationTurns(items: ConversationLog[]): ConversationLo
       status: turn.errors.length ? 'error' : turn.replies.length ? 'sent' : turn.status ?? turn.base.status ?? 'received',
       details: {
         ...turn.details,
+        ...(turn.charges.length ? { cost: turn.charges.reduce((sum, charge) => sum + charge.cost, 0), charges: turn.charges } : {}),
         ...(turn.replies.length ? { reply: turn.replies.join('\n') } : {}),
         ...(turn.errors.length ? { error: turn.errors.join('\n') } : {}),
       },

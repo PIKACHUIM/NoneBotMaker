@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConversationLog, D1DatabaseLike, KVNamespaceLike, RuntimeBindings } from '../../shared/types';
 import { D1ConversationLogRepository } from '../storage/conversation-log-repository';
 import { createApiRouter } from './index';
+import { mergeConversationTurns } from './logs';
 
 function createKV(logs: ConversationLog[]): KVNamespaceLike {
   const values = new Map(logs.map((log) => [
@@ -21,6 +22,25 @@ function createKV(logs: ConversationLog[]): KVNamespaceLike {
     },
   };
 }
+
+describe('conversation cost aggregation', () => {
+  it('totals every model and image charge of a single event and preserves usage details', () => {
+    const base = { accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1', eventId: 'same-event', expiresAt: 9999999 };
+    const entries: ConversationLog[] = [
+      { ...base, id: 'incoming', direction: 'in', content: 'draw', createdAt: 1 },
+      { ...base, id: 'model', direction: 'out', content: '', status: 'model_completed', createdAt: 2, details: { cost: 0.2, model: 'chat-model', usage: { promptTokens: 12 }, pricingSource: 'price' } },
+      { ...base, id: 'image', direction: 'out', content: '', status: 'image_completed', createdAt: 3, details: { cost: 0.3, model: 'image-model', usage: { totalTokens: 120 }, pricingSource: 'total_estimate', estimated: true } },
+      { ...base, id: 'reply', direction: 'out', content: 'sent', status: 'sent', createdAt: 4 },
+    ];
+    const [turn] = mergeConversationTurns(entries);
+    expect(turn.details).toMatchObject({ cost: 0.5, charges: [
+      { cost: 0.2, model: 'chat-model', usage: { promptTokens: 12 }, pricingSource: 'price' },
+      { cost: 0.3, model: 'image-model', usage: { totalTokens: 120 }, pricingSource: 'total_estimate', estimated: true },
+    ] });
+    expect(turn.content).toBe('draw');
+    expect(turn.details?.reply).toBe('sent');
+  });
+});
 
 describe('conversation log filtering', () => {
   it('filters by Unix millisecond from/to values and excludes expired logs', async () => {

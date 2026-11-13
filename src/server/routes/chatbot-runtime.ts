@@ -4,7 +4,8 @@ import { configIdSet, configString, conversationIdList, matchesConversationId, p
 import type { QQGroupMessage } from '../protocols/qq/types';
 import { resolveQQAccountById } from '../protocols/qq/accounts';
 import { createRepository } from '../storage/repository';
-import { sanitizeLogDetails } from '../storage/conversation-log-repository';
+import { readBoolean } from '../env';
+import { createConversationLogRepository, sanitizeLogDetails } from '../storage/conversation-log-repository';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from '../plugins/chatbot/runtime';
 import { ToolApprovalManager } from '../plugins/chatbot/approval';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
@@ -270,6 +271,39 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     const externalId = requiredValue(context.req.query('externalId') ?? primaryConversationId(group.externalId), 'externalId');
     if (!matchesConversationId(group.externalId, externalId)) throw new ApiError(404, 'not_found');
     return context.json({ data: await control(context.env, accountId, group, { action: 'status', externalId }) });
+  });
+
+  api.get('/chatbot/conversations/:accountId/:groupId/stats', async (context) => {
+    const accountId = requiredValue(context.req.param('accountId'), 'accountId');
+    const groupId = requiredValue(context.req.param('groupId'), 'groupId');
+    const repository = createRepository(context.env);
+    const group = await repository.get('groups', groupId) as unknown as GroupRecord | null;
+    if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');
+    const externalId = requiredValue(context.req.query('externalId'), 'externalId');
+    if (!matchesConversationId(group.externalId, externalId)) throw new ApiError(404, 'not_found');
+    const summary = { enabled: readBoolean(context.env.LOG_RECORD), scanned: 0, truncated: false, messagesIn: 0,
+      repliesOut: 0, errors: 0, costUsd: 0, charges: 0 };
+    if (!summary.enabled) return context.json({ data: summary });
+    const logs = createConversationLogRepository(context.env);
+    let scanned = 0;
+    for (let offset = 0; offset < 1000; offset += 100) {
+      const batch = await logs.list({ accountId, groupId, limit: 100, offset });
+      scanned += batch.items.length;
+      for (const item of batch.items) {
+        if (item.groupExternalId !== externalId) continue;
+        if (item.direction === 'in' && item.status !== 'denied') summary.messagesIn += 1;
+        if (item.direction === 'out' && item.status === 'sent' && item.content) summary.repliesOut += 1;
+        if (item.status === 'error' || item.status === 'failed') summary.errors += 1;
+        if (item.direction === 'out' && typeof item.details?.cost === 'number' && Number.isFinite(item.details.cost) && item.details.cost >= 0) {
+          summary.costUsd += item.details.cost;
+          summary.charges += 1;
+        }
+      }
+      if (offset + batch.items.length >= 1000) summary.truncated = batch.total > scanned;
+      if (batch.items.length < 100) break;
+    }
+    summary.scanned = scanned;
+    return context.json({ data: summary });
   });
 
   api.get('/chatbot/conversations/:accountId/:groupId/approvals', async (context) => {

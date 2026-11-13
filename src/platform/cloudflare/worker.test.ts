@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RuntimeBindings } from '../../shared/types';
 
-const cleanup = vi.hoisted(() => ({ purgeExpiredLogs: vi.fn(async () => 3) }));
+const cleanup = vi.hoisted(() => ({ purgeExpiredLogs: vi.fn(async () => 3), purgeExpiredMemories: vi.fn(async () => 2) }));
 vi.mock('../../server/storage/log-retention', () => ({ purgeExpiredLogs: cleanup.purgeExpiredLogs }));
+vi.mock('../../server/storage/conversation-memory-repository', () => ({ createConversationMemoryRepository: () => ({ purgeExpired: cleanup.purgeExpiredMemories }) }));
 
 import worker from './worker';
 
@@ -35,7 +36,7 @@ describe('Cloudflare Worker routing', () => {
 });
 
 describe('Cloudflare scheduled cleanup', () => {
-  it('passes the scheduled timestamp to physical log cleanup', () => {
+  it('passes the scheduled timestamp to physical log and memory cleanup', () => {
     const scheduledTime = 1_800_000_000_000;
     const bindings = { DB: {} } as RuntimeBindings;
     const waitUntil = vi.fn((_promise: Promise<unknown>) => undefined);
@@ -46,6 +47,7 @@ describe('Cloudflare scheduled cleanup', () => {
       { ...bindings, PLATFORM: 'cloudflare' },
       scheduledTime,
     );
-    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(cleanup.purgeExpiredMemories).toHaveBeenCalledWith(scheduledTime);
+    expect(waitUntil).toHaveBeenCalledTimes(2);
   });
 });

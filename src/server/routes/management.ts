@@ -1,14 +1,14 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
-import type { BotAccountRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings } from '../../shared/types';
-import { missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationIdList } from '../../shared/plugin-catalog';
+import type { BotAccountRecord, GroupRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings } from '../../shared/types';
+import { BUILTIN_CHAT_TOOL_NAMES, missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationFields, conversationIdList } from '../../shared/plugin-catalog';
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
-import { loadPolicyLayers, resolveGroupConfig } from '../plugins/chatbot/policies';
+import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
 import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
-const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'memories', 'policies'];
+const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'tools', 'memories', 'policies'];
 const ACCOUNT_SCOPED_KINDS = new Set<RecordKind>(['memories']);
 const MAX_CONVERSATION_IDS = 100;
 
@@ -117,11 +117,7 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         name: stringField(data, 'name'),
         description: stringField(data, 'description', ''),
         enabled: booleanField(data, 'enabled', true),
-        config: {
-          ...config,
-          ...normalizeFieldValues(definition.configFields, config),
-          ...normalizeFieldValues(definition.groupFields.filter((field) => config[field.key] !== undefined), config),
-        },
+        config: normalizeFieldValues(definition.configFields, config),
       };
     }
     case 'accounts':
@@ -135,41 +131,33 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         config: objectField(data, 'config'),
       };
     case 'groups': {
-      const reasoningEffort = stringField(data, 'reasoningEffort', 'medium');
-      if (!['default', 'low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
       const conversationType = stringField(data, 'conversationType', 'group');
       if (!['group', 'private'].includes(conversationType)) throw new ApiError(400, 'invalid_conversationType');
-      const systemPromptMode = stringField(data, 'systemPromptMode', 'inherit');
-      if (!['inherit', 'append', 'override'].includes(systemPromptMode)) throw new ApiError(400, 'invalid_systemPromptMode');
       const externalIds = conversationIdList(stringField(data, 'externalId').trim());
-      if (externalIds.length > MAX_CONVERSATION_IDS) throw new ApiError(400, 'invalid_externalId');
+      if (!externalIds.length || externalIds.length > MAX_CONVERSATION_IDS) throw new ApiError(400, 'invalid_externalId');
+      const providerId = stringField(data, 'providerId', '');
+      const model = stringField(data, 'model', '');
+      if (Boolean(providerId) !== Boolean(model)) throw new ApiError(400, 'provider_model_override_must_be_paired');
+      const approvalMode = stringField(data, 'toolApprovalMode', 'per-tool');
+      if (!['per-tool', 'all-approve', 'all-allow'].includes(approvalMode)) throw new ApiError(400, 'invalid_toolApprovalMode');
+      const rules = objectField(data, 'toolApprovalRules');
+      if (Object.entries(rules).some(([name, rule]) => !/^[a-zA-Z0-9_.-]{1,64}$/.test(name) || !['disabled', 'approve', 'allow'].includes(String(rule)))) throw new ApiError(400, 'invalid_toolApprovalRules');
       return {
         ...common,
-        accountId: stringField(data, 'accountId'),
-        externalId: externalIds.join(','),
-        conversationType,
-        config: objectField(data, 'config'),
-        name: stringField(data, 'name'),
-        enabled: booleanField(data, 'enabled', true),
-        dialogPolicyId: stringField(data, 'dialogPolicyId', ''),
+        accountId: nonEmptyStringField(data, 'accountId'), externalId: externalIds.join(','), conversationType,
+        config: objectField(data, 'config'), name: stringField(data, 'name', ''), enabled: booleanField(data, 'enabled', true),
+        identityPolicyId: nonEmptyStringField(data, 'identityPolicyId'),
+        dialogPolicyId: nonEmptyStringField(data, 'dialogPolicyId'),
         voicePolicyId: stringField(data, 'voicePolicyId', ''),
-        identityPolicyId: stringField(data, 'identityPolicyId', ''),
-        systemPromptMode,
-        providerId: stringField(data, 'providerId', ''),
-        model: stringField(data, 'model', ''),
+        memoryPolicyId: stringField(data, 'memoryPolicyId', ''),
+        costPolicyId: stringField(data, 'costPolicyId', ''),
+        providerId, model,
         systemPrompt: stringField(data, 'systemPrompt', ''),
-        reasoningEffort,
         nonMentionReplyRate: numberField(data, 'nonMentionReplyRate', DEFAULT_NON_MENTION_REPLY_RATE, 0, 1),
         whitelistEnabled: booleanField(data, 'whitelistEnabled', false),
         whitelistUserIds: stringArrayField(data, 'whitelistUserIds'),
-        ...(data.inputCostPerMillion === undefined ? {} : { inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0) }),
-        ...(data.outputCostPerMillion === undefined ? {} : { outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0) }),
-        dailyCostLimit: numberField(data, 'dailyCostLimit', 0, 0),
-        monthlyCostLimit: numberField(data, 'monthlyCostLimit', 0, 0),
-        totalCostLimit: numberField(data, 'totalCostLimit', 0, 0),
-        skillIds: stringArrayField(data, 'skillIds'),
-        mcpIds: stringArrayField(data, 'mcpIds'),
-        ruleIds: stringArrayField(data, 'ruleIds'),
+        toolApprovalMode: approvalMode,
+        toolApprovalRules: rules,
       };
     }
     case 'providers': {
@@ -205,6 +193,8 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0),
         outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
         ...(data.cacheInputCostPerMillion === undefined || data.cacheInputCostPerMillion === null ? {} : { cacheInputCostPerMillion: numberField(data, 'cacheInputCostPerMillion', 0, 0) }),
+        ...Object.fromEntries(['imageTextInputCostPerMillion', 'imageInputCostPerMillion', 'imageCachedInputCostPerMillion', 'imageOutputCostPerMillion']
+          .filter((key) => data[key] !== undefined && data[key] !== null).map((key) => [key, numberField(data, key, 0, 0)])),
         ...(data.sourceUrl === undefined ? {} : { sourceUrl: httpUrl(stringField(data, 'sourceUrl'), 'sourceUrl') }),
       };
     }
@@ -224,22 +214,31 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
     }
     case 'policies': {
       const type = stringField(data, 'type', 'dialog');
-      if (!['dialog', 'voice', 'identity'].includes(type)) throw new ApiError(400, 'invalid_type');
+      if (!['dialog', 'voice', 'identity', 'memory', 'cost'].includes(type)) throw new ApiError(400, 'invalid_type');
       const policyType = type as PolicyType;
       const config = objectField(data, 'config');
+      const policyConfig = policyType === 'cost' ? {
+        dailyCostLimit: numberField(config, 'dailyCostLimit', 0, 0),
+        monthlyCostLimit: numberField(config, 'monthlyCostLimit', 0, 0),
+        totalCostLimit: numberField(config, 'totalCostLimit', 0, 0),
+      } : policyType === 'memory' ? {
+        memoryMode: stringField(config, 'memoryMode', 'manual'),
+        maxEntries: numberField(config, 'maxEntries', 100, 1, 1000),
+        retentionDays: numberField(config, 'retentionDays', 7, 1, 365),
+        memory_enabled: booleanField(config, 'memory_enabled', true),
+      } : normalizeFieldValues(policyFields(policyType), config);
+      if (policyType === 'memory' && !['manual', 'review', 'auto'].includes(policyConfig.memoryMode as string)) throw new ApiError(400, 'invalid_memoryMode');
       const base = {
-        ...common,
-        type: policyType,
-        name: stringField(data, 'name'),
-        description: stringField(data, 'description', ''),
-        enabled: booleanField(data, 'enabled', true),
-        config: { ...config, ...normalizeFieldValues(policyFields(policyType), config) },
+        ...common, type: policyType, name: nonEmptyStringField(data, 'name'),
+        description: stringField(data, 'description', ''), enabled: booleanField(data, 'enabled', true),
+        config: policyConfig,
       };
       if (policyType !== 'identity') return base;
       const reasoningEffort = stringField(data, 'reasoningEffort', 'default');
       if (!['default', 'low', 'medium', 'high'].includes(reasoningEffort)) throw new ApiError(400, 'invalid_reasoningEffort');
       return {
         ...base,
+        persona: stringField(data, 'persona', ''),
         providerId: stringField(data, 'providerId', ''),
         model: stringField(data, 'model', ''),
         systemPrompt: stringField(data, 'systemPrompt', ''),
@@ -247,6 +246,37 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         skillIds: stringArrayField(data, 'skillIds'),
         mcpIds: stringArrayField(data, 'mcpIds'),
         ruleIds: stringArrayField(data, 'ruleIds'),
+        toolIds: stringArrayField(data, 'toolIds'),
+      };
+    }
+    case 'tools': {
+      const config = objectField(data, 'config');
+      const toolKind = stringField(config, 'kind', 'https');
+      if (!['builtin', 'https'].includes(toolKind)) throw new ApiError(400, 'invalid_tool_kind');
+      if (toolKind === 'builtin' && !(BUILTIN_CHAT_TOOL_NAMES as readonly string[]).includes(stringField(config, 'name'))) throw new ApiError(400, 'invalid_builtin_tool');
+      if (toolKind === 'https') {
+        const url = httpUrl(nonEmptyStringField(config, 'url'), 'tool_url');
+        if (!url.startsWith('https://')) throw new ApiError(400, 'invalid_tool_url');
+      }
+      const method = stringField(config, 'method', 'POST');
+      if (!['GET', 'POST'].includes(method) || method === 'GET' && booleanField(config, 'readOnly', false) !== true ||
+        method === 'POST' && booleanField(config, 'readOnly', false) === true) throw new ApiError(400, 'invalid_tool_method');
+      const enabled = booleanField(data, 'enabled', false);
+      if (toolKind === 'builtin' && config.name === 'chat_generate_image' && enabled &&
+        (!stringField(config, 'providerId', '') || !stringField(config, 'model', '') || numberField(config, 'fallbackCostPerImage', 0, 0) <= 0)) throw new ApiError(400, 'image_tool_requires_provider_model_and_fallback_price');
+      return {
+        ...common, name: nonEmptyStringField(data, 'name'),
+        description: stringField(data, 'description', ''), enabled,
+        config: {
+          kind: toolKind, name: stringField(config, 'name', ''),
+          ...(toolKind === 'https' ? { url: httpUrl(nonEmptyStringField(config, 'url'), 'tool_url') } : {}),
+          method, readOnly: booleanField(config, 'readOnly', false),
+          ...(config.authToken === undefined ? {} : { authToken: stringField(config, 'authToken') }),
+          parameterSchema: objectField(config, 'parameterSchema'),
+          providerId: stringField(config, 'providerId', ''), model: stringField(config, 'model', ''),
+          fallbackCostPerImage: numberField(config, 'fallbackCostPerImage', 0, 0),
+          size: stringField(config, 'size', '1024x1024'), quality: stringField(config, 'quality', 'low'),
+        },
       };
     }
     case 'skills':
@@ -350,11 +380,9 @@ async function normalizeGroupConfig(repository: RecordRepository, record: Stored
   const plugin = account ? await repository.get('plugins', account.pluginId as string) : null;
   const definition = pluginDefinition(typeof plugin?.type === 'string' ? plugin.type : undefined);
   const config = await readableConfig(record.config as JsonObject, bindings);
-  const pluginConfig = await readableConfig(plugin?.config as JsonObject | undefined, bindings);
-  record.config = definition ? {
-    ...config,
-    ...normalizeFieldValues(definition.groupFields, { ...pluginConfig, ...config }),
-  } : config;
+  const ownFields = conversationFields(definition?.type);
+  const presentFields = ownFields.filter((field) => Object.hasOwn(config, field.key));
+  record.config = normalizeFieldValues(presentFields, config);
   const ids = new Set(conversationIdList(record.externalId));
   const duplicate = (await repository.list('groups')).some((group) => group.id !== record.id &&
     group.accountId === record.accountId &&
@@ -374,10 +402,12 @@ function assertAccountScope(record: StoredRecord, accountId: string | undefined)
   if (accountId !== undefined && record.accountId !== accountId) throw new ApiError(404, 'not_found');
 }
 
-const GROUP_POLICY_FIELDS: Array<['dialogPolicyId' | 'voicePolicyId' | 'identityPolicyId', PolicyType]> = [
+const GROUP_POLICY_FIELDS: Array<['identityPolicyId' | 'dialogPolicyId' | 'voicePolicyId' | 'memoryPolicyId' | 'costPolicyId', PolicyType]> = [
+  ['identityPolicyId', 'identity'],
   ['dialogPolicyId', 'dialog'],
   ['voicePolicyId', 'voice'],
-  ['identityPolicyId', 'identity'],
+  ['memoryPolicyId', 'memory'],
+  ['costPolicyId', 'cost'],
 ];
 
 async function assertReferences(repository: RecordRepository, kind: RecordKind, record: StoredRecord): Promise<void> {
@@ -391,19 +421,23 @@ async function assertReferences(repository: RecordRepository, kind: RecordKind, 
   } else if (kind === 'groups') {
     await requireRecord('accounts', record.accountId as string);
     if (record.providerId) await requireRecord('providers', record.providerId as string);
-    for (const id of record.skillIds as string[]) await requireRecord('skills', id);
-    for (const id of record.mcpIds as string[]) await requireRecord('mcps', id);
-    for (const id of record.ruleIds as string[]) await requireRecord('rules', id);
     for (const [field, expected] of GROUP_POLICY_FIELDS) {
       if (!record[field]) continue;
       const policy = await repository.get('policies', record[field] as string);
-      if (!policy || policy.type !== expected) throw new ApiError(400, `invalid_${field}`);
+      if (!policy || policy.type !== expected || policy.enabled !== true) throw new ApiError(400, `invalid_${field}`);
     }
+  } else if (kind === 'tools') {
+    const config = record.config as JsonObject | undefined;
+    if (config?.providerId) await requireRecord('providers', config.providerId as string);
   } else if (kind === 'policies' && record.type === 'identity') {
     if (record.providerId) await requireRecord('providers', record.providerId as string);
     for (const id of record.skillIds as string[] ?? []) await requireRecord('skills', id);
     for (const id of record.mcpIds as string[] ?? []) await requireRecord('mcps', id);
     for (const id of record.ruleIds as string[] ?? []) await requireRecord('rules', id);
+    for (const id of record.toolIds as string[] ?? []) {
+      if ((BUILTIN_CHAT_TOOL_NAMES as readonly string[]).includes(id)) continue;
+      await requireRecord('tools', id);
+    }
   }
 }
 
@@ -417,6 +451,7 @@ async function assertNotReferenced(repository: RecordRepository, kind: RecordKin
   if (kind === 'skills') checks.push(['groups', 'skillIds', id], ['policies', 'skillIds', id]);
   if (kind === 'mcps') checks.push(['groups', 'mcpIds', id], ['policies', 'mcpIds', id]);
   if (kind === 'rules') checks.push(['groups', 'ruleIds', id], ['policies', 'ruleIds', id]);
+  if (kind === 'tools') checks.push(['policies', 'toolIds', id]);
   if (kind === 'policies') checks.push(...GROUP_POLICY_FIELDS.map(([field]) => ['groups', field, id] as [RecordKind, string, string]));
   for (const [relatedKind, field, target] of checks) {
     const records = await repository.list(relatedKind);
@@ -446,20 +481,31 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
     const account = await repository.get('accounts', record.accountId as string);
     const plugin = account ? await repository.get('plugins', account.pluginId as string) : null;
     const config = await readableConfig(record.config as JsonObject | undefined, bindings);
-    const pluginConfig = await readableConfig(plugin?.config as JsonObject | undefined, bindings);
+    const ownConfig = Object.fromEntries(conversationFields(typeof plugin?.type === 'string' ? plugin.type : undefined)
+      .filter((field) => Object.hasOwn(config, field.key)).map((field) => [field.key, config[field.key]]));
+    const { skillIds: _skills, mcpIds: _mcps, ruleIds: _rules, reasoningEffort: _effort,
+      systemPromptMode: _promptMode, dailyCostLimit: _daily, monthlyCostLimit: _monthly,
+      totalCostLimit: _total, inputCostPerMillion: _inputPrice, outputCostPerMillion: _outputPrice,
+      ...storedGroup } = record;
     const policies = await loadPolicyLayers(repository, record);
+    const migrationRequired: string[] = [];
+    if (Number(record.inputCostPerMillion ?? 0) > 0 || Number(record.outputCostPerMillion ?? 0) > 0) migrationRequired.push('legacy_model_price');
+    if (!policies.cost && [record.dailyCostLimit, record.monthlyCostLimit, record.totalCostLimit].some((value) => Number(value ?? 0) > 0)) migrationRequired.push('legacy_budget');
+    const raw = { ...storedGroup, config: ownConfig } as unknown as GroupRecord;
+    const resolved = !migrationRequired.length && policies.identity && policies.dialog
+      ? applyGroupPolicies(raw, policies, await readableConfig(plugin?.config as JsonObject | undefined, bindings)) : null;
     record = {
-      ...groupCostDefaults(record),
-      conversationType: record.conversationType ?? 'group',
-      systemPromptMode: record.systemPromptMode ?? 'inherit',
-      dialogPolicyId: record.dialogPolicyId ?? '',
-      voicePolicyId: record.voicePolicyId ?? '',
-      identityPolicyId: record.identityPolicyId ?? '',
-      config: { ...config, ...resolveGroupConfig({ config }, policies, pluginConfig) },
+      ...storedGroup, config: ownConfig, conversationType: record.conversationType ?? 'group',
+      identityPolicyId: record.identityPolicyId ?? '', dialogPolicyId: record.dialogPolicyId ?? '',
+      voicePolicyId: record.voicePolicyId ?? '', memoryPolicyId: record.memoryPolicyId ?? '', costPolicyId: record.costPolicyId ?? '',
+      ...(migrationRequired.length ? { migrationRequired } : {}),
+      ...(resolved ? { effective: { providerId: resolved.providerId, model: resolved.model, persona: resolved.persona ?? '',
+        systemPrompt: resolved.systemPrompt, config: resolved.config, dailyCostLimit: resolved.dailyCostLimit,
+        monthlyCostLimit: resolved.monthlyCostLimit, totalCostLimit: resolved.totalCostLimit } } : {}),
     };
   } else if (kind === 'policies') {
     const config = record.config as JsonObject | undefined;
-    const type = ['dialog', 'voice', 'identity'].includes(record.type as string) ? record.type as PolicyType : 'dialog';
+    const type = ['dialog', 'voice', 'identity', 'memory', 'cost'].includes(record.type as string) ? record.type as PolicyType : 'dialog';
     record = {
       ...record,
       enabled: record.enabled !== false,
@@ -468,15 +514,20 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
       ...(type === 'identity' ? {
         providerId: typeof record.providerId === 'string' ? record.providerId : '',
         model: typeof record.model === 'string' ? record.model : '',
+        persona: typeof record.persona === 'string' ? record.persona : '',
         systemPrompt: typeof record.systemPrompt === 'string' ? record.systemPrompt : '',
         reasoningEffort: typeof record.reasoningEffort === 'string' ? record.reasoningEffort : 'default',
         skillIds: Array.isArray(record.skillIds) ? record.skillIds : [],
         mcpIds: Array.isArray(record.mcpIds) ? record.mcpIds : [],
         ruleIds: Array.isArray(record.ruleIds) ? record.ruleIds : [],
+        toolIds: Array.isArray(record.toolIds) ? record.toolIds : [],
       } : {}),
     };
   } else if (kind === 'plugins') {
-    record = { ...record, config: await readableConfig(record.config as JsonObject | undefined, bindings) };
+    const config = await readableConfig(record.config as JsonObject | undefined, bindings);
+    const definition = pluginDefinition(typeof record.type === 'string' ? record.type : undefined);
+    record = { ...record, config: Object.fromEntries((definition?.configFields ?? [])
+      .filter((field) => Object.hasOwn(config, field.key)).map((field) => [field.key, config[field.key]])) };
   } else if (kind === 'providers') {
     record = { ...record, priceMultiplier: record.priceMultiplier ?? 1, mediaCapabilities: record.mediaCapabilities ?? ['image'] };
   } else if (kind === 'prices') {
@@ -485,19 +536,6 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
     record = { ...record, config: normalizedMcpConfig(objectField(await redactSecrets(record), 'config')) };
   }
   return redacted(record, kind, bindings);
-}
-
-function groupCostDefaults(record: StoredRecord): StoredRecord {
-  const limit = (key: string) => {
-    const value = record[key];
-    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-  };
-  return {
-    ...record,
-    dailyCostLimit: limit('dailyCostLimit'),
-    monthlyCostLimit: limit('monthlyCostLimit'),
-    totalCostLimit: limit('totalCostLimit'),
-  };
 }
 
 function setCostConsistencyHeader(context: Context<{ Bindings: RuntimeBindings }>, kind: RecordKind): void {
@@ -571,6 +609,12 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     const now = new Date().toISOString();
     const visiblePrevious = await visibleRecord(repository, kind, previous, context.env);
     const merged = { ...visiblePrevious, ...data, id } as JsonObject;
+    if (kind === 'groups') {
+      if (Number(previous.inputCostPerMillion ?? 0) > 0 || Number(previous.outputCostPerMillion ?? 0) > 0)
+        throw new ApiError(409, 'legacy_model_price_requires_migration');
+      if ([previous.dailyCostLimit, previous.monthlyCostLimit, previous.totalCostLimit].some((value) => Number(value ?? 0) > 0) && !merged.costPolicyId)
+        throw new ApiError(409, 'legacy_budget_requires_cost_policy');
+    }
     if (data.config !== undefined) merged.config = { ...objectField(visiblePrevious, 'config'), ...objectField(data, 'config') };
     if (kind === 'mcps') {
       const config = objectField(merged, 'config');

@@ -1,6 +1,7 @@
 import { app } from '../../server/app';
 import type { RuntimeBindings } from '../../shared/types';
 import { purgeExpiredLogs } from '../../server/storage/log-retention';
+import { createConversationMemoryRepository } from '../../server/storage/conversation-memory-repository';
 import { ensureQQGatewaySessions } from './qq-do';
 export { QQGatewayDurableObject } from './qq-do';
 
@@ -30,5 +31,6 @@ export default {
   scheduled(controller: ScheduledControllerLike, env: RuntimeBindings, context: ExecutionContextLike): void {
     const bindings = { ...env, PLATFORM: 'cloudflare' };
     context.waitUntil(purgeExpiredLogs(bindings, controller.scheduledTime));
+    if (bindings.DB) context.waitUntil(createConversationMemoryRepository(bindings).purgeExpired(controller.scheduledTime));
   },
 };

@@ -16,6 +16,8 @@ const group = (overrides: Partial<GroupRecord> = {}): GroupRecord => ({
   externalId: 'external-group-1',
   name: 'Test group',
   enabled: true,
+  identityPolicyId: 'test-identity',
+  dialogPolicyId: 'test-dialog',
   providerId: 'provider-1',
   model: 'test-model',
   systemPrompt: '',
@@ -23,8 +25,8 @@ const group = (overrides: Partial<GroupRecord> = {}): GroupRecord => ({
   nonMentionReplyRate: 0.05,
   whitelistEnabled: false,
   whitelistUserIds: [],
-  inputCostPerMillion: 1,
-  outputCostPerMillion: 1,
+  inputCostPerMillion: 0,
+  outputCostPerMillion: 0,
   dailyCostLimit: 0,
   monthlyCostLimit: 0,
   totalCostLimit: 0,
@@ -44,6 +46,14 @@ function memoryKV() {
     delete: vi.fn(async (key: string) => { values.delete(key); }),
   };
   return { kv, values };
+}
+
+async function seedPolicies(records: ReturnType<typeof createRepository>, overrides: { dialog?: Record<string, unknown>; voice?: Record<string, unknown>; toolIds?: string[] } = {}) {
+  const common = { name: 'Test policy', description: '', enabled: true, createdAt: '', updatedAt: '' };
+  await records.put('policies', { ...common, id: 'test-identity', type: 'identity', providerId: 'provider-1', model: 'test-model',
+    systemPrompt: '', persona: '', skillIds: [], mcpIds: [], ruleIds: [], toolIds: overrides.toolIds ?? [], config: {} });
+  await records.put('policies', { ...common, id: 'test-dialog', type: 'dialog', config: overrides.dialog ?? {} });
+  if (overrides.voice) await records.put('policies', { ...common, id: 'test-voice', type: 'voice', config: overrides.voice });
 }
 
 function d1Adapter(database: DatabaseSync): D1DatabaseLike {
@@ -234,12 +244,13 @@ describe('persistent chatbot cost accounting', () => {
     await expect(recreated.getState!(key)).resolves.toMatchObject({ memory: 'durable' });
   });
 
-  it('decrypts legacy encrypted group numeric config before provider request normalization', async () => {
+  it('ignores legacy encrypted group output limits when a dialog policy owns the field', async () => {
     const { kv, values } = memoryKV();
     kv.list = vi.fn(async (options) => ({ keys: [...values.keys()].filter((key) => key.startsWith(options?.prefix ?? '')).map((name) => ({ name })), list_complete: true }));
     const bindings: RuntimeBindings = { KV: kv, SYS_SECRET: 'test-sys-secret' };
     const records = createRepository(bindings);
     const legacy = await encryptSecrets({ token: 123 }, undefined, bindings);
+    await seedPolicies(records, { dialog: { agent_max_output_tokens: 2048 } });
     await records.put('groups', { ...group(), config: { agent_max_output_tokens: legacy.token } });
     await records.put('providers', await encryptSecrets({ id: 'provider-1', name: 'provider', baseUrl: 'https://provider.example/v1', apiKey: 'provider-key', enabled: true, models: ['test-model'], createdAt: '', updatedAt: '' }, undefined, bindings));
     const requests: any[] = [];
@@ -251,7 +262,7 @@ describe('persistent chatbot cost accounting', () => {
     const handler = createStoredChatbotHandler(bindings, { ...createPersistentChatbotStores(bindings), sendReply: vi.fn(async () => undefined), fetch: fetchImpl });
     const account = { appId: 'app', appSecret: 'app-secret', pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
     await handler(account, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'message', accountId: 'account-1', botId: 'app', groupId: 'external-group-1', userId: 'user', text: 'hello', mentionsBot: true, receivedAt: Date.now() });
-    expect(requests[0].max_completion_tokens).toBe(123);
+    expect(requests[0].max_completion_tokens).toBe(2048);
   });
 
   it('runs StoredHandler through real speech generation and QQ media upload/send with character billing', async () => {
@@ -259,7 +270,8 @@ describe('persistent chatbot cost accounting', () => {
     kv.list = vi.fn(async (options) => ({ keys: [...values.keys()].filter((key) => key.startsWith(options?.prefix ?? '')).map((name) => ({ name })), list_complete: true }));
     const bindings: RuntimeBindings = { KV: kv, SYS_SECRET: 'test-sys-secret' };
     const records = createRepository(bindings);
-    await records.put('groups', { ...group(), config: { voice_model: 'tts-1' } });
+    await seedPolicies(records, { voice: { voice_model: 'tts-1' }, toolIds: ['chat_tts'] });
+    await records.put('groups', { ...group({ voicePolicyId: 'test-voice' }), config: { voice_model: 'legacy-voice-must-not-override' } });
     await records.put('providers', await encryptSecrets({ id: 'provider-1', name: 'provider', baseUrl: 'https://provider.example/v1', apiKey: 'speech-provider-key', enabled: true, models: ['test-model'], mediaCapabilities: ['speech'], priceMultiplier: 2, createdAt: '', updatedAt: '' }, undefined, bindings));
     for (const [model, unit, inputPrice] of [['test-model', 'tokens', 1], ['tts-1', 'characters', 15]] as const) await records.put('prices', { id: unit, name: model, model, unit, enabled: true, currency: 'USD', inputCostPerMillion: inputPrice, outputCostPerMillion: 0, createdAt: '', updatedAt: '' });
     const requests: Array<{ url: string; body: any }> = [];

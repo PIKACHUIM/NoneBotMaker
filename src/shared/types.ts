@@ -2,12 +2,14 @@ export const CHATBOT_PLUGIN_TYPE = 'elysia-best/plugin-chatbot' as const;
 export const DEFAULT_NON_MENTION_REPLY_RATE = 0.05;
 export const LOG_RETENTION_DAYS = 30;
 
-export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'memories' | 'policies';
+export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'tools' | 'memories' | 'policies';
 export type JsonObject = Record<string, unknown>;
 
 /** Reusable capability policies that conversations can reference instead of duplicating fields. */
-export type PolicyType = 'dialog' | 'voice' | 'identity';
+export type PolicyType = 'dialog' | 'voice' | 'identity' | 'memory' | 'cost';
 export type PolicyScope = PolicyType | 'conversation';
+export type ToolApprovalMode = 'per-tool' | 'all-approve' | 'all-allow';
+export type ToolApprovalRule = 'disabled' | 'approve' | 'allow';
 export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high';
 export type SystemPromptMode = 'inherit' | 'append' | 'override';
 
@@ -90,10 +92,23 @@ export interface GroupRecord {
   config?: JsonObject;
   name: string;
   enabled: boolean;
-  /** Capability policies referenced by this conversation; empty means "not selected". */
+  /** Required reusable identity and dialog policies; other policies are optional. */
   dialogPolicyId?: string;
   voicePolicyId?: string;
   identityPolicyId?: string;
+  memoryPolicyId?: string;
+  costPolicyId?: string;
+  /** An approval rule cannot authorize tools absent from the identity policy. */
+  toolApprovalMode?: ToolApprovalMode;
+  toolApprovalRules?: Record<string, ToolApprovalRule>;
+  /** Resolved at runtime from the identity policy, never stored in a conversation. */
+  persona?: string;
+  /** Resolved memory behavior; only confirmed entries are supplied to the model. */
+  memoryPolicy?: { memoryMode: 'manual' | 'review' | 'auto'; maxEntries: number; retentionDays: number };
+  /** Legacy values need an explicit migration instead of silently changing spend controls. */
+  migrationRequired?: Array<'legacy_model_price' | 'legacy_budget'>;
+  /** Read-only effective values; the raw record remains limited to its own fields. */
+  effective?: { providerId: string; model: string; persona: string; systemPrompt: string; config: JsonObject; dailyCostLimit: number; monthlyCostLimit: number; totalCostLimit: number };
   /** How the conversation prompt combines with the identity policy prompt. */
   systemPromptMode?: SystemPromptMode;
   /** Empty means "inherit from the identity policy". */
@@ -115,6 +130,8 @@ export interface GroupRecord {
   skillIds: string[];
   mcpIds: string[];
   ruleIds: string[];
+  /** Runtime-resolved tool authorization from the identity policy. */
+  toolIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -125,7 +142,8 @@ export interface PolicyRecord {
   name: string;
   description: string;
   enabled: boolean;
-  /** Identity policies only: default provider and model for attached conversations. */
+  /** Identity policies only: one default persona and the provider/model for attached conversations. */
+  persona?: string;
   providerId?: string;
   model?: string;
   systemPrompt?: string;
@@ -133,6 +151,7 @@ export interface PolicyRecord {
   skillIds?: string[];
   mcpIds?: string[];
   ruleIds?: string[];
+  toolIds?: string[];
   config: JsonObject;
   createdAt: string;
   updatedAt: string;
@@ -158,6 +177,11 @@ export interface ModelPriceRecord {
   inputCostPerMillion: number;
   outputCostPerMillion: number;
   cacheInputCostPerMillion?: number;
+  /** Image generation may price text/image input and image output separately. */
+  imageTextInputCostPerMillion?: number;
+  imageInputCostPerMillion?: number;
+  imageCachedInputCostPerMillion?: number;
+  imageOutputCostPerMillion?: number;
   currency: 'USD';
   unit?: 'tokens' | 'characters';
   sourceUrl?: string;

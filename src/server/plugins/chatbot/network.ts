@@ -84,11 +84,12 @@ export async function boundedText(response: Response, limit = MAX_RESPONSE_BYTES
   return new TextDecoder().decode(await boundedBytes(response, limit));
 }
 
-export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl: typeof fetch = fetch): Promise<Response> {
+export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl: typeof fetch = fetch, timeoutMs = 20_000): Promise<Response> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw new Error('Invalid request timeout.');
   const url = publicHttpsUrl(value);
   await verifyPublicDns(url, fetchImpl);
   // Workers边缘不支持redirect:'error'，只支持follow/manual；3xx手动判定为失败。
-  const response = await fetchImpl(url.toString(), { ...init, redirect: 'manual', signal: AbortSignal.timeout(20_000) });
+  const response = await fetchImpl(url.toString(), { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
   if (response.redirected || response.status >= 300 && response.status < 400) throw new Error('Redirects are not allowed.');
   if (!response.ok) {
     let detail = '';

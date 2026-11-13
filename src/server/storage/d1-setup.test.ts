@@ -39,7 +39,7 @@ describe('online D1 initialization', () => {
       const before = await inspectD1Setup(db);
       expect(before.databaseConfigured).toBe(true);
       expect(before.schemaReady).toBe(false);
-      expect(before.pendingMigrations).toBe(4);
+      expect(before.pendingMigrations).toBe(5);
 
       const initialized = await initializeD1Setup(db);
       expect(initialized.schemaReady).toBe(true);
@@ -50,18 +50,25 @@ describe('online D1 initialization', () => {
       expect(tables.map((row) => row.name)).toEqual(expect.arrayContaining([
         'chatbot_group_context',
         'chatbot_group_costs',
+        'chatbot_conversation_memories',
         'conversation_logs',
         'd1_migrations',
         'records',
       ]));
       const columns = database.prepare('PRAGMA table_info(conversation_logs)').all() as Array<{ name: string }>;
       expect(columns.map((row) => row.name)).toContain('group_external_id');
+      const memoryColumns = database.prepare('PRAGMA table_info(chatbot_conversation_memories)').all() as Array<{ name: string }>;
+      expect(memoryColumns.map((row) => row.name)).toEqual([
+        'id', 'account_id', 'group_id', 'conversation_type', 'group_external_id',
+        'name', 'title', 'description', 'type', 'content', 'status', 'created_at', 'updated_at', 'expires_at',
+      ]);
       const migrations = database.prepare('SELECT name FROM d1_migrations ORDER BY name').all() as Array<{ name: string }>;
       expect(migrations.map((row) => row.name)).toEqual([
         '0001_initial.sql',
         '0002_conversation_group_external_id.sql',
         '0003_chatbot_runtime_state.sql',
         '0004_plugin_conversation_logs.sql',
+        '0005_conversation_memories.sql',
       ]);
 
       const repeated = await initializeD1Setup(db);

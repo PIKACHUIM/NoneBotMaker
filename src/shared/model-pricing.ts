@@ -1,6 +1,7 @@
 import type { ModelPriceRecord } from './types';
 
 export const MODEL_PRICE_CHECKED_AT = '2026-11-12';
+export const IMAGE_MODEL_PRICE_CHECKED_AT = '2026-11-13';
 
 /** Used for budget accounting when a model has no enabled price record. */
 export const DEFAULT_MODEL_PRICE = {
@@ -163,6 +164,26 @@ export const MODEL_PRICE_PRESETS: ModelPriceRecord[] = [
     enabled: true,
     createdAt: MODEL_PRICE_CHECKED_AT,
     updatedAt: MODEL_PRICE_CHECKED_AT,
+  })),
+  // Standard pricing per million tokens, separated by modality. gpt-image-2.5 is
+  // an alias priced as Flare by explicit operator decision, not a separately listed official model.
+  ...(['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5'] as const).map((model) => ({
+    id: `openai-${model}`,
+    name: `OpenAI ${model}`,
+    model,
+    inputCostPerMillion: 5,
+    outputCostPerMillion: 30,
+    cacheInputCostPerMillion: 1.25,
+    imageTextInputCostPerMillion: 5,
+    imageInputCostPerMillion: 8,
+    imageCachedInputCostPerMillion: 2,
+    imageOutputCostPerMillion: 30,
+    currency: 'USD' as const,
+    unit: 'tokens' as const,
+    sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+    enabled: true,
+    createdAt: IMAGE_MODEL_PRICE_CHECKED_AT,
+    updatedAt: IMAGE_MODEL_PRICE_CHECKED_AT,
   })),
 ];
 
