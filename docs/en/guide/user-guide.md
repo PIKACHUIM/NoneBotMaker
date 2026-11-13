@@ -2,6 +2,19 @@
 
 This guide takes a new installation through its first test message. “Conversation Management” and “Conversation Policies” serve different purposes: the former operates on runtime state for saved policies; the latter defines the provider, model, prompt, allowlist, and budget for a conversation.
 
+## Recommended setup order
+
+The admin sidebar follows this order. Work through it once to send the first message:
+
+1. **Integrations → AI Providers**: enter the compatible API URL, key, and models.
+2. **Integrations → Prices**: import presets or register your actual rates; budgets use these prices.
+3. **Integrations → Identity**: create an identity policy with a model, system prompt, and tools.
+4. **Plugins / Platform Accounts**: confirm the chatbot plugin, then enter the QQ AppID and AppSecret.
+5. **Group Policies**: select the account, enter the group openid, and choose the identity policy; leave everything else empty to inherit.
+6. **Conversation Management / Logs**: mention the bot in the group and check connection state and errors.
+
+A group policy only links an account and conversation IDs to an identity policy. Models, system prompts, Skills/MCP/Rules, and similar shared settings live in the identity policy, so you do not repeat them for every group. The **05 / Advanced** section can stay untouched.
+
 ## Before you start
 
 1. Deploy and initialize persistent storage; set `SYS_PASSWD` and `SYS_SECRET`.
@@ -15,34 +28,39 @@ This guide takes a new installation through its first test message. “Conversat
 
 Open the admin entry point at your deployed domain and sign in with `SYS_PASSWD`. Management APIs require an authenticated admin session. Initialize the database first if this is a fresh deployment.
 
-### 2. Create the plugin
+### 2. Configure an AI provider and prices
 
-In **Plugins**, add the Group Chatbot plugin (`elysia-best/plugin-chatbot`). Fields are rendered from declared types. Secret fields are not echoed as ordinary text. Do not paste credentials into non-secret fields.
-
-### 3. Configure an AI provider and prices
-
-In **AI Providers**, enter a provider name, compatible API URL, API key, and model information. Then use **API Capabilities / Model Pricing** to record input/output rates and billing units. Pricing participates in budget checks; text models without a registered price are billed at the default $3 input / $15 output per million tokens instead of being rejected. The pricing page offers public price presets for common models; import them and adjust against your actual bill.
+In **Integrations → AI Providers**, enter a provider name, compatible API URL, API key, and model information. Then use **Prices** to import common presets or register input/output rates and billing units from your actual bill. Pricing participates in budget checks; text models without a registered price are billed at the default $3 input / $15 output per million tokens instead of being rejected.
 
 Declare media capabilities for the actual provider and model. Attachments unsupported by the selected model are not reported as read. The provider still controls external requests and billing.
 
-### 4. Add a QQ account
+### 3. Create an identity policy
+
+In **Integrations → Identity**, create a policy with the provider, model, system prompt, and optional Skills, MCP servers, and Rules. An identity policy is the shared default for group policies: a group policy references it instead of repeating the model and tools. Without an identity policy, a group policy can still override the model and prompt, but the configuration is harder to reuse across groups.
+
+### 4. Confirm the plugin
+
+In **Plugins**, confirm that the Group Chatbot plugin (`elysia-best/plugin-chatbot`) is registered and enabled. Fields are rendered from declared types. Secret fields are not echoed as ordinary text. Do not paste credentials into non-secret fields.
+
+### 5. Add a QQ account
 
 In **Platform Accounts**, create a QQ account, select the chatbot plugin, and enter the QQ AppID and AppSecret. The server encrypts secrets using `SYS_SECRET`; consider existing encrypted data before rotating this secret.
 
-### 5. Add a group or private-chat policy
+### 6. Add a group or private-chat policy
 
-In **Conversation Policies**, select the account, enter the external conversation ID/OpenID and conversation type, and configure:
+In **Group Policies**, select the account, enter the external conversation ID/OpenID and conversation type, then follow the form order:
 
-- AI provider, model, and optional reasoning effort;
-- system prompt, tools, MCP servers, Skills/Rules;
-- owner/admin/user allowlists or the relevant access policy;
-- context budget, summary ratio, message batching/chunking, rate limits, and spending limits.
+- **01 / Basics**: account, conversation IDs, owner IDs, name, and enabled state;
+- **02 / AI and prompts**: choose the identity policy; add a persona or conversation prompt only when this conversation needs a different role; empty overrides inherit the identity policy;
+- **03 / Spending limits**: daily, monthly, and total limits; 0 means unlimited;
+- **04 / Extensions**: append Skills, MCP servers, and Rules on top of the identity policy;
+- **05 / Advanced**: expand only for dialogue/voice policies, the user allowlist, reserved modes, or a custom time zone.
 
-Each conversation can also define a **Persona** in the Persona & prompts extension settings of its policy. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
+Each conversation can also define a **Persona** under **02 / AI and prompts**. The persona describes identity, tone, and speaking style and is injected before the identity policy/system rules; role cards, conversation memory, Skills/Rules, and mode instructions are appended by the runtime. Keep authorization rules out of the persona, and never put secrets or private data in prompts.
 
 Create policies only for conversations you are authorized to manage. Group OpenIDs and user OpenIDs have different scopes; do not interchange them.
 
-### 6. Verify message delivery
+### 7. Verify message delivery
 
 Point the QQ callback at `/webhook/qq`; ensure proxies preserve signature headers and the original JSON body. Send a message from an allowlisted test account in the configured conversation. Use `/help` to inspect available commands and `/openid` to verify the current user and group IDs. Never send credentials or private data to public groups.
 

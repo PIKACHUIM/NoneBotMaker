@@ -110,13 +110,13 @@ type LogFilters = { q?: string; pluginId?: string; openid?: string; accountId?: 
 
 const libraryNames: Record<LibraryKind, string> = { skills: '技能', mcps: 'MCP', rules: '规则' };
 const pageTitles: Record<AdminPage, { title: string; eyebrow: string; description: string }> = {
-  overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '查看 Bot 实例、群聊与扩展能力的当前配置。' },
-  plugins: { title: '插件管理', eyebrow: 'RUNTIME / 02', description: '管理已注册的 TypeScript 插件及其运行状态。' },
-  accounts: { title: '平台账号', eyebrow: 'INSTANCES / 03', description: '为同一插件配置多个平台实例与鉴权参数。' },
-  groups: { title: '群聊策略', eyebrow: 'POLICIES / 04', description: '选择接口能力策略，并按会话覆盖模型、提示词与扩展能力。' },
-  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 05', description: '设置模式、静默、提示和工具；模型与群聊策略在「群聊策略」中配置。' },
-  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 05', description: '配置 AI 供应商与单价，以及身份、对话、语音、记忆策略和技能、MCP、规则。' },
-  logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 06', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
+  overview: { title: '运行总览', eyebrow: 'CONTROL ROOM / 01', description: '按 01 → 05 检查配置：AI、账号、群聊策略与运行状态。' },
+  integrations: { title: '接口能力', eyebrow: 'CONNECTORS / 02', description: '先配置 AI 供应商、模型单价与身份策略，再供群聊策略引用。' },
+  plugins: { title: '插件管理', eyebrow: 'RUNTIME / 03', description: '管理已注册的 TypeScript 插件及其运行状态。' },
+  accounts: { title: '平台账号', eyebrow: 'INSTANCES / 04', description: '为同一插件配置多个平台实例与鉴权参数。' },
+  groups: { title: '群聊策略', eyebrow: 'POLICIES / 05', description: '选择账号与群 ID，引用身份策略，并按会话覆盖模型、提示词与限额。' },
+  conversations: { title: '会话管理', eyebrow: 'CHAT BRIDGE / 06', description: '设置模式、静默、提示和工具；模型与群聊策略在「群聊策略」中配置。' },
+  logs: { title: '对话日志', eyebrow: 'OBSERVABILITY / 07', description: '筛选近期对话记录。日志受服务端 LOG_RECORD 配置控制。' },
 };
 
 function currentRoute(): Route {
@@ -440,11 +440,11 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
       try {
         switch (page) {
           case 'overview': {
-            const [pluginData, accountData, groupData, providerData] = await Promise.all([
-              api.listPlugins(), api.listAccounts(), api.listGroups(), api.listProviders(),
+            const [pluginData, accountData, groupData, providerData, policyData] = await Promise.all([
+              api.listPlugins(), api.listAccounts(), api.listGroups(), api.listProviders(), api.listPolicies(),
             ]);
             if (!active) return;
-            setPlugins(pluginData); setAccounts(accountData); setGroups(groupData); setProviders(providerData);
+            setPlugins(pluginData); setAccounts(accountData); setGroups(groupData); setProviders(providerData); setPolicies(policyData);
             break;
           }
           case 'plugins': setPlugins(await api.listPlugins()); break;
@@ -512,11 +512,11 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
 
   const navItems = [
     { key: 'overview', icon: <BookOutlined />, label: tr('运行总览') },
+    { key: 'integrations', icon: <ApiOutlined />, label: tr('接口能力') },
     { key: 'plugins', icon: <CodeOutlined />, label: tr('插件管理') },
     { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
     { key: 'groups', icon: <TeamOutlined />, label: tr('群聊策略') },
     { key: 'conversations', icon: <MessageOutlined />, label: tr('会话管理') },
-    { key: 'integrations', icon: <ApiOutlined />, label: tr('接口能力') },
     { key: 'logs', icon: <MessageOutlined />, label: tr('对话日志') },
   ];
   const title = pageTitles[page];
@@ -571,7 +571,7 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
             <div className="page-error"><Alert type="error" showIcon message={tr('无法读取此页面数据')} description={loadError} action={<Button size="small" icon={<ReloadOutlined />} onClick={refresh}>{tr('重试')}</Button>} /></div>
           ) : (
             <>
-              {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} onNavigate={setPage} />}
+              {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} policies={policies} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} />}
               {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} libraries={libraries} policies={policies} onRefresh={refresh} onError={handleError} />}
@@ -587,18 +587,25 @@ function AdminConsole({ page, onLogout }: { page: AdminPage; onLogout: () => voi
   );
 }
 
-function OverviewPage({ plugins, accounts, groups, providers, onNavigate }: {
-  plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; providers: ProviderRecord[]; onNavigate: (page: string) => void;
+function OverviewPage({ plugins, accounts, groups, providers, policies, onNavigate }: {
+  plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; onNavigate: (page: string) => void;
 }) {
   const { tr } = useI18n();
   const activeAccounts = accounts.filter((item) => item.enabled).length;
   const activeGroups = groups.filter((item) => item.enabled).length;
   const activePlugins = plugins.filter((item) => item.enabled).length;
+  const steps = [
+    { index: '01', title: tr('配置 AI 供应商'), detail: tr('填写兼容 API 地址、密钥和模型；常用单价可一键导入。'), done: providers.some((item) => item.enabled), page: 'integrations' },
+    { index: '02', title: tr('创建身份策略'), detail: tr('选择模型、写系统提示词，勾选 Skills/MCP/Rules。'), done: policies.some((item) => item.type === 'identity' && item.enabled), page: 'integrations' },
+    { index: '03', title: tr('添加平台账号'), detail: tr('把机器人 AppID 与密钥绑定到插件。'), done: accounts.length > 0, page: 'accounts' },
+    { index: '04', title: tr('绑定群聊策略'), detail: tr('填写群 openid，选择身份策略和限额。'), done: groups.length > 0, page: 'groups' },
+    { index: '05', title: tr('验证会话与日志'), detail: tr('在群里 @ 机器人，检查连接状态和对话日志。'), done: false, page: 'conversations' },
+  ];
   return (
     <div className="overview-page">
       <section className="overview-banner">
-        <div><span className="banner-label"><span className="online-dot" /> CONFIGURATION PLANE / ONLINE</span><h2>{tr('一眼掌握运行边界。')}</h2><p>{tr('数据直接读取当前管理 API；新增和修改配置后将以服务端结果为准。')}</p></div>
-        <div className="banner-code"><span>ENVIRONMENT</span><strong>EDGE / SERVERLESS</strong><span>CONTROL MODEL</span><strong>PLUGIN → ACCOUNT → GROUP</strong></div>
+        <div><span className="banner-label"><span className="online-dot" /> CONFIGURATION PLANE / ONLINE</span><h2>{tr('按顺序配置，跑通第一条消息。')}</h2><p>{tr('先接 AI，再建账号与群聊策略；群聊只引用策略，不重复填写模型。')}</p></div>
+        <div className="banner-code"><span>ENVIRONMENT</span><strong>EDGE / SERVERLESS</strong><span>CONFIG ORDER</span><strong>AI → PLUGIN → ACCOUNT → GROUP</strong></div>
       </section>
       <div className="metric-grid">
         <MetricTile index="01" label={tr('启用插件')} value={activePlugins} total={plugins.length} icon={<CodeOutlined />} onClick={() => onNavigate('plugins')} />
@@ -606,15 +613,25 @@ function OverviewPage({ plugins, accounts, groups, providers, onNavigate }: {
         <MetricTile index="03" label={tr('启用群聊')} value={activeGroups} total={groups.length} icon={<TeamOutlined />} onClick={() => onNavigate('groups')} />
         <MetricTile index="04" label={tr('AI供应商')} value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('integrations')} />
       </div>
+      <Card className="section-card setup-guide" title={<SectionTitle index="00" title={tr('从零配置')} subtitle="SETUP ORDER" />}>
+        <div className="setup-steps">{steps.map((step) => <button type="button" key={step.index} className={`setup-step${step.done ? ' is-done' : ''}`} onClick={() => onNavigate(step.page)}>
+          <span className="setup-step-index">{step.done ? <CheckCircleOutlined /> : step.index}</span>
+          <strong>{step.title}</strong>
+          <small>{step.detail}</small>
+          <em>{step.done ? tr('已完成') : step.page === 'conversations' ? tr('去检查') : tr('去配置')} <ArrowRightOutlined /></em>
+        </button>)}</div>
+      </Card>
       <div className="overview-columns">
-        <Card className="section-card overview-flow" title={<SectionTitle index="A" title={tr('配置拓扑')} subtitle="CONFIGURATION GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>{tr('管理群聊')} <ArrowRightOutlined /></Button>}>
-          <div className="flow-row"><span className="flow-icon"><CodeOutlined /></span><div><strong>{tr('插件')}</strong><small>{tr('逻辑与接入协议')}</small></div><b>{plugins.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><RobotOutlined /></span><div><strong>{tr('账号')}</strong><small>{tr('平台机器人实例')}</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>{tr('群聊')}</strong><small>{tr('按群独立策略')}</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
+        <Card className="section-card overview-flow" title={<SectionTitle index="A" title={tr('运行拓扑')} subtitle="RUNTIME GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>{tr('管理群聊')} <ArrowRightOutlined /></Button>}>
+          <div className="flow-row"><span className="flow-icon"><CodeOutlined /></span><div><strong>{tr('插件')}</strong><small>{tr('逻辑与接入协议')}</small></div><b>{plugins.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><RobotOutlined /></span><div><strong>{tr('账号')}</strong><small>{tr('平台机器人实例')}</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>{tr('群聊')}</strong><small>{tr('引用策略并按群运行')}</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
           <div className="flow-caption"><span>PLUGIN</span><i /><span>MULTI-ACCOUNT</span><i /><span>GROUP POLICY</span></div>
         </Card>
-        <Card className="section-card overview-quick" title={<SectionTitle index="B" title={tr('快捷操作')} subtitle="CONTROL SHORTCUTS" />}>
-          <button className="quick-row" onClick={() => onNavigate('plugins')}><span><CodeOutlined /></span><div><strong>{tr('检查插件运行状态')}</strong><small>{tr('查看已注册插件与启停配置')}</small></div><ArrowRightOutlined /></button>
-          <button className="quick-row" onClick={() => onNavigate('accounts')}><span><PlusOutlined /></span><div><strong>{tr('添加机器人实例')}</strong><small>{tr('创建账号并关联现有插件')}</small></div><ArrowRightOutlined /></button>
-          <button className="quick-row" onClick={() => onNavigate('integrations')}><span><SettingOutlined /></span><div><strong>{tr('配置模型与工具')}</strong><small>{tr('供应商、Skills、MCP、Rules')}</small></div><ArrowRightOutlined /></button>
+        <Card className="section-card overview-quick config-rules-card" title={<SectionTitle index="B" title={tr('配置原则')} subtitle="CONFIG RULES" />}>
+          <div className="config-rules">
+            <div className="config-rule"><span>01</span><div><strong>{tr('策略复用')}</strong><small>{tr('模型、提示词和工具放在身份策略里，群聊只做选择与覆盖。')}</small></div></div>
+            <div className="config-rule"><span>02</span><div><strong>{tr('留空继承')}</strong><small>{tr('群聊里的覆盖项留空时，自动使用身份策略或插件默认值。')}</small></div></div>
+            <div className="config-rule"><span>03</span><div><strong>{tr('保存生效')}</strong><small>{tr('保存后下一条消息使用新配置，历史记录不会被重写。')}</small></div></div>
+          </div>
         </Card>
       </div>
       <div className="overview-bottom"><span><CheckCircleOutlined /> SERVICE DATA</span><strong>{tr('配置来源为管理 REST API，不提供演示数据回退。')}</strong><span>LOG RETENTION / 30 DAYS</span></div>
@@ -1132,6 +1149,10 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
   const definition = pluginDefinition(selectedPlugin?.type);
   // 私聊白名单只对私聊有意义；群聊的可达范围就是上面的群 ID 列表。
   const visibleConversationFields = conversationFields(definition?.type).filter((field) => field.key !== 'bridge_allowed_private' || conversationType === 'private');
+  const basicConfigFields = visibleConversationFields.filter((field) => field.placement === 'basic');
+  const personaConfigFields = visibleConversationFields.filter((field) => field.placement === 'persona');
+  const advancedConfigFields = visibleConversationFields.filter((field) => field.placement === 'advanced');
+  const otherConfigFields = visibleConversationFields.filter((field) => !field.placement);
   const identityPolicyId = (Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.identityPolicyId;
   const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
   const effectiveProviderId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId || identityPolicy?.providerId || '';
@@ -1139,11 +1160,15 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
   const promptMode = (Form.useWatch('systemPromptMode', { form, preserve: true }) as GroupRecord['systemPromptMode'] | undefined) ?? editing?.systemPromptMode ?? 'inherit';
   const dialogPolicyId = (Form.useWatch('dialogPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.dialogPolicyId;
   const voicePolicyId = (Form.useWatch('voicePolicyId', { form, preserve: true }) as string | undefined) ?? editing?.voicePolicyId;
-  const policySummary = [
-    `${tr('身份')} ${policyName(policies, 'identity', identityPolicyId) || tr('未选择')}`,
-    `${tr('对话')} ${policyName(policies, 'dialog', dialogPolicyId) || tr('未选择')}`,
-    `${tr('语音')} ${policyName(policies, 'voice', voicePolicyId) || tr('未选择')}`,
-  ].join(' · ');
+  const whitelistEnabled = Boolean(Form.useWatch('whitelistEnabled', { form, preserve: true }) ?? editing?.whitelistEnabled);
+  const watchedConfig = Form.useWatch('config', { form, preserve: true }) as JsonObject | undefined;
+  const identityPolicies = policies.filter((item) => item.type === 'identity' && item.enabled);
+  const advancedSummary = [
+    dialogPolicyId ? `${tr('对话')} ${policyName(policies, 'dialog', dialogPolicyId)}` : '',
+    voicePolicyId ? `${tr('语音')} ${policyName(policies, 'voice', voicePolicyId)}` : '',
+    whitelistEnabled ? tr('白名单已启用') : '',
+    watchedConfig?.bridge_reserved_prompt || watchedConfig?.bridge_reserved2_prompt ? tr('预留模式提示') : '',
+  ].filter(Boolean).join(' · ') || tr('未启用额外设置');
   useEffect(() => {
     if (!drawer.open) return;
     const currentPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === editing?.accountId)?.pluginId);
@@ -1220,7 +1245,8 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
     {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有群聊策略')} description={tr('新增群聊并为其绑定 AI 模型、回复策略和工具。')} onCreate={() => drawer.edit()} action={tr('新增群聊策略')} />}
     <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? tr('编辑群聊策略') : tr('新增群聊策略')} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
-        <div className="form-section-heading"><span>BASICS</span><small>REQUIRED</small></div>
+        <p className="form-note form-intro-note">{tr('按 01 → 05 填写。只有“基本信息”里的账号和会话 ID 必填，其余留空会继承默认值。')}</p>
+        <div className="form-section-heading"><span>01 / {tr('基本信息')}</span><small>{tr('必填')}</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select disabled={Boolean(editing)} placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: `${item.name} · ${plugins.find((plugin) => plugin.id === item.pluginId)?.name ?? item.pluginId}`, value: item.id }))} onChange={(accountId: string) => {
             const nextPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === accountId)?.pluginId);
@@ -1244,25 +1270,17 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
             </div>}
           </Form.List>
         </Form.Item>
+        {selectedAccountId && basicConfigFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}
         <div className="form-grid two-cols">
           <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
           <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         </div>
         {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
-        {selectedAccountId && (visibleConversationFields.length ? <>
-          <div className="form-section-heading"><span>CONVERSATION CONFIG</span><small>{visibleConversationFields.length} FIELDS</small></div>
-          <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} />
-        </> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
-        <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
-        <Collapse className="policy-overrides" size="small" items={[{ key: 'policies', label: tr('选择要继承的能力策略'), extra: <span className="policy-overrides-summary">{policySummary}</span>, children: <>
-          <div className="form-grid three-cols">
-            <Form.Item name="identityPolicyId" label={tr('身份策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
-            <Form.Item name="dialogPolicyId" label={tr('对话策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
-            <Form.Item name="voicePolicyId" label={tr('语音策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
-          </div>
-          <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
-        </> }]} />
-        <div className="form-section-heading"><span>MODEL & PROMPT</span><small>OPTIONAL OVERRIDES</small></div>
+        <div className="form-section-heading"><span>02 / {tr('AI 与提示词')}</span><small>{tr('核心')}</small></div>
+        {identityPolicies.length === 0 && <Alert type="warning" showIcon message={tr('还没有可用的身份策略')} description={tr('先创建一条身份策略，或在下方直接覆盖模型和提示词。')} action={<Button size="small" href="#/admin/integrations">{tr('去创建')}</Button>} />}
+        <Form.Item name="identityPolicyId" label={tr('身份策略')} extra={<span>{tr('决定模型、系统提示词、工具和上下文默认值。先在“接口能力 → 身份”创建。')} <Button type="link" href="#/admin/integrations">{tr('打开接口能力')}</Button></span>}><Select allowClear placeholder={tr('使用插件默认值')} options={policyOptions('identity')} /></Form.Item>
+        {selectedAccountId && personaConfigFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}
+        {selectedAccountId && otherConfigFields.length > 0 && <SchemaFields fields={otherConfigFields} path="config" editing={Boolean(editing)} />}
         <div className="form-grid three-cols">
           <Form.Item name="providerId" label={tr('AI供应商覆盖')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
           <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
@@ -1273,24 +1291,34 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')} extra={tr('0–1；默认值 0.05，0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} /></Form.Item>
         </div>
         <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
-        <Alert type="info" showIcon message={tr('提示词组装顺序')} description={tr('人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“人设与提示词”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。')} />
-        <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
+        <p className="form-note">{tr('提示词拼装顺序：人设 → 身份策略/本会话规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。')}</p>
+        <div className="form-section-heading"><span>03 / {tr('费用限额')}</span><small>USD / 0 = {tr('不限')}</small></div>
         <div className="form-grid three-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
           <Form.Item name="monthlyCostLimit" label={tr('每月限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
           <Form.Item name="totalCostLimit" label={tr('总限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
         </div>
         <div className="form-note">{tr('限额使用 USD 计价；数值 0 表示不设限。任一预算到达限额后，运行时将根据策略停止额外模型请求。')}</div>
-        <div className="form-section-heading"><span>ACCESS CONTROL</span><small>OPTIONAL WHITELIST</small></div>
-        <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
-        <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('使用空格或逗号分隔。白名单关闭时此列表不会生效。')}><Input.TextArea rows={3} placeholder="user-id-1, user-id-2" /></Form.Item>
-        <div className="form-section-heading"><span>EXTENSIONS</span><small>ADDED ON TOP OF THE IDENTITY POLICY</small></div>
+        <div className="form-section-heading"><span>04 / {tr('能力扩展')}</span><small>{tr('可选')}</small></div>
         <div className="form-grid three-cols">
           <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
           <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
           <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
         </div>
         <div className="form-note">{tr('所选 Skills / MCP / Rules 会追加在身份策略之上，运行时按顺序合并。')}</div>
+        <div className="form-section-heading"><span>05 / {tr('高级设置')}</span><small>{tr('按需展开')}</small></div>
+        <Collapse className="policy-overrides advanced-settings" size="small" items={[{ key: 'advanced', label: tr('对话策略、语音策略、白名单与预留模式'), extra: <span className="policy-overrides-summary">{advancedSummary}</span>, children: <>
+          <div className="form-grid two-cols">
+            <Form.Item name="dialogPolicyId" label={tr('对话策略')}><Select allowClear placeholder={tr('使用插件默认值')} options={policyOptions('dialog')} /></Form.Item>
+            <Form.Item name="voicePolicyId" label={tr('语音策略')}><Select allowClear placeholder={tr('使用插件默认值')} options={policyOptions('voice')} /></Form.Item>
+          </div>
+          <p className="form-note">{tr('对话策略控制流式响应、工具轮数与输出上限；语音策略控制合成模型与音色。未选择时使用插件默认值。')}</p>
+          <div className="form-grid two-cols">
+            <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+            <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('使用空格或逗号分隔。白名单关闭时此列表不会生效。')}><Input.TextArea rows={2} placeholder="user-id-1, user-id-2" /></Form.Item>
+          </div>
+          {selectedAccountId && advancedConfigFields.length > 0 && <SchemaFields fields={advancedConfigFields} path="config" editing={Boolean(editing)} />}
+        </> }]} />
       </Form>
     </Drawer>
   </section>;

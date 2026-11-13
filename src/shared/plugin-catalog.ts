@@ -81,7 +81,7 @@ const chatbotDefinition: PluginDefinition = {
     text('agent_persona', ['人设', 'Persona'], [
       '该会话的角色设定，例如身份、语气和表达习惯；会排在系统规则与角色卡之前。留空则不额外注入。',
       'Role definition for this conversation, such as identity, tone and speaking style. It is injected before system rules and role cards. Empty means no extra persona.',
-    ], { group: personaGroup, default: '', multiline: true }),
+    ], { group: personaGroup, default: '', multiline: true, placement: 'persona' }),
     boolean('agent_stream', ['流式模型响应', 'Streaming model response'], [
       '按流式协议读取模型文本、工具调用和用量。须由所选 AI API 支持；聊天平台仍按完整分段发送。',
       'Reads model text, tool calls and usage through streaming. Requires API support; the chat platform still receives complete message parts.',
@@ -99,13 +99,13 @@ const chatbotDefinition: PluginDefinition = {
       'Controls randomness from 0 to 2; support depends on the selected model.',
     ], { group: agentGroup, default: 0.7, min: 0, max: 2, step: 0.1, scope: 'dialog' }),
     text('bridge_owner_ids', ['管理员 ID', 'Owner IDs'], [
-      '对应 BRIDGE_OWNER_IDS，逗号分隔。管理员即使不在白名单中也会被允许。',
-      'Maps to BRIDGE_OWNER_IDS, comma-separated. Owners bypass the allowlist.',
-    ], { group: bridgeGroup, default: '', multiline: false }),
+      '管理员即使不在白名单中也会被允许；多个 ID 用逗号分隔。',
+      'Owners are allowed even when not on the allowlist; separate multiple IDs with commas.',
+    ], { group: bridgeGroup, default: '', multiline: false, placement: 'basic' }),
     text('bridge_allowed_private', ['允许的私聊', 'Allowed private chats'], [
       '仅对私聊生效：允许的用户 openid，逗号分隔；留空表示不额外限制。群聊以「允许的群 ID」列表为准。',
       'Private chats only: allowed user openids, comma-separated. Empty means no extra restriction. Group chats are scoped by the allowed group ID list instead.',
-    ], { group: bridgeGroup, default: '' }),
+    ], { group: bridgeGroup, default: '', placement: 'advanced' }),
     text('bridge_mode', ['运行模式', 'Bridge mode'], [
       'chat 正常回复；reserved 可按模板运行；reserved2 仅通过工具发送；closed-agent 仅响应管理员私聊。',
       'chat replies normally; reserved can use a simulation prompt; reserved2 sends only through tools; closed-agent responds only to owner DMs.',
@@ -123,11 +123,11 @@ const chatbotDefinition: PluginDefinition = {
     text('bridge_reserved_prompt', ['reserved 模拟提示', 'Reserved simulation prompt'], [
       '仅在当前会话为 reserved 模式时追加到系统指令。',
       'Added to system instructions only while this conversation uses reserved mode.',
-    ], { group: bridgeGroup, default: '', multiline: true }),
+    ], { group: bridgeGroup, default: '', multiline: true, placement: 'advanced' }),
     text('bridge_reserved2_prompt', ['reserved2 模拟提示', 'Reserved2 simulation prompt'], [
       '仅在当前会话为 reserved2 模式时追加到系统指令。',
       'Added to system instructions only while this conversation uses reserved2 mode.',
-    ], { group: bridgeGroup, default: '', multiline: true }),
+    ], { group: bridgeGroup, default: '', multiline: true, placement: 'advanced' }),
     number('bridge_max_message_chars', ['单条消息字符上限', 'Max message chars'], [
       '对应 BRIDGE_MAX_MESSAGE_CHARS，100–4000。超长回复会分段发送。',
       'Maps to BRIDGE_MAX_MESSAGE_CHARS, 100–4000. Long replies are split into parts.',
@@ -169,7 +169,7 @@ const chatbotDefinition: PluginDefinition = {
     text('timezone', ['会话时区', 'Conversation time zone'], [
       '输入 IANA 时区名称，例如 Asia/Shanghai、America/New_York；留空使用 UTC。',
       'Enter an IANA time-zone name such as Asia/Shanghai or America/New_York; empty uses UTC.',
-    ], { group: contextGroup, default: 'UTC' }),
+    ], { group: contextGroup, default: 'UTC', placement: 'advanced' }),
     number('context_history_limit', ['历史消息条数', 'History message limit'], [
       '每次模型请求保留的历史消息条数；0 表示不使用历史。',
       'Number of historical messages retained for each request; 0 disables history.',

@@ -28,6 +28,8 @@ export interface PluginFieldDefinition {
   group?: LocalizedText;
   /** Which capability policy owns this field; omitted means the conversation record owns it. */
   scope?: PolicyType;
+  /** Where a conversation-scoped field is rendered in the group policy form. */
+  placement?: 'basic' | 'persona' | 'advanced';
   options?: Array<{ value: string; label: LocalizedText }>;
   required?: boolean;
   secret?: boolean;
