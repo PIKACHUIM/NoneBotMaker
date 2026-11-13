@@ -1249,14 +1249,16 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
           <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         </div>
         {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
-        <div className="form-section-heading"><span>CONVERSATION CONFIG</span><small>{visibleConversationFields.length} FIELDS</small></div>
-        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
+        {selectedAccountId && (visibleConversationFields.length ? <>
+          <div className="form-section-heading"><span>CONVERSATION CONFIG</span><small>{visibleConversationFields.length} FIELDS</small></div>
+          <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} />
+        </> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
         <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
         <Collapse className="policy-overrides" size="small" items={[{ key: 'policies', label: tr('选择要继承的能力策略'), extra: <span className="policy-overrides-summary">{policySummary}</span>, children: <>
           <div className="form-grid three-cols">
-            <Form.Item name="identityPolicyId" label={tr('身份策略')} extra={tr('提供模型、提示词、Skills/MCP/Rules 与会话上下文默认值。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
-            <Form.Item name="dialogPolicyId" label={tr('对话策略')} extra={tr('提供流式响应、工具轮数、输出上限与回复随机性。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
-            <Form.Item name="voicePolicyId" label={tr('语音策略')} extra={tr('提供语音合成模型、音色与语音大小限制。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
+            <Form.Item name="identityPolicyId" label={tr('身份策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
+            <Form.Item name="dialogPolicyId" label={tr('对话策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
+            <Form.Item name="voicePolicyId" label={tr('语音策略')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
           </div>
           <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
         </> }]} />
