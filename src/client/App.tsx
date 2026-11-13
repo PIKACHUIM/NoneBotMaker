@@ -5,6 +5,7 @@ import {
   AutoComplete,
   Button,
   Card,
+  Collapse,
   ConfigProvider,
   Drawer,
   Empty,
@@ -1136,6 +1137,13 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
   const effectiveProviderId = (Form.useWatch('providerId', { form, preserve: true }) as string | undefined) || editing?.providerId || identityPolicy?.providerId || '';
   const provider = providers.find((item) => item.id === effectiveProviderId);
   const promptMode = (Form.useWatch('systemPromptMode', { form, preserve: true }) as GroupRecord['systemPromptMode'] | undefined) ?? editing?.systemPromptMode ?? 'inherit';
+  const dialogPolicyId = (Form.useWatch('dialogPolicyId', { form, preserve: true }) as string | undefined) ?? editing?.dialogPolicyId;
+  const voicePolicyId = (Form.useWatch('voicePolicyId', { form, preserve: true }) as string | undefined) ?? editing?.voicePolicyId;
+  const policySummary = [
+    `${tr('身份')} ${policyName(policies, 'identity', identityPolicyId) || tr('未选择')}`,
+    `${tr('对话')} ${policyName(policies, 'dialog', dialogPolicyId) || tr('未选择')}`,
+    `${tr('语音')} ${policyName(policies, 'voice', voicePolicyId) || tr('未选择')}`,
+  ].join(' · ');
   useEffect(() => {
     if (!drawer.open) return;
     const currentPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === editing?.accountId)?.pluginId);
@@ -1212,6 +1220,7 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
     {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有群聊策略')} description={tr('新增群聊并为其绑定 AI 模型、回复策略和工具。')} onCreate={() => drawer.edit()} action={tr('新增群聊策略')} />}
     <Drawer title={<DrawerTitle label="GROUP POLICY" title={editing ? tr('编辑群聊策略') : tr('新增群聊策略')} />} width={660} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <div className="form-section-heading"><span>BASICS</span><small>REQUIRED</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select disabled={Boolean(editing)} placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: `${item.name} · ${plugins.find((plugin) => plugin.id === item.pluginId)?.name ?? item.pluginId}`, value: item.id }))} onChange={(accountId: string) => {
             const nextPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === accountId)?.pluginId);
@@ -1235,32 +1244,36 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
             </div>}
           </Form.List>
         </Form.Item>
-        {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
-        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
-        <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
-        <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="identityPolicyId" label={tr('身份策略')} extra={tr('提供模型、提示词、Skills/MCP/Rules 与会话上下文默认值。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
-          <Form.Item name="dialogPolicyId" label={tr('对话策略')} extra={tr('提供流式响应、工具轮数、输出上限与回复随机性。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
-          <Form.Item name="voicePolicyId" label={tr('语音策略')} extra={tr('提供语音合成模型、音色与语音大小限制。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
+          <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
+          <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         </div>
-        <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
-        <div className="form-section-heading"><span>MODEL OVERRIDE</span><small>OPTIONAL</small></div>
-        <div className="form-grid two-cols">
+        {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
+        <div className="form-section-heading"><span>CONVERSATION CONFIG</span><small>{visibleConversationFields.length} FIELDS</small></div>
+        {selectedAccountId && (visibleConversationFields.length ? <SchemaFields fields={visibleConversationFields} path="config" editing={Boolean(editing)} /> : <Alert type="info" showIcon message={tr('该插件类型没有声明群聊配置项。')} />)}
+        <div className="form-section-heading"><span>CAPABILITY POLICIES</span><small>INHERIT SHARED VALUES</small></div>
+        <Collapse className="policy-overrides" size="small" items={[{ key: 'policies', label: tr('选择要继承的能力策略'), extra: <span className="policy-overrides-summary">{policySummary}</span>, children: <>
+          <div className="form-grid three-cols">
+            <Form.Item name="identityPolicyId" label={tr('身份策略')} extra={tr('提供模型、提示词、Skills/MCP/Rules 与会话上下文默认值。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('identity')} /></Form.Item>
+            <Form.Item name="dialogPolicyId" label={tr('对话策略')} extra={tr('提供流式响应、工具轮数、输出上限与回复随机性。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('dialog')} /></Form.Item>
+            <Form.Item name="voicePolicyId" label={tr('语音策略')} extra={tr('提供语音合成模型、音色与语音大小限制。')}><Select allowClear placeholder={tr('未选择')} options={policyOptions('voice')} /></Form.Item>
+          </div>
+          <p className="form-note">{tr('选择策略后无需重复填写相同参数；未选择的项沿用插件级默认值。')} <Button type="link" href="#/admin/integrations">{tr('管理策略')}</Button></p>
+        </> }]} />
+        <div className="form-section-heading"><span>MODEL & PROMPT</span><small>OPTIONAL OVERRIDES</small></div>
+        <div className="form-grid three-cols">
           <Form.Item name="providerId" label={tr('AI供应商覆盖')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
           <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
+          <Form.Item name="reasoningEffort" label={tr('思考强度覆盖')} extra={tr('模型默认表示不发送该参数。')}><Select options={[{ label: tr('继承身份策略'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
         </div>
-        <Form.Item name="reasoningEffort" label={tr('思考强度覆盖')} extra={tr('默认继承身份策略；模型默认表示不发送该参数。')}><Select options={[{ label: tr('继承身份策略'), value: 'default' }, { label: tr('低 / low'), value: 'low' }, { label: tr('中 / medium'), value: 'medium' }, { label: tr('高 / high'), value: 'high' }]} /></Form.Item>
-        <div className="form-section-heading"><span>PROMPT OVERRIDE</span><small>INHERIT / APPEND / REPLACE</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="systemPromptMode" label={tr('提示词处理方式')} extra={promptMode === 'append' ? tr('身份策略提示词在前，本会话提示词在后。') : promptMode === 'override' ? tr('仅使用本会话提示词。') : tr('未选择身份策略时使用本会话提示词。')}><Select options={[{ value: 'inherit', label: tr('继承') }, { value: 'append', label: tr('附加') }, { value: 'override', label: tr('覆盖') }]} /></Form.Item>
-          <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} addonAfter="0–1" /></Form.Item>
+          <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')} extra={tr('0–1；默认值 0.05，0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} /></Form.Item>
         </div>
         <Form.Item name="systemPrompt" label={tr('本会话提示词')}><Input.TextArea rows={4} placeholder={tr('描述该群聊中 AI 的角色、边界与回复风格')} /></Form.Item>
         <Alert type="info" showIcon message={tr('提示词组装顺序')} description={tr('人设 → 身份策略/本会话系统规则 → 角色卡 → 会话记忆 → Skills/Rules → 模式指令。人设在“人设与提示词”扩展配置中编辑，角色卡用 /role 或账号共享角色卡维护。')} />
-        <div className="form-note">{tr('默认值 0.05；0 表示仅在被 @ 时回复，1 表示每条消息均参与回复判定。')}</div>
         <div className="form-section-heading"><span>SPENDING LIMITS</span><small>USD / 0 = UNLIMITED</small></div>
-        <div className="form-grid two-cols">
+        <div className="form-grid three-cols">
           <Form.Item name="dailyCostLimit" label={tr('每日限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
           <Form.Item name="monthlyCostLimit" label={tr('每月限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
           <Form.Item name="totalCostLimit" label={tr('总限额')}><InputNumber className="full-width" min={0} precision={2} addonBefore="$" /></Form.Item>
@@ -1270,10 +1283,12 @@ function GroupsPage({ groups, plugins, accounts, providers, libraries, policies,
         <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('使用空格或逗号分隔。白名单关闭时此列表不会生效。')}><Input.TextArea rows={3} placeholder="user-id-1, user-id-2" /></Form.Item>
         <div className="form-section-heading"><span>EXTENSIONS</span><small>ADDED ON TOP OF THE IDENTITY POLICY</small></div>
-        <Form.Item name="skillIds" label="Skills" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
-        <Form.Item name="mcpIds" label="MCP" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
-        <Form.Item name="ruleIds" label="Rules" extra={tr('在身份策略的基础上追加。')}><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
-        <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+        <div className="form-grid three-cols">
+          <Form.Item name="skillIds" label="Skills"><Select mode="multiple" placeholder={tr('选择可用 Skills')} options={choices('skills')} /></Form.Item>
+          <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" placeholder={tr('选择 MCP 服务')} options={choices('mcps')} /></Form.Item>
+          <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" placeholder={tr('选择规则集')} options={choices('rules')} /></Form.Item>
+        </div>
+        <div className="form-note">{tr('所选 Skills / MCP / Rules 会追加在身份策略之上，运行时按顺序合并。')}</div>
       </Form>
     </Drawer>
   </section>;
