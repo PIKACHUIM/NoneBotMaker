@@ -28,6 +28,15 @@ export interface CapabilitySourceItem {
   url?: string;
   requiresAuth?: boolean;
   hint?: string;
+  category?: string;
+  tags?: string[];
+  author?: string;
+  version?: string;
+  downloads?: number;
+  stars?: number;
+  hub?: string;
+  hubName?: string;
+  updatedAt?: number;
 }
 export interface ConversationMemoryItem { id: string; name: string; title: string; description: string; type: MemoryType; content: string; status: 'pending' | 'confirmed'; createdAt: number; updatedAt: number; expiresAt: number }
 export type ConversationMemoryInput = Pick<ConversationMemoryItem, 'name' | 'title' | 'type' | 'content' | 'status'> & Partial<Pick<ConversationMemoryItem, 'description'>>;
@@ -288,9 +297,10 @@ export const api = {
   async deleteLibrary(kind: LibraryKind, id: string) {
     return request(`/api/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
-  async searchCapabilitySources(kind: LibraryKind, query: string) {
+  async searchCapabilitySources(kind: LibraryKind, query: string, hub?: string) {
     const params = new URLSearchParams();
     if (query.trim()) params.set('q', query.trim());
+    if (hub) params.set('hub', hub);
     return records<CapabilitySourceItem>(await request(collectionPath(`/api/capability-sources/${kind}/search`, params)));
   },
   async importCapabilitySource(kind: LibraryKind, payload: Record<string, unknown>) {

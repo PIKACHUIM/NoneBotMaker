@@ -698,11 +698,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .library-source-bar .form-note { margin: 0; }
 .source-manual { display: flex; gap: 8px; margin-top: 12px; }
 .source-manual .ant-input { min-width: 0; }
-.source-list { display: grid; gap: 8px; margin-top: 14px; max-height: 420px; overflow: auto; }
-.source-item { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.source-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.source-hub-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.source-hub-row .ant-select { min-width: 180px; }
+.source-hub-row .form-note { margin: 0; }
+.source-list { display: grid; gap: 8px; margin-top: 14px; max-height: 440px; overflow: auto; }
+.source-item { display: flex; align-items: flex-start; gap: 14px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.source-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.source-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .source-copy strong { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-copy small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-hub-chip { flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--accent-border); border-radius: 4px; color: var(--accent-text); background: var(--accent-surface); font-size: 10px; }
+.source-copy .source-desc { font-size: 11px; line-height: 1.55; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; }
+.source-meta-row { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; color: var(--muted); font-size: 10px; }
+.source-tag { padding: 1px 5px; border-radius: 3px; border: 1px solid var(--line); background: var(--surface-2, transparent); }
 .source-copy em { font-size: 11px; font-style: normal; color: var(--warning, #b56a00); }
 
 @media (max-width: 640px) {

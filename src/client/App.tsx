@@ -130,6 +130,12 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   tools: { title: '调用工具', eyebrow: 'MODEL / CAPABILITIES', description: '管理内置工具及安全配置；身份策略决定授权范围。' },
 };
 
+const SKILL_HUB_OPTIONS = [
+  { value: 'all', label: '全部来源' },
+  { value: 'palebluedot', label: 'SkillHub 原版' },
+  { value: 'skillhub-cn', label: 'SkillHub 国内' },
+] as const;
+
 function currentRoute(): Route {
   const path = window.location.hash.slice(1);
   if (path) {
@@ -2002,13 +2008,15 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
   const [importOpen, setImportOpen] = useState(false);
   const [sourceQuery, setSourceQuery] = useState('');
   const [sourceInput, setSourceInput] = useState('');
+  const [skillHub, setSkillHub] = useState('all');
   const [sourceItems, setSourceItems] = useState<CapabilitySourceItem[]>([]);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [importingKey, setImportingKey] = useState('');
   const editing = data.find((item) => item.id === drawer.editingId);
-  const searchSources = async (query = sourceQuery) => {
+  const compactNumber = (value: number) => new Intl.NumberFormat(language === 'en' ? 'en-US' : 'zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  const searchSources = async (query = sourceQuery, hub = skillHub) => {
     setSourceBusy(true);
-    try { setSourceItems(await api.searchCapabilitySources(kind, query)); }
+    try { setSourceItems(await api.searchCapabilitySources(kind, query, kind === 'skills' ? hub : undefined)); }
     catch (reason) { onError(reason); }
     finally { setSourceBusy(false); }
   };
@@ -2017,7 +2025,8 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
     setSourceItems([]);
     setSourceQuery('');
     setSourceInput('');
-    void searchSources('');
+    setSkillHub('all');
+    void searchSources('', 'all');
   };
   const importSource = async (item?: CapabilitySourceItem) => {
     const source = item?.source ?? sourceInput.trim();
@@ -2081,23 +2090,41 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
   return <div className="tab-panel"><PageToolbar count={data.length} noun={libraryNames[kind].toUpperCase()} action={`${tr('新增')} ${libraryNames[kind]}`} onCreate={() => drawer.edit()} />
     <div className="library-source-bar"><Button icon={<CloudServerOutlined />} onClick={openImport}>{tr('从在线源导入')}</Button><span className="form-note">{tr('Skill 来自 SkillHub，MCP 来自官方 Registry，规则来自 GitHub 规则库。')}</span></div>
     {data.length ? <Table<LibraryRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={`${tr('还没有')} ${libraryNames[kind]}`} description={`${tr('添加')} ${libraryNames[kind]}${tr('，再按群聊策略选择启用范围。')}`} onCreate={() => drawer.edit()} action={`${tr('新增')} ${libraryNames[kind]}`} />}
-    <Modal title={<DrawerTitle label="ONLINE SOURCE" title={`${tr('从在线源导入')} · ${libraryNames[kind]}`} />} open={importOpen} onCancel={() => setImportOpen(false)} footer={null} width={660} destroyOnClose>
+    <Modal title={<DrawerTitle label="ONLINE SOURCE" title={`${tr('从在线源导入')} · ${libraryNames[kind]}`} />} open={importOpen} onCancel={() => setImportOpen(false)} footer={null} width={kind === 'skills' ? 760 : 660} destroyOnClose>
+      {kind === 'skills' && <div className="source-hub-row">
+        <span className="form-note">{tr('技能来源')}</span>
+        <Select value={skillHub} aria-label={tr('技能来源')} options={SKILL_HUB_OPTIONS.map((item) => ({ value: item.value, label: tr(item.label) }))}
+          onChange={(value: string) => { setSkillHub(value); void searchSources(sourceQuery, value); }} />
+        <span className="form-note">{tr('原版偏英文，国内站提供中文描述与分类；可先看全部来源。')}</span>
+      </div>}
       <Space.Compact className="full-width">
         <Input value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} onPressEnter={() => void searchSources()} allowClear
-          placeholder={kind === 'skills' ? tr('搜索 SkillHub 技能') : kind === 'mcps' ? tr('搜索 MCP 官方 Registry') : tr('搜索规则名称')} />
+          placeholder={kind === 'skills' ? tr(skillHub === 'skillhub-cn' ? '搜索国内 SkillHub 技能' : skillHub === 'palebluedot' ? '搜索原版 SkillHub 技能' : '搜索原版和国内 SkillHub 技能') : kind === 'mcps' ? tr('搜索 MCP 官方 Registry') : tr('搜索规则名称')} />
         <Button loading={sourceBusy} onClick={() => void searchSources()}>{tr('搜索')}</Button>
       </Space.Compact>
       {(kind === 'skills' || kind === 'rules') && <div className="source-manual">
         <Input value={sourceInput} onChange={(event) => setSourceInput(event.target.value)} allowClear
-          placeholder={kind === 'skills' ? 'https://skills.palebluedot.live/en/skill/owner/repo/skill 或 owner/repo/skill' : 'https://github.com/owner/repo 或 raw 规则链接'} />
+          placeholder={kind === 'skills' ? 'https://skillhub.cn/skills/slug 或 https://skills.palebluedot.live/en/skill/owner/repo/skill' : 'https://github.com/owner/repo 或 raw 规则链接'} />
         <Button type="primary" loading={importingKey === 'manual'} onClick={() => void importSource()}>{tr('按链接导入')}</Button>
       </div>}
       {sourceBusy ? <Skeleton active paragraph={{ rows: 4 }} /> : sourceItems.length ? <div className="source-list">
         {sourceItems.map((item, index) => <div className="source-item" key={`${item.id}-${item.source}-${index}`}>
-          <div className="source-copy"><strong>{item.name}</strong><small>{item.description || item.source}</small>{item.hint && <em>{item.hint}</em>}</div>
+          <div className="source-copy">
+            <div className="source-title-row"><strong>{item.name}</strong>{item.hubName && <span className="source-hub-chip">{item.hubName}</span>}</div>
+            <small className="source-desc">{item.description || item.source}</small>
+            {(item.category || item.author || item.version || item.downloads !== undefined || item.stars !== undefined || item.tags?.length) && <div className="source-meta-row">
+              {item.category && <span>{tr('分类')}：{item.category}</span>}
+              {item.author && <span>{tr('作者')}：{item.author}</span>}
+              {item.version && <span>v{item.version}</span>}
+              {item.downloads !== undefined && <span>{tr('下载')} {compactNumber(item.downloads)}</span>}
+              {item.stars !== undefined && <span>{tr('收藏')} {compactNumber(item.stars)}</span>}
+              {item.tags?.slice(0, 4).map((tag) => <span className="source-tag" key={tag}>{tag}</span>)}
+            </div>}
+            {item.hint && <em>{item.hint}</em>}
+          </div>
           <Button size="small" type="primary" loading={importingKey === item.id} onClick={() => void importSource(item)}>{item.requiresAuth ? tr('导入并配置令牌') : tr('导入')}</Button>
         </div>)}
-      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('没有找到可导入的条目；可改用上方链接直接导入。')} />}
+      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('没有找到可导入的条目；可切换来源或改用上方链接直接导入。')} />}
     </Modal>
     <Drawer title={<DrawerTitle label={`${kind.toUpperCase()} / LIBRARY`} title={editing ? `${tr('编辑')} ${libraryNames[kind]}` : `${tr('新增')} ${libraryNames[kind]}`} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>

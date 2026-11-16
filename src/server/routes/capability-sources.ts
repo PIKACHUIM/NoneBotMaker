@@ -7,8 +7,11 @@ import { ApiError } from './management';
 
 const MAX_SOURCE_BYTES = 512 * 1024;
 const SKILLHUB_ORIGIN = 'https://skills.palebluedot.live';
+const SKILLHUB_CN_ORIGIN = 'https://skillhub.cn';
+const SKILLHUB_CN_API = 'https://api.skillhub.cn';
 const MCP_REGISTRY = 'https://registry.modelcontextprotocol.io/v0/servers';
 const RULE_REPOSITORY = 'PatrickJS/awesome-cursorrules';
+const SKILL_HUBS = ['all', 'palebluedot', 'skillhub-cn'] as const;
 
 interface SourceItem {
   id: string;
@@ -18,6 +21,15 @@ interface SourceItem {
   url?: string;
   requiresAuth?: boolean;
   hint?: string;
+  category?: string;
+  tags?: string[];
+  author?: string;
+  version?: string;
+  downloads?: number;
+  stars?: number;
+  hub?: string;
+  hubName?: string;
+  updatedAt?: number;
 }
 
 function text(value: unknown, max: number): string {
@@ -37,6 +49,130 @@ function isSkillHubUrl(url: URL): boolean {
   return url.hostname === 'skills.palebluedot.live' || url.hostname === 'claudeskillhub.com';
 }
 
+function isCnSkillHubUrl(url: URL): boolean {
+  return ['skillhub.cn', 'www.skillhub.cn', 'skillhub.tencent.com', 'api.skillhub.cn'].includes(url.hostname);
+}
+
+function cnSkillSlug(url: URL): string | null {
+  const parts = url.pathname.split('/').filter(Boolean);
+  const index = parts.findIndex((part) => part === 'skill' || part === 'skills');
+  if (index >= 0 && parts[index + 1]) return decodeURIComponent(parts[index + 1]);
+  const last = parts.at(-1);
+  return last && !['api', 'v1', 'skills', 'skill'].includes(last) ? decodeURIComponent(last) : null;
+}
+
+function stripHtml(value: string): string {
+  return decodeHtml(value.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function compactMetric(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = /^([\d.]+)\s*([kKmM]?)/.exec(value.trim());
+  if (!match) return undefined;
+  const number = Number(match[1]);
+  if (!Number.isFinite(number)) return undefined;
+  const scale = match[2].toLowerCase() === 'm' ? 1_000_000 : match[2].toLowerCase() === 'k' ? 1_000 : 1;
+  return Math.round(number * scale);
+}
+
+async function fetchJson<T>(value: string): Promise<T> {
+  const response = await safeFetch(value, { headers: { accept: 'application/json' } }, fetch, 20_000, 3);
+  try { return JSON.parse(await boundedText(response, MAX_SOURCE_BYTES)) as T; }
+  catch { throw new ApiError(502, 'source_response_invalid'); }
+}
+
+let cnCategoryCache: { at: number; map: Map<string, string> } | null = null;
+async function cnCategoryNames(): Promise<Map<string, string>> {
+  if (cnCategoryCache && Date.now() - cnCategoryCache.at < 60 * 60_000) return cnCategoryCache.map;
+  const payload = await fetchJson<{ items?: Array<{ key?: unknown; name?: unknown }> }>(`${SKILLHUB_CN_API}/api/v1/categories`);
+  const map = new Map<string, string>();
+  for (const item of payload.items ?? []) {
+    if (typeof item.key === 'string') map.set(item.key, typeof item.name === 'string' ? item.name : item.key);
+  }
+  cnCategoryCache = { at: Date.now(), map };
+  return map;
+}
+
+interface CnSkillSummary {
+  slug?: unknown;
+  name?: unknown;
+  description?: unknown;
+  description_zh?: unknown;
+  category?: unknown;
+  tags?: unknown;
+  ownerName?: unknown;
+  version?: unknown;
+  downloads?: unknown;
+  stars?: unknown;
+  updated_at?: unknown;
+}
+
+async function searchCnSkills(query: string): Promise<SourceItem[]> {
+  const params = new URLSearchParams({ page: '1', pageSize: '24', sortBy: query ? 'score' : 'downloads', order: 'desc' });
+  if (query) params.set('keyword', query);
+  const payload = await fetchJson<{ code?: number; data?: { skills?: CnSkillSummary[] } }>(`${SKILLHUB_CN_API}/api/skills?${params.toString()}`);
+  if (payload.code !== 0 || !Array.isArray(payload.data?.skills)) return [];
+  const categories = await cnCategoryNames().catch(() => new Map<string, string>());
+  return payload.data.skills.flatMap((skill) => {
+    if (typeof skill.slug !== 'string' || !skill.slug || typeof skill.name !== 'string') return [];
+    const slug = skill.slug;
+    const categoryKey = typeof skill.category === 'string' ? skill.category : '';
+    return [{
+      id: `cn:${slug}`,
+      name: skill.name.slice(0, 200),
+      description: text(typeof skill.description_zh === 'string' ? skill.description_zh : skill.description, 800),
+      source: `${SKILLHUB_CN_ORIGIN}/skills/${encodeURIComponent(slug)}`,
+      url: `${SKILLHUB_CN_ORIGIN}/skills/${encodeURIComponent(slug)}`,
+      category: categories.get(categoryKey) ?? categoryKey,
+      tags: Array.isArray(skill.tags) ? skill.tags.filter((tag): tag is string => typeof tag === 'string' && tag.toLowerCase() !== 'latest').slice(0, 8) : [],
+      ...(typeof skill.ownerName === 'string' ? { author: skill.ownerName } : {}),
+      ...(typeof skill.version === 'string' ? { version: skill.version } : {}),
+      ...(typeof skill.downloads === 'number' ? { downloads: skill.downloads } : {}),
+      ...(typeof skill.stars === 'number' ? { stars: skill.stars } : {}),
+      ...(typeof skill.updated_at === 'number' ? { updatedAt: skill.updated_at } : {}),
+      hub: 'skillhub-cn',
+      hubName: 'SkillHub 国内',
+    } satisfies SourceItem];
+  });
+}
+
+function originalSkillCards(html: string): SourceItem[] {
+  const items: SourceItem[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)) {
+    const attrs = match[1];
+    if (!/class="[^"]*sh-skill-card/i.test(attrs)) continue;
+    const href = /href="([^"]+)"/.exec(attrs)?.[1];
+    if (!href || !href.startsWith('/en/skill/')) continue;
+    const body = match[2];
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const owner = stripHtml(/<span class="owner">([\s\S]*?)<\/span>/i.exec(body)?.[1] ?? '');
+    const name = stripHtml(/<span class="name">([\s\S]*?)<\/span>/i.exec(body)?.[1] ?? '') || href.split('/').at(-1) || href;
+    const description = stripHtml(/<p class="desc"[^>]*>([\s\S]*?)<\/p>/i.exec(body)?.[1] ?? '');
+    const metrics = [...body.matchAll(/<span class="ltr-nums">([^<]*)<\/span>/g)].map((entry) => entry[1]);
+    items.push({
+      id: `pbd:${href.slice('/en/skill/'.length)}`,
+      name: name.slice(0, 200),
+      description: description.slice(0, 800),
+      source: `${SKILLHUB_ORIGIN}${href}`,
+      url: `${SKILLHUB_ORIGIN}${href}`,
+      ...(owner ? { author: owner } : {}),
+      ...(compactMetric(metrics[0]) !== undefined ? { downloads: compactMetric(metrics[0]) } : {}),
+      ...(compactMetric(metrics[1]) !== undefined ? { stars: compactMetric(metrics[1]) } : {}),
+      hub: 'palebluedot',
+      hubName: 'SkillHub 原版',
+    });
+    if (items.length >= 24) break;
+  }
+  return items;
+}
+
+async function searchOriginalSkills(query: string): Promise<SourceItem[]> {
+  const url = `${SKILLHUB_ORIGIN}/en/browse${query ? `?q=${encodeURIComponent(query)}` : ''}`;
+  return originalSkillCards(await fetchText(url));
+}
+
 function parseSkillHubPage(html: string): { content: string } | null {
   const marker = /<h2[^>]*>\s*SKILL\.md Content\s*<\/h2>([\s\S]{0,40_000}?)<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>/i.exec(html);
   if (marker) return { content: decodeHtml(marker[2]).trim() };
@@ -47,7 +183,7 @@ function parseSkillHubPage(html: string): { content: string } | null {
   return null;
 }
 
-function frontmatter(content: string): { name?: string; description?: string } {
+function frontmatter(content: string): { name?: string; displayName?: string; description?: string } {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
   if (!match) return {};
   const read = (key: string) => {
@@ -57,7 +193,7 @@ function frontmatter(content: string): { name?: string; description?: string } {
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     return value.trim() || undefined;
   };
-  return { name: read('name'), description: read('description') };
+  return { name: read('name'), displayName: read('displayName'), description: read('description') };
 }
 
 function slugFromPath(value: string): string {
@@ -103,12 +239,68 @@ async function fetchGithubSkill(parts: { owner: string; repo: string; path: stri
   return null;
 }
 
-async function loadSkillSource(source: string): Promise<{ content: string; sourceUrl: string; slug: string }> {
+interface CnSkillDetail {
+  skill?: {
+    displayName?: unknown;
+    summary?: unknown;
+    summary_zh?: unknown;
+    category?: unknown;
+    tags?: unknown;
+    stats?: { downloads?: unknown; stars?: unknown };
+  };
+  latestVersion?: { version?: unknown };
+  owner?: { displayName?: unknown; handle?: unknown };
+}
+
+async function loadCnSkill(slug: string): Promise<{ content: string; sourceUrl: string; meta: JsonObject }> {
+  const detail = await fetchJson<CnSkillDetail>(`${SKILLHUB_CN_API}/api/v1/skills/${encodeURIComponent(slug)}`).catch(() => null);
+  const files = await fetchJson<{ files?: Array<{ path?: unknown }> }>(`${SKILLHUB_CN_API}/api/v1/skills/${encodeURIComponent(slug)}/files`).catch(() => null);
+  const candidates: string[] = [];
+  const add = (value: string | undefined) => {
+    if (value && !candidates.includes(value)) candidates.push(value);
+  };
+  for (const file of files?.files ?? []) {
+    if (typeof file.path === 'string' && /(^|\/)SKILL\.md$/i.test(file.path)) add(file.path);
+  }
+  add('SKILL.md');
+  add('skill.md');
+  add('README.md');
+  for (const path of candidates.slice(0, 8)) {
+    try {
+      const content = await fetchText(`${SKILLHUB_CN_API}/api/v1/skills/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`);
+      if (!content.trim()) continue;
+      const skill = detail?.skill;
+      const categoryKey = typeof skill?.category === 'string' ? skill.category : '';
+      const categories = categoryKey ? await cnCategoryNames().catch(() => new Map<string, string>()) : new Map<string, string>();
+      const meta: JsonObject = {
+        hub: 'skillhub-cn',
+        ...(typeof skill?.displayName === 'string' ? { title: skill.displayName } : {}),
+        ...(typeof skill?.summary_zh === 'string' ? { description: skill.summary_zh } : typeof skill?.summary === 'string' ? { description: skill.summary } : {}),
+        ...(categoryKey ? { category: categories.get(categoryKey) ?? categoryKey } : {}),
+        ...(skill?.tags && typeof skill.tags === 'object' && !Array.isArray(skill.tags) ? { tags: Object.keys(skill.tags).filter((tag) => tag.toLowerCase() !== 'latest') } : {}),
+        ...(typeof detail?.owner?.displayName === 'string' ? { author: detail.owner.displayName } : typeof detail?.owner?.handle === 'string' ? { author: detail.owner.handle } : {}),
+        ...(typeof detail?.latestVersion?.version === 'string' ? { version: detail.latestVersion.version } : {}),
+        ...(typeof skill?.stats?.downloads === 'number' ? { downloads: skill.stats.downloads } : {}),
+        ...(typeof skill?.stats?.stars === 'number' ? { stars: skill.stats.stars } : {}),
+      };
+      return { content, sourceUrl: `${SKILLHUB_CN_ORIGIN}/skills/${encodeURIComponent(slug)}`, meta };
+    } catch { /* try the next candidate */ }
+  }
+  throw new ApiError(404, 'skill_not_found');
+}
+
+async function loadSkillSource(source: string): Promise<{ content: string; sourceUrl: string; slug: string; meta?: JsonObject }> {
   const trimmed = source.trim();
   if (!trimmed) throw new ApiError(400, 'source_required');
   let url: URL | null = null;
   try { url = new URL(trimmed); } catch { url = null; }
 
+  if (url && isCnSkillHubUrl(url)) {
+    const slug = cnSkillSlug(url);
+    if (!slug) throw new ApiError(400, 'invalid_skill_source');
+    const loaded = await loadCnSkill(slug);
+    return { content: loaded.content, sourceUrl: loaded.sourceUrl, slug, meta: loaded.meta };
+  }
   if (url && isSkillHubUrl(url)) {
     const html = await fetchText(url.toString());
     const parsed = parseSkillHubPage(html);
@@ -187,35 +379,31 @@ async function saveLibrary(context: Context<{ Bindings: RuntimeBindings }>, kind
   return record;
 }
 
-function skillRecord(content: string, name: string, description: string, sourceUrl: string): { name: string; description: string; config: JsonObject } {
+function skillRecord(content: string, name: string, description: string, sourceUrl: string, meta?: JsonObject): { name: string; description: string; config: JsonObject } {
   return {
     name: name.slice(0, 200),
     description: description.slice(0, 1000),
-    config: { prompt: description.slice(0, 4000), content: content.slice(0, MAX_SOURCE_BYTES), sourceUrl },
+    config: {
+      prompt: description.slice(0, 4000),
+      content: content.slice(0, MAX_SOURCE_BYTES),
+      sourceUrl,
+      ...(meta && Object.keys(meta).length ? { sourceMeta: meta } : {}),
+    },
   };
 }
 
-async function searchSkills(query: string): Promise<SourceItem[]> {
-  const url = `${SKILLHUB_ORIGIN}/en/browse${query ? `?q=${encodeURIComponent(query)}` : ''}`;
-  const html = await fetchText(url);
-  const seen = new Set<string>();
-  const items: SourceItem[] = [];
-  for (const match of html.matchAll(/href="(\/en\/skill\/[^"?#]+)"/g)) {
-    const path = match[1];
-    if (seen.has(path)) continue;
-    seen.add(path);
-    const slug = path.replace(/^\/en\/skill\//, '');
-    const name = slug.split('/').at(-1) ?? slug;
-    items.push({
-      id: slug,
-      name,
-      description: slug,
-      source: `${SKILLHUB_ORIGIN}${path}`,
-      url: `${SKILLHUB_ORIGIN}${path}`,
-    });
-    if (items.length >= 24) break;
+async function searchSkills(query: string, hub = 'all'): Promise<SourceItem[]> {
+  if (!SKILL_HUBS.includes(hub as typeof SKILL_HUBS[number])) throw new ApiError(400, 'invalid_skill_hub');
+  const searches = hub === 'all'
+    ? [searchOriginalSkills(query), searchCnSkills(query)]
+    : hub === 'palebluedot' ? [searchOriginalSkills(query)] : [searchCnSkills(query)];
+  const settled = await Promise.allSettled(searches);
+  const items = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+  if (!items.length) {
+    const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failure) throw failure.reason;
   }
-  return items;
+  return items.slice(0, 40);
 }
 
 interface RegistryServer {
@@ -333,7 +521,7 @@ async function importRule(source: string): Promise<{ name: string; description: 
 
 export function registerCapabilitySourceRoutes(api: Hono<{ Bindings: RuntimeBindings }>): void {
   api.get('/capability-sources/skills/search', async (context) => {
-    try { return context.json({ data: await searchSkills(context.req.query('q')?.trim() ?? '') }); }
+    try { return context.json({ data: await searchSkills(context.req.query('q')?.trim() ?? '', context.req.query('hub')?.trim() || 'all') }); }
     catch (error) { return sourceFailure(context, error); }
   });
 
@@ -342,7 +530,15 @@ export function registerCapabilitySourceRoutes(api: Hono<{ Bindings: RuntimeBind
       const body = await context.req.json() as JsonObject;
       const loaded = await loadSkillSource(String(body.source ?? ''));
       const meta = frontmatter(loaded.content);
-      const imported = skillRecord(loaded.content, meta.name ?? loaded.slug, meta.description ?? `从 SkillHub 导入的 ${loaded.slug} 技能。`, loaded.sourceUrl);
+      const metaTitle = text(loaded.meta?.title, 200);
+      const metaDescription = text(loaded.meta?.description, 1000);
+      const imported = skillRecord(
+        loaded.content,
+        meta.displayName ?? meta.name ?? (metaTitle || loaded.slug),
+        meta.description ?? (metaDescription || `从 SkillHub 导入的 ${loaded.slug} 技能。`),
+        loaded.sourceUrl,
+        loaded.meta,
+      );
       const record = await saveLibrary(context, 'skills', imported);
       return context.json({ data: record }, 201);
     } catch (error) { return sourceFailure(context, error); }
