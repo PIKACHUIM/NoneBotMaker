@@ -405,6 +405,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const imageModel = configString(record.config, 'model');
       const imageProvider = providerId ? await dependencies.findProvider(providerId) : null;
       if (!imageProvider?.enabled || !imageModel || !imageProvider.models.includes(imageModel)) return null;
+      if (Array.isArray(imageProvider.mediaCapabilities) && !imageProvider.mediaCapabilities.includes('image')) return null;
       const fallbackCostPerImage = configNumber(record.config, 'fallbackCostPerImage', 0, 0);
       if (fallbackCostPerImage <= 0) return null;
       secrets.push(imageProvider.apiKey);
@@ -456,6 +457,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const videoModel = configString(record.config, 'model');
       const videoProvider = providerId ? await dependencies.findProvider(providerId) : null;
       if (!videoProvider?.enabled || !videoModel || !videoProvider.models.includes(videoModel)) return null;
+      if (Array.isArray(videoProvider.mediaCapabilities) && !videoProvider.mediaCapabilities.includes('video')) return null;
       const fallbackCostPerSecond = configNumber(record.config, 'fallbackCostPerSecond', 0, 0);
       if (fallbackCostPerSecond <= 0) return null;
       const protocol = configString(record.config, 'protocol', 'minimax');

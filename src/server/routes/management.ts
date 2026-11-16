@@ -591,6 +591,12 @@ async function assertReferences(repository: RecordRepository, kind: RecordKind, 
   } else if (kind === 'tools') {
     const config = record.config as JsonObject | undefined;
     if (config?.providerId) await requireRecord('providers', config.providerId as string);
+    if (record.enabled && config?.name === 'chat_generate_video' && config.providerId) {
+      const provider = await repository.get('providers', config.providerId as string);
+      if (provider && Array.isArray(provider.mediaCapabilities) && !provider.mediaCapabilities.includes('video')) {
+        throw new ApiError(400, 'video_provider_capability_required');
+      }
+    }
   } else if (kind === 'policies' && record.type === 'identity') {
     if (record.providerId) await requireRecord('providers', record.providerId as string);
     for (const id of record.skillIds as string[] ?? []) await requireRecord('skills', id);

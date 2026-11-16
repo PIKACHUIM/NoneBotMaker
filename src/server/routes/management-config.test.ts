@@ -626,6 +626,19 @@ describe('capability policies', () => {
     expect((await writeRequest(setup, '/tools', { name: 'Auto with key', enabled: true, config: { kind: 'builtin', name: 'WebSearch', engine: 'auto', apiKey: 'key' } })).status).toBe(400);
   });
 
+  it('rejects enabling video generation for an image-only provider', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'providers', {
+      id: 'image-provider', name: 'Image only', baseUrl: 'https://video.example', apiKey: '', models: ['H3-768P'],
+      enabled: true, mediaCapabilities: ['image'], priceMultiplier: 1,
+    });
+    const response = await writeRequest(setup, '/tools', {
+      name: 'Video', enabled: true,
+      config: { kind: 'builtin', name: 'chat_generate_video', providerId: 'image-provider', model: 'H3-768P', protocol: 'openai', fallbackCostPerSecond: 0.06 },
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('blocks deleting skills that only a policy references', async () => {
     const setup = configuredApp();
     seed(setup.values, 'skills', { id: 'skill-1', name: 'Skill', description: '', enabled: true, config: { prompt: 'do it' } });

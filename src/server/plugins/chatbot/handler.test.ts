@@ -514,6 +514,21 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(expect.any(Object), 0.48, 1_000);
   });
 
+  it('hides the video tool when the provider only advertises image capability', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'normal reply' } }] }));
+    const toolRecord = { id: 'builtin-chat-generate-video', name: 'Video', description: '', enabled: true,
+      config: { kind: 'builtin', name: 'chat_generate_video', providerId: 'image-provider', model: 'H3-768P',
+        protocol: 'openai', resolution: '768P', duration: 6, fallbackCostPerSecond: 0.06 }, createdAt: '', updatedAt: '' };
+    const { deps } = dependencies({ fetch,
+      findGroup: vi.fn(async () => ({ ...group, config: { media_video_enabled: true }, toolIds: [toolRecord.id] })),
+      findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
+      findProvider: vi.fn(async (id) => id === 'image-provider' ? { ...provider, id, models: ['H3-768P'], mediaCapabilities: ['image' as const] } : provider),
+    });
+    await createChatbotHandler(deps)(account, message());
+    const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { tools?: Array<{ function: { name: string } }> };
+    expect(request.tools?.map((item) => item.function.name)).not.toContain('chat_generate_video');
+  });
+
   it('never exposes a disabled built-in tool even when its identity grants the function', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'normal reply' } }] }));
     const { deps } = dependencies({ fetch,
