@@ -1477,6 +1477,8 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
   const whitelistEnabled = Boolean(Form.useWatch('whitelistEnabled', { form, preserve: true }));
   const watchedConfig = Form.useWatch('config', { form, preserve: true }) as JsonObject | undefined;
   const identityPolicies = policies.filter((item) => item.type === 'identity' && item.enabled);
+  const defaultPolicyFor = (type: PolicyType) => policies.find((item) => item.id === `default-${type}` && item.enabled)
+    ?? policies.find((item) => item.type === type && item.enabled && item.name.includes('默认'));
   const availableTools = identityPolicy?.toolIds ?? [];
   const advancedSummary = [
     watchedConfig?.timezone ? String(watchedConfig.timezone) : '',
@@ -1491,11 +1493,11 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
       externalIds: editing ? conversationIdList(editing.externalId) : [''],
       conversationType: editing?.conversationType ?? 'group',
       name: editing?.name ?? '', enabled: editing?.enabled ?? true,
-      dialogPolicyId: editing?.dialogPolicyId || (!editing ? policies.find((item) => item.id === 'default-dialog' && item.enabled)?.id : undefined),
-      voicePolicyId: editing?.voicePolicyId || (!editing ? policies.find((item) => item.id === 'default-voice' && item.enabled)?.id : undefined),
-      identityPolicyId: editing?.identityPolicyId || (!editing ? policies.find((item) => item.id === 'default-identity' && item.enabled)?.id : undefined),
-      memoryPolicyId: editing?.memoryPolicyId || (!editing ? policies.find((item) => item.id === 'default-memory' && item.enabled)?.id : undefined),
-      costPolicyId: editing?.costPolicyId || (!editing ? policies.find((item) => item.id === 'default-cost' && item.enabled)?.id : undefined),
+      dialogPolicyId: editing?.dialogPolicyId || (!editing ? defaultPolicyFor('dialog')?.id : undefined),
+      voicePolicyId: editing?.voicePolicyId || (!editing ? defaultPolicyFor('voice')?.id : undefined),
+      identityPolicyId: editing?.identityPolicyId || (!editing ? defaultPolicyFor('identity')?.id : undefined),
+      memoryPolicyId: editing?.memoryPolicyId || (!editing ? defaultPolicyFor('memory')?.id : undefined),
+      costPolicyId: editing?.costPolicyId || (!editing ? defaultPolicyFor('cost')?.id : undefined),
       toolApprovalMode: editing?.toolApprovalMode ?? 'per-tool', toolApprovalRules: editing?.toolApprovalRules ?? {},
       providerId: editing?.providerId || undefined, model: editing?.model || undefined,
       systemPrompt: editing?.systemPrompt ?? '',
