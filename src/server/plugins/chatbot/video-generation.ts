@@ -42,10 +42,13 @@ export class VideoGenerationAttemptError extends Error {
   readonly estimatedCost: number;
   readonly pricingSource = 'per_second_fallback' as const;
   readonly estimated = true;
+  /** 4xx responses never created a provider task, so they must not consume budget. */
+  readonly billable: boolean;
   constructor(message: string, estimatedCost: number) {
     super(message);
     this.name = 'VideoGenerationAttemptError';
     this.estimatedCost = estimatedCost;
+    this.billable = !/Remote request failed \(4\d{2}\)/i.test(message);
   }
 }
 

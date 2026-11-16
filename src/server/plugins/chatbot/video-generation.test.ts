@@ -60,6 +60,19 @@ describe('video generation', () => {
     const error = await generateVideo(provider, request, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 1 }).catch((reason: unknown) => reason);
     expect(error).toBeInstanceOf(VideoGenerationAttemptError);
     expect((error as VideoGenerationAttemptError).estimatedCost).toBeCloseTo(1.2);
+    expect((error as VideoGenerationAttemptError).billable).toBe(true);
+  });
+
+  it('does not mark a 4xx provider rejection as billable', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('cloudflare-dns.com')) return dns();
+      return new Response('404 page not found', { status: 404 });
+    });
+    const error = await generateVideo({ ...provider, baseUrl: 'https://video.example' },
+      { ...request, protocol: 'openai' }, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 1 })
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(VideoGenerationAttemptError);
+    expect((error as VideoGenerationAttemptError).billable).toBe(false);
   });
 
   it('fails closed for invalid video requests before fetching', async () => {

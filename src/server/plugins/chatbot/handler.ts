@@ -424,9 +424,13 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           try { result = await generateImage(imageProvider, request, imagePrice, fetchImpl); }
           catch (error) {
             if (error instanceof ImageGenerationAttemptError) {
-              await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
-              await log('out', '', 'image_cost_estimated', { model: imageModel, providerId, sizeTier, cost: error.estimatedCost,
-                estimated: true, pricingSource: error.pricingSource, error: error.message });
+              if (error.billable) {
+                await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
+                await log('out', '', 'image_cost_estimated', { model: imageModel, providerId, sizeTier, cost: error.estimatedCost,
+                  estimated: true, pricingSource: error.pricingSource, error: error.message });
+              } else {
+                await log('out', '', 'image_failed', { model: imageModel, providerId, sizeTier, error: error.message });
+              }
             }
             throw error;
           }
@@ -472,9 +476,13 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           try { result = await generateVideo(videoProvider, request, videoPrice, fetchImpl); }
           catch (error) {
             if (error instanceof VideoGenerationAttemptError) {
-              await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
-              await log('out', '', 'video_cost_estimated', { model: videoModel, providerId, resolution, duration,
-                cost: error.estimatedCost, estimated: true, pricingSource: error.pricingSource, error: error.message });
+              if (error.billable) {
+                await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
+                await log('out', '', 'video_cost_estimated', { model: videoModel, providerId, resolution, duration,
+                  cost: error.estimatedCost, estimated: true, pricingSource: error.pricingSource, error: error.message });
+              } else {
+                await log('out', '', 'video_failed', { model: videoModel, providerId, resolution, duration, error: error.message });
+              }
             }
             throw error;
           }
