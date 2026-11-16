@@ -98,6 +98,19 @@ function safeResearchText(value: unknown, maxChars: number, maxBytes: number): s
   return cleaned.length <= maxChars && encoder.encode(cleaned).byteLength <= maxBytes ? cleaned : '';
 }
 
+/**
+ * Observation text is optional: an @ message may contain only an image or no
+ * text at all. Such messages must be ignored rather than surfaced as an error.
+ */
+function collectableText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const cleaned = String(sanitize(value.replace(CONTROL_CHARS, ''))).trim();
+  if (!cleaned) return '';
+  let bounded = cleaned.slice(0, MAX_MESSAGE_CHARS);
+  while (bounded && encoder.encode(bounded).byteLength > 8000) bounded = bounded.slice(0, -1);
+  return bounded;
+}
+
 function htmlEscape(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
 }
@@ -267,7 +280,7 @@ export class SlangWorkflow {
 
   async queueMessage(userId: string, text: string): Promise<void> {
     const safeUserId = boundedText(userId, MAX_USER_ID_CHARS, 512, 'User ID');
-    const safeText = boundedText(text, MAX_MESSAGE_CHARS, 8000, 'Message');
+    const safeText = collectableText(text);
     if (!safeText || safeText.startsWith('/')) return;
     await this.update((workflow, at) => {
       workflow.messageWindow = workflow.messageWindow.filter((entry) => entry.at > at - OBSERVATION_WINDOW_MS && entry.at <= at).slice(-MAX_BATCH_MESSAGES);
@@ -331,8 +344,8 @@ export class SlangWorkflow {
 
   async observeMessage(userId: string, text: string): Promise<SlangCandidate[]> {
     const safeUserId = boundedText(userId, MAX_USER_ID_CHARS, 512, 'User ID');
-    const safeText = boundedText(text, MAX_MESSAGE_CHARS, 8000, 'Message');
-    if (safeText.startsWith('/')) return [];
+    const safeText = collectableText(text);
+    if (!safeText || safeText.startsWith('/')) return [];
     const terms = new Map<string, string>();
     CANDIDATE_RE.lastIndex = 0;
     for (const match of safeText.matchAll(CANDIDATE_RE)) {

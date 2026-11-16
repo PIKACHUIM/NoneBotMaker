@@ -39,6 +39,17 @@ describe('conversation-scoped slang workflow', () => {
     expect(await saved.workflow.confirmedPrompt()).toContain('<term>qwerx</term>');
   });
 
+  it('ignores empty and oversized observation text instead of raising collection errors', async () => {
+    const saved = fixture();
+    await expect(saved.workflow.queueMessage('member-1', '   ')).resolves.toBeUndefined();
+    await expect(saved.workflow.queueMessage('member-1', '\u0000\u0001')).resolves.toBeUndefined();
+    await expect(saved.workflow.observeMessage('member-1', '')).resolves.toEqual([]);
+    await expect(saved.workflow.queueMessage('member-1', 'x'.repeat(5000))).resolves.toBeUndefined();
+    const workflow = (saved.state() as { slangWorkflows: { conversation: { messageWindow: Array<{ context: string }> } } }).slangWorkflows.conversation;
+    expect(workflow.messageWindow).toHaveLength(1);
+    expect(workflow.messageWindow[0].context).toHaveLength(2000);
+  });
+
   it('uses upstream default ten-message batches, cooldown, and injected LLM extraction', async () => {
     const saved = fixture();
     saved.advance(300_000);
