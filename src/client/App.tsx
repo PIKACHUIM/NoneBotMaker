@@ -125,7 +125,7 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   conversations: { title: '会话管理', eyebrow: 'RUNTIME / SESSIONS', description: '查看连接状态、待审批操作、聊天记录与记忆；临时控制只作用于当前会话。' },
   providers: { title: '模型接口', eyebrow: 'MODEL / INTERFACES', description: '管理兼容 API 地址、密钥与供应商支持的模型。' },
   prices: { title: '模型价格', eyebrow: 'MODEL / PRICING', description: '登记文本与图像模型单价、来源和价格核对日期。' },
-  budgets: { title: '费用策略', eyebrow: 'MODEL / BUDGETS', description: '集中管理可复用预算，群聊只选择费用策略。' },
+  budgets: { title: '费用限制', eyebrow: 'MODEL / BUDGETS', description: '集中管理可复用预算，群聊只选择费用策略。' },
   identities: { title: '身份策略', eyebrow: 'MODEL / IDENTITY', description: '集中定义人设、基础规则、聊天模型与能力授权。' },
   dialogs: { title: '对话策略', eyebrow: 'MODEL / DIALOG', description: '控制模型流式响应、工具轮数与回复方式。' },
   voices: { title: '语音策略', eyebrow: 'MODEL / VOICE', description: '配置语音合成参数；未选择语音策略表示关闭。' },
@@ -589,20 +589,18 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
       { key: 'commands', icon: <CodeOutlined />, label: tr('命令管理') },
       { key: 'logs', icon: <FileTextOutlined />, label: tr('对话日志') },
     ] },
-    { key: 'model', icon: <ApiOutlined />, label: tr('模型能力'), children: [
-      { key: 'interfaces', label: tr('接口管理'), children: [
-        { key: 'providers', label: tr('模型接口') }, { key: 'prices', label: tr('模型价格') }, { key: 'budgets', label: tr('费用策略') },
-      ] },
-      { key: 'strategies', label: tr('策略管理'), children: [
-        { key: 'identities', label: tr('身份策略') }, { key: 'dialogs', label: tr('对话策略') },
-        { key: 'voices', label: tr('语音策略') }, { key: 'memory-policies', label: tr('记忆策略') },
-      ] },
-      { key: 'capabilities', label: tr('能力管理'), children: [
-        { key: 'skills', label: tr('可用技能') }, { key: 'mcps', label: tr('模型协议') }, { key: 'rules', label: tr('约束规则') }, { key: 'tools', label: tr('调用工具') }, { key: 'extensions', label: tr('扩展插件') },
-      ] },
+    { key: 'interfaces', icon: <ApiOutlined />, label: tr('接口管理'), children: [
+      { key: 'providers', label: tr('模型接口') }, { key: 'prices', label: tr('模型价格') }, { key: 'budgets', label: tr('费用策略') },
+    ] },
+    { key: 'strategies', icon: <ThunderboltOutlined />, label: tr('策略管理'), children: [
+      { key: 'identities', label: tr('身份策略') }, { key: 'dialogs', label: tr('对话策略') },
+      { key: 'voices', label: tr('语音策略') }, { key: 'memory-policies', label: tr('记忆策略') },
+    ] },
+    { key: 'capabilities', icon: <ToolOutlined />, label: tr('能力管理'), children: [
+      { key: 'skills', label: tr('可用技能') }, { key: 'mcps', label: tr('模型协议') }, { key: 'rules', label: tr('约束规则') }, { key: 'tools', label: tr('调用工具') }, { key: 'extensions', label: tr('扩展插件') },
     ] },
   ];
-  const [openMenus, setOpenMenus] = useState<string[]>(['platform', 'model', 'interfaces', 'strategies', 'capabilities']);
+  const [openMenus, setOpenMenus] = useState<string[]>(['platform', 'interfaces', 'strategies', 'capabilities']);
   const title = pageTitles[page];
   const setPage = (key: string) => {
     setMobileNav(false);
