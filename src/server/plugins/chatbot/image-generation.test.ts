@@ -38,6 +38,16 @@ describe('Images API generation', () => {
     expect(cached).toMatchObject({ cost: (80 * 5 + 8 * 3 + 12 + 1000 * 20) / 1e6, pricingSource: 'modalities', usage: { cachedImageInputTokens: 12 } });
   });
 
+  it('accepts URL image responses from OpenAI-compatible providers', async () => {
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(url).includes('cloudflare-dns.com')) return dns();
+      if (String(url).includes('cdn.example.com')) return new Response(png, { headers: { 'content-type': 'image/png' } });
+      return payload({ data: [{ url: 'https://cdn.example.com/image.png' }] });
+    });
+    const result = await generateImage(provider, { ...request, sizeTier: '1K' }, { ...price, imageCostPer1K: 0.05 }, fetchImpl);
+    expect(result).toMatchObject({ bytes: png, contentType: 'image/png', cost: 0.05, pricingSource: 'size_tier', estimated: false });
+  });
+
   it('bills the conversation size tier instead of token usage when a tier price is configured', async () => {
     const fetchImpl = stub(payload({ total_tokens: 10_000 }));
     const result = await generateImage(provider, { ...request, size: '2048x2048', sizeTier: '2K' }, { ...price, imageCostPer2K: 1.25 }, fetchImpl);

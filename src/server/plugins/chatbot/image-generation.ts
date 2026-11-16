@@ -1,5 +1,5 @@
 import type { ProviderRecord } from '../../../shared/types';
-import { boundedText, openAiEndpoint, publicHttpsUrl, safeFetch } from './network';
+import { boundedBytes, boundedText, openAiEndpoint, publicHttpsUrl, safeFetch } from './network';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
@@ -124,9 +124,26 @@ export async function generateImage(
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Image provider response is invalid.');
   const result = payload as Record<string, unknown>;
   if (!Array.isArray(result.data) || result.data.length !== 1 || !result.data[0] || typeof result.data[0] !== 'object') throw new Error('Image provider must return exactly one image.');
-  const encoded = (result.data[0] as Record<string, unknown>).b64_json;
-  if (typeof encoded !== 'string' || !encoded.length || encoded.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error('Image provider returned invalid image data.');
-  const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+  const first = result.data[0] as Record<string, unknown>;
+  let bytes: Uint8Array;
+  if (first.b64_json !== undefined) {
+    const encoded = first.b64_json;
+    if (typeof encoded !== 'string' || !encoded.length || encoded.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error('Image provider returned invalid image data.');
+    bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+  } else {
+    // Some OpenAI-compatible Images API implementations return a URL instead of base64.
+    const imageUrl = first.url;
+    if (typeof imageUrl !== 'string' || imageUrl.length > 2048) throw new Error('Image provider returned invalid image data.');
+    let response: Response;
+    try { response = await safeFetch(imageUrl, { headers: { accept: 'image/*' } }, fetchImpl, 120_000, 2); }
+    catch { throw new Error('Image download failed.'); }
+    const mime = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    if ((mime && !mime.startsWith('image/') && mime !== 'application/octet-stream')) {
+      await response.body?.cancel();
+      throw new Error('Image download did not return an image.');
+    }
+    bytes = await boundedBytes(response, MAX_IMAGE_BYTES);
+  }
   if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('Image provider image exceeds the size limit.');
   const contentType = imageMime(bytes);
   // Per-image tier pricing is authoritative and does not depend on provider usage.
