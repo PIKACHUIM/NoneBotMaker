@@ -2181,6 +2181,17 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
     finally { setClearing(false); }
   };
   const selectedPluginId = Form.useWatch('pluginId', { form, preserve: true }) as string | undefined;
+  const sessionOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const group of groups) {
+      for (const externalId of conversationIdList(group.externalId)) {
+        if (options.has(externalId)) continue;
+        const account = accounts.find((item) => item.id === group.accountId);
+        options.set(externalId, `${account?.name ?? group.accountId} · ${group.name || externalId} · ${group.conversationType === 'private' ? tr('私聊') : tr('群聊')} · ${externalId}`);
+      }
+    }
+    return [...options].map(([value, label]) => ({ value, label }));
+  }, [groups, accounts, tr]);
   const rowPlugin = (row: ConversationLog) => plugins.find((item) => item.id === (row.pluginId || accounts.find((account) => account.id === row.accountId)?.pluginId));
   const rowDefinition = (row: ConversationLog) => pluginDefinition(row.pluginType || rowPlugin(row)?.type);
   const selectedDefinition = pluginDefinition(plugins.find((item) => item.id === selectedPluginId)?.type);
@@ -2229,7 +2240,7 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
     <div className="log-toolbar"><Form form={form} layout="inline" onFinish={onFilter} className="log-filter-form">
       <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder={tr('搜索消息内容或用户 ID')} aria-label={tr('搜索消息内容或用户 ID')} /></Form.Item>
       <Form.Item name="pluginId"><Select allowClear placeholder={tr('全部插件')} aria-label={tr('全部插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
-      <Form.Item name="openid"><Input allowClear placeholder={tr('用户或群 openid')} aria-label={tr('用户或群 openid')} /></Form.Item>
+      <Form.Item name="openid"><Select allowClear showSearch optionFilterProp="label" popupMatchSelectWidth={false} placeholder={tr('选择群聊或私聊')} aria-label={tr('选择群聊或私聊')} options={sessionOptions} notFoundContent={tr('暂无已绑定会话')} /></Form.Item>
       <Form.Item name="from"><Input type="datetime-local" aria-label={tr('开始时间')} /></Form.Item>
       <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
       <Form.Item name="accountId"><Select allowClear placeholder={tr('全部账号')} options={accounts.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
