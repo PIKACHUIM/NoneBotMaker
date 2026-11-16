@@ -181,6 +181,19 @@ async function resolveToolRecords(
   return [...new Map(records.filter((record): record is LibraryRecord => record?.enabled === true).map((record) => [record.id, record])).values()];
 }
 
+function chatErrorNotice(message: string): string | undefined {
+  if (/timed?\s*out|aborted due to timeout|timeout/i.test(message)) return '处理失败：模型接口响应超时，请稍后再试。';
+  const status = /Remote request failed \((\d{3})\)/i.exec(message)?.[1];
+  if (status) {
+    if (status === '401' || status === '403') return `处理失败：模型接口鉴权失败（HTTP ${status}），请联系管理员检查配置。`;
+    if (status === '429') return '处理失败：模型接口请求过于频繁，请稍后再试。';
+    if (status.startsWith('5')) return `处理失败：模型接口暂时不可用（HTTP ${status}），请稍后再试。`;
+    return `处理失败：模型接口请求失败（HTTP ${status}），请稍后再试。`;
+  }
+  if (/fetch failed|network|ECONN|ENOTFOUND|EAI_AGAIN/i.test(message)) return '处理失败：连接模型接口失败，请稍后再试。';
+  return undefined;
+}
+
 export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): ChatbotMessageHandler {
   const random = dependencies.random ?? Math.random;
   const now = dependencies.now ?? Date.now;
@@ -1230,10 +1243,18 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       }
       await log('out', '', 'max_turns', { turns: maxRounds });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Chatbot execution failed.';
-      const errorCode = /timed?\s*out|aborted due to timeout|timeout/i.test(message) ? 'timeout' : undefined;
-      try { await log('out', '', 'error', { error: message, ...(errorCode ? { errorCode } : {}), sentCount }); }
-      catch { if (!sentCount) throw error; }
+      const errorMessage = error instanceof Error ? error.message : 'Chatbot execution failed.';
+      const errorCode = /timed?\s*out|aborted due to timeout|timeout/i.test(errorMessage) ? 'timeout' : undefined;
+      try { await log('out', '', 'error', { error: errorMessage, ...(errorCode ? { errorCode } : {}), sentCount }); }
+      catch { /* The user-facing notice below is still useful when logging is unavailable. */ }
+      const notice = chatErrorNotice(errorMessage);
+      if (!message.isWake && sentCount === 0 && notice) {
+        try {
+          await send(notice);
+          try { await log('out', '', 'error_reply', { errorCode: errorCode ?? 'api_error', sentCount }); } catch { /* best effort */ }
+          return;
+        } catch { /* Sending the notice failed; fall back to the retryable error below. */ }
+      }
       if (!sentCount) throw error;
     } finally {
       try {

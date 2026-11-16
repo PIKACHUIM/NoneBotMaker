@@ -129,6 +129,18 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.00002, 1_000);
   });
 
+  it('sends a user-facing notice when the upstream model API fails', async () => {
+    const { deps, sentReplies } = dependencies({ fetch: vi.fn(async () => new Response('bad gateway', { status: 502 })) });
+    await expect(createChatbotHandler(deps)(account, message())).resolves.toBeUndefined();
+    expect(sentReplies).toEqual(['处理失败：模型接口暂时不可用（HTTP 502），请稍后再试。']);
+  });
+
+  it('sends a timeout notice without retrying the user message', async () => {
+    const { deps, sentReplies } = dependencies({ fetch: vi.fn(async () => { throw new Error('The operation was aborted due to timeout'); }) });
+    await expect(createChatbotHandler(deps)(account, message())).resolves.toBeUndefined();
+    expect(sentReplies).toEqual(['处理失败：模型接口响应超时，请稍后再试。']);
+  });
+
   it('omits reasoning effort for models using the explicit model-default policy', async () => {
     const { deps, fetch } = dependencies({ findGroup: vi.fn(async () => ({ ...group, reasoningEffort: 'default' as const })) });
     await createChatbotHandler(deps)(account, message());
