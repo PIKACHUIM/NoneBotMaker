@@ -1,6 +1,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import type { D1DatabaseLike, D1StatementLike } from '../../shared/types';
+import { BUILTIN_CHAT_TOOL_NAMES } from '../../shared/plugin-catalog';
 import { initializeD1Setup, inspectD1Setup } from './d1-setup';
 
 const sqliteModule = await import('node:sqlite').catch(() => null);
@@ -39,7 +40,7 @@ describe('online D1 initialization', () => {
       const before = await inspectD1Setup(db);
       expect(before.databaseConfigured).toBe(true);
       expect(before.schemaReady).toBe(false);
-      expect(before.pendingMigrations).toBe(6);
+      expect(before.pendingMigrations).toBe(7);
 
       const initialized = await initializeD1Setup(db);
       expect(initialized.schemaReady).toBe(true);
@@ -70,10 +71,16 @@ describe('online D1 initialization', () => {
         '0004_plugin_conversation_logs.sql',
         '0005_conversation_memories.sql',
         '0006_default_media_tools.sql',
+        '0007_builtin_tool_catalog.sql',
       ]);
 
       const repeated = await initializeD1Setup(db);
       expect(repeated).toEqual(initialized);
+
+      const toolIds = new Set((database.prepare("SELECT id FROM records WHERE kind = 'tools'").all() as Array<{ id: string }>).map((row) => row.id));
+      for (const name of BUILTIN_CHAT_TOOL_NAMES) {
+        expect(toolIds.has(`builtin-${name.replaceAll('_', '-')}`)).toBe(true);
+      }
     } finally {
       database.close();
     }

@@ -65,6 +65,8 @@ export const DEFAULT_IDENTITY_TOOL_NAMES = [
 
 /** Human-readable catalog names for built-in tools. */
 export const BUILTIN_TOOL_LABELS: Record<string, LocalizedText> = {
+  WebSearch: { zh: '联网搜索', en: 'Web search' },
+  WebFetch: { zh: '网页读取', en: 'Web fetch' },
   chat_generate_image: { zh: '图片生成', en: 'Image generation' },
   chat_generate_video: { zh: '视频生成', en: 'Video generation' },
   chat_calculate: { zh: '计算器', en: 'Calculator' },

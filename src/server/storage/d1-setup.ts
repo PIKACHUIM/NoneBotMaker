@@ -10,6 +10,7 @@ const MIGRATION_NAMES = [
   '0004_plugin_conversation_logs.sql',
   '0005_conversation_memories.sql',
   '0006_default_media_tools.sql',
+  '0007_builtin_tool_catalog.sql',
 ] as const;
 
 const LOG_COLUMNS = {
