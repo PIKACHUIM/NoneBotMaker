@@ -100,6 +100,7 @@ import {
   chatProtocols,
   conversationFields,
   conversationIdList,
+  DEFAULT_IDENTITY_TOOL_NAMES,
   defaultFieldValues,
   normalizeFieldValues,
   pluginDefinition,
@@ -1788,7 +1789,8 @@ function PolicyPanel({ type, data, providers, libraries, tools = [], onRefresh, 
       reasoningEffort: editing?.reasoningEffort ?? 'default',
       persona: editing?.persona ?? '',
       systemPrompt: editing?.systemPrompt ?? '',
-      skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [], toolIds: editing?.toolIds ?? [],
+      skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
+      toolIds: editing?.toolIds ?? (type === 'identity' ? DEFAULT_IDENTITY_TOOL_NAMES.map((name) => `builtin-${name.replaceAll('_', '-')}`) : []),
       config: type === 'cost' ? { dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0, ...editing?.config }
         : type === 'memory' ? { memoryMode: 'manual', maxEntries: 100, retentionDays: 7, memoryContextLength: '32K', memory_enabled: true, ...editing?.config }
           : editableFieldValues(fields, editing?.config),
