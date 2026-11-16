@@ -711,6 +711,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .source-meta-row { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; color: var(--muted); font-size: 10px; }
 .source-tag { padding: 1px 5px; border-radius: 3px; border: 1px solid var(--line); background: var(--surface-2, transparent); }
 .source-copy em { font-size: 11px; font-style: normal; color: var(--warning, #b56a00); }
+.code-input textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; }
 
 @media (max-width: 640px) {
   .source-manual { flex-direction: column; }

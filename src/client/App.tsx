@@ -2258,7 +2258,7 @@ function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
       enabled: editing?.enabled ?? true,
       config: editing?.config ?? {
         cron: '0 9 * * *', timezone: 'Asia/Shanghai', groupId: groups.find((group) => group.enabled)?.id ?? '',
-        action: 'message', content: '', extensionId: undefined, maxCatchUpMinutes: 0,
+        action: 'message', content: '', extensionId: undefined,
       },
     });
   }, [drawer.open, editing, form, groups]);

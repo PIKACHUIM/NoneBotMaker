@@ -315,7 +315,7 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         enabled: booleanField(data, 'enabled', true),
         config: {
           cron, timezone, groupId: nonEmptyStringField(config, 'groupId'), action, content,
-          extensionId, maxCatchUpMinutes: numberField(config, 'maxCatchUpMinutes', 0, 0, 1440),
+          extensionId,
         },
         ...(typeof data.lastRunAt === 'string' ? { lastRunAt: data.lastRunAt } : {}),
         ...(typeof data.lastStatus === 'string' ? { lastStatus: data.lastStatus } : {}),
@@ -672,7 +672,6 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
         cron: stringField(config, 'cron', '0 9 * * *'), timezone: stringField(config, 'timezone', 'UTC'),
         groupId: stringField(config, 'groupId', ''), action: stringField(config, 'action', 'message'),
         content: stringField(config, 'content', ''), extensionId: stringField(config, 'extensionId', ''),
-        maxCatchUpMinutes: numberField(config, 'maxCatchUpMinutes', 0, 0, 1440),
       } };
   } else if (kind === 'commands') {
     const config = objectField(record, 'config');

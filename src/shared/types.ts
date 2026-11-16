@@ -222,8 +222,6 @@ export interface ScheduleConfig {
   /** Fixed text for message actions, prompt text for prompt actions, or `/command args`. */
   content: string;
   extensionId?: string;
-  /** Stop catching up after this many minutes; 0 means only the current tick. */
-  maxCatchUpMinutes?: number;
 }
 
 export interface ScheduleRecord {
