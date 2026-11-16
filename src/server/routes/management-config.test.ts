@@ -590,6 +590,27 @@ describe('capability policies', () => {
     expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', identityPolicyId: 'missing-policy' })).status).toBe(400);
   });
 
+  it('stores conversation-level Skills, MCP and Rules additions and validates references', async () => {
+    const setup = configuredApp();
+    seed(setup.values, 'skills', { id: 'skill-1', name: 'Skill', description: '', enabled: true, config: { prompt: 'skill prompt' } });
+    seed(setup.values, 'mcps', { id: 'mcp-1', name: 'MCP', description: '', enabled: true, config: { url: 'https://mcp.example/rpc' } });
+    seed(setup.values, 'rules', { id: 'rule-1', name: 'Rule', description: '', enabled: true, config: { prompt: 'rule prompt' } });
+
+    const created = await writeRequest(setup, '/groups', {
+      ...baseGroup, skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'],
+    });
+    expect(created.status).toBe(201);
+    const group = (await json(created)).data as JsonObject;
+    expect(group).toMatchObject({ skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'] });
+
+    const listed = (await json(await setup.app.request('/groups', {}, setup.bindings))).data as JsonObject[];
+    expect(listed.find((item) => item.id === baseGroup.id)).toMatchObject({ skillIds: ['skill-1'], mcpIds: ['mcp-1'], ruleIds: ['rule-1'] });
+
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', skillIds: ['missing-skill'] })).status).toBe(400);
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-3', externalId: 'external-3', mcpIds: ['missing-mcp'] })).status).toBe(400);
+    expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-4', externalId: 'external-4', ruleIds: ['missing-rule'] })).status).toBe(400);
+  });
+
   it('blocks deleting skills that only a policy references', async () => {
     const setup = configuredApp();
     seed(setup.values, 'skills', { id: 'skill-1', name: 'Skill', description: '', enabled: true, config: { prompt: 'do it' } });

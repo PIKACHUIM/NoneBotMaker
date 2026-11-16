@@ -667,7 +667,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
               {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} policies={policies} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
               {page === 'accounts' && <><AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} /><div className="account-memory-section"><h2>{tr('账号共享项目记忆')}</h2><p>{tr('共享项目记忆按平台账号存储，不等同于会话记忆策略。')}</p><ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={refresh} onError={handleError} /></div></>}
-              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} policies={policies} tools={tools} onRefresh={refresh} onError={handleError} />}
+              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} policies={policies} tools={tools} libraries={libraries} onRefresh={refresh} onError={handleError} />}
               {page === 'conversations' && <section className="conversation-workspace"><Tabs activeKey={view} onChange={(key) => go(`/admin/conversations/${key}`)} items={[
                 { key: 'status', label: tr('运行状态'), children: view === 'status' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="status" /> },
                 { key: 'approvals', label: tr('操作审批'), children: view === 'approvals' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="approvals" /> },
@@ -1501,8 +1501,8 @@ function PolicySelectCard({ type, name, required = false, policies, value, optio
   </div>;
 }
 
-function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onRefresh, onError }: {
-  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; tools: LibraryRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+function GroupsPage({ groups, plugins, accounts, providers, policies, tools, libraries, onRefresh, onError }: {
+  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; tools: LibraryRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
   const { tr } = useI18n();
   const drawer = useDrawer();
@@ -1559,6 +1559,7 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
       nonMentionReplyRate: editing?.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE,
       whitelistEnabled: editing?.whitelistEnabled ?? false,
       whitelistText: editing?.whitelistUserIds.join('\n') ?? '',
+      skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
       config: editableFieldValues(conversationFields(pluginDefinition(currentPlugin?.type)?.type), editing?.config),
     });
   }, [drawer.open, editing, form, plugins, accounts]);
@@ -1581,6 +1582,9 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
         systemPrompt: String(values.systemPrompt ?? ''),
         nonMentionReplyRate: Number(values.nonMentionReplyRate ?? DEFAULT_NON_MENTION_REPLY_RATE),
         whitelistEnabled: Boolean(values.whitelistEnabled), whitelistUserIds: userIds,
+        skillIds: (values.skillIds as string[] | undefined) ?? [],
+        mcpIds: (values.mcpIds as string[] | undefined) ?? [],
+        ruleIds: (values.ruleIds as string[] | undefined) ?? [],
       }, editing?.id);
       drawer.close(); onRefresh();
     } catch (reason) { onError(reason); }
@@ -1615,6 +1619,7 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name || row.externalId}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveGroup({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name || row.externalId}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteGroup(row.id).then(onRefresh).catch(onError)}><Button aria-label={tr('删除')} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   const policyOptions = (type: PolicyType) => policies.filter((item) => item.type === type).map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id, disabled: !item.enabled }));
+  const libraryOptions = (kind: LibraryKind) => libraries[kind].map((item) => ({ label: `${item.name}${item.enabled ? '' : ` · ${tr('已停用')}`}`, value: item.id, disabled: !item.enabled }));
   return <section className="data-page"><PageToolbar count={groups.length} noun="CONVERSATIONS" action={tr('新增群聊')} onCreate={() => drawer.edit()} />
     {groups.length ? <Table<GroupRecord> rowKey="id" columns={columns} dataSource={groups} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 1050 }} className="data-table" /> : <EmptyTable title={tr('还没有绑定的群聊或私聊')} description={tr('先配置可用的身份与对话策略，再绑定平台账号和会话 OpenID。')} onCreate={() => drawer.edit()} action={tr('新增群聊')} />}
     <Drawer title={<DrawerTitle label="CONVERSATION BINDING" title={editing ? tr('编辑群聊') : tr('新增群聊')} />} width={960} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存策略')}</Button></div>}>
@@ -1664,7 +1669,14 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
           <PolicySelectCard type="memory" name="memoryPolicyId" policies={policies} value={memoryPolicyId} options={policyOptions('memory')} detail={memoryPolicyId ? policies.find((item) => item.id === memoryPolicyId)?.config.memory_enabled === false ? tr('所选策略已关闭会话记忆') : tr('记忆模式来自所选策略') : tr('未选：关闭会话记忆')} href="#/admin/memory-policies" />
         </div>
         {selectedAccountId && otherConfigFields.length > 0 && <SchemaFields fields={otherConfigFields} path="config" editing={Boolean(editing)} />}
-        <div className="form-section-heading"><span>03 / {tr('仅此群的差异')}</span><small>{tr('可选覆盖')}</small></div>
+        <div className="form-section-heading"><span>03 / {tr('群聊能力追加')}</span><small>{tr('可选，叠加在身份策略之上')}</small></div>
+        <p className="form-note">{tr('身份策略已有的 Skills、MCP 与 Rules 会保留；这里只增加此群额外的能力，不会移除身份授权。')}</p>
+        <div className="form-grid three-cols">
+          <Form.Item name="skillIds" label="Skills"><Select mode="multiple" allowClear placeholder={tr('追加 Skills')} options={libraryOptions('skills')} /></Form.Item>
+          <Form.Item name="mcpIds" label="MCP"><Select mode="multiple" allowClear placeholder={tr('追加 MCP 服务')} options={libraryOptions('mcps')} /></Form.Item>
+          <Form.Item name="ruleIds" label="Rules"><Select mode="multiple" allowClear placeholder={tr('追加规则集')} options={libraryOptions('rules')} /></Form.Item>
+        </div>
+        <div className="form-section-heading"><span>04 / {tr('仅此群的差异')}</span><small>{tr('可选覆盖')}</small></div>
         <div className="form-grid two-cols">
           <Form.Item name="providerId" label={tr('AI供应商覆盖')} extra={tr('供应商与模型必须成组覆盖；两项留空继承身份策略。')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
           <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
@@ -1693,7 +1705,7 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
           <div>{tr('对话')}：{policyName(policies, 'dialog', dialogPolicyId) || tr('未选择')} · {tr('语音')}：{policyName(policies, 'voice', voicePolicyId) || tr('关闭')}</div>
           <div>{tr('费用')}：{policyName(policies, 'cost', costPolicyId) || tr('不限额')} · {tr('记忆')}：{policyName(policies, 'memory', memoryPolicyId) || tr('关闭')}</div>
         </div>
-        <div className="form-section-heading"><span>04 / {tr('高级选项')}</span><small>{tr('按需展开')}</small></div>
+        <div className="form-section-heading"><span>05 / {tr('高级选项')}</span><small>{tr('按需展开')}</small></div>
         <Collapse className="policy-overrides advanced-settings" size="small" items={[{ key: 'advanced', label: tr('时区与预留模式参数'), extra: <span className="policy-overrides-summary">{advancedSummary}</span>, children: <>
           {selectedAccountId && advancedConfigFields.length > 0 && <SchemaFields fields={advancedConfigFields} path="config" editing={Boolean(editing)} />}
         </> }]} />

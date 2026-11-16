@@ -159,6 +159,9 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         nonMentionReplyRate: numberField(data, 'nonMentionReplyRate', DEFAULT_NON_MENTION_REPLY_RATE, 0, 1),
         whitelistEnabled: booleanField(data, 'whitelistEnabled', false),
         whitelistUserIds: stringArrayField(data, 'whitelistUserIds'),
+        skillIds: stringArrayField(data, 'skillIds'),
+        mcpIds: stringArrayField(data, 'mcpIds'),
+        ruleIds: stringArrayField(data, 'ruleIds'),
         toolApprovalMode: approvalMode,
         toolApprovalRules: rules,
       };
@@ -560,6 +563,9 @@ async function assertReferences(repository: RecordRepository, kind: RecordKind, 
       const policy = await repository.get('policies', record[field] as string);
       if (!policy || policy.type !== expected || policy.enabled !== true) throw new ApiError(400, `invalid_${field}`);
     }
+    for (const id of record.skillIds as string[] ?? []) await requireRecord('skills', id);
+    for (const id of record.mcpIds as string[] ?? []) await requireRecord('mcps', id);
+    for (const id of record.ruleIds as string[] ?? []) await requireRecord('rules', id);
   } else if (kind === 'tools') {
     const config = record.config as JsonObject | undefined;
     if (config?.providerId) await requireRecord('providers', config.providerId as string);
@@ -648,7 +654,7 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
     const config = await readableConfig(record.config as JsonObject | undefined, bindings);
     const ownConfig = Object.fromEntries(conversationFields(typeof plugin?.type === 'string' ? plugin.type : undefined)
       .filter((field) => Object.hasOwn(config, field.key)).map((field) => [field.key, config[field.key]]));
-    const { skillIds: _skills, mcpIds: _mcps, ruleIds: _rules, reasoningEffort: _effort,
+    const { reasoningEffort: _effort,
       systemPromptMode: _promptMode, dailyCostLimit: _daily, monthlyCostLimit: _monthly,
       totalCostLimit: _total, inputCostPerMillion: _inputPrice, outputCostPerMillion: _outputPrice,
       ...storedGroup } = record;
@@ -663,6 +669,9 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
       ...storedGroup, config: ownConfig, conversationType: record.conversationType ?? 'group',
       identityPolicyId: record.identityPolicyId ?? '', dialogPolicyId: record.dialogPolicyId ?? '',
       voicePolicyId: record.voicePolicyId ?? '', memoryPolicyId: record.memoryPolicyId ?? '', costPolicyId: record.costPolicyId ?? '',
+      skillIds: Array.isArray(record.skillIds) ? record.skillIds : [],
+      mcpIds: Array.isArray(record.mcpIds) ? record.mcpIds : [],
+      ruleIds: Array.isArray(record.ruleIds) ? record.ruleIds : [],
       ...(migrationRequired.length ? { migrationRequired } : {}),
       ...(resolved ? { effective: { providerId: resolved.providerId, model: resolved.model, persona: resolved.persona ?? '',
         systemPrompt: resolved.systemPrompt, config: resolved.config, dailyCostLimit: resolved.dailyCostLimit,

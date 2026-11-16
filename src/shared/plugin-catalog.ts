@@ -743,7 +743,7 @@ export interface ResolvedGroupIdentity {
 
 /** Identity owns persona, tool authorization and base rules; a group may append local rules. */
 export function resolveGroupIdentity(
-  group: Pick<GroupRecord, 'providerId' | 'model' | 'systemPrompt'>,
+  group: Pick<GroupRecord, 'providerId' | 'model' | 'systemPrompt'> & Partial<Pick<GroupRecord, 'skillIds' | 'mcpIds' | 'ruleIds'>>,
   identity?: PolicyRecord,
 ): ResolvedGroupIdentity {
   if (!identity?.enabled) throw new Error('identity_policy_unavailable');
@@ -755,9 +755,10 @@ export function resolveGroupIdentity(
     model,
     systemPrompt: [identity.systemPrompt, group.systemPrompt].filter((part) => typeof part === 'string' && part.trim()).join('\n\n'),
     reasoningEffort: identity.reasoningEffort ?? 'default',
-    skillIds: [...new Set(identity.skillIds ?? [])],
-    mcpIds: [...new Set(identity.mcpIds ?? [])],
-    ruleIds: [...new Set(identity.ruleIds ?? [])],
+    // Conversation-level capabilities are additive; identity grants remain in effect.
+    skillIds: [...new Set([...(identity.skillIds ?? []), ...(group.skillIds ?? [])])],
+    mcpIds: [...new Set([...(identity.mcpIds ?? []), ...(group.mcpIds ?? [])])],
+    ruleIds: [...new Set([...(identity.ruleIds ?? []), ...(group.ruleIds ?? [])])],
   };
 }
 
