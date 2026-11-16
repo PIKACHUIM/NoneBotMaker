@@ -394,6 +394,7 @@ const chatbotDefinition: PluginDefinition = {
     ], {
       group: searchGroup,
       default: 'auto',
+      hidden: true,
       options: [
         { value: 'auto', label: { zh: 'auto / 自动（DuckDuckGo → 百度 → Bing）', en: 'auto / DuckDuckGo, Baidu, Bing' } },
         { value: 'duckduckgo', label: { zh: 'DuckDuckGo（免费）', en: 'DuckDuckGo (free)' } },
@@ -405,11 +406,11 @@ const chatbotDefinition: PluginDefinition = {
     number('web_search_results', ['搜索结果数量', 'Search results'], [
       '每次搜索返回的结果条数，1–10。',
       'Number of results returned per search, from 1 to 10.',
-    ], { group: searchGroup, default: 5, min: 1, max: 10, step: 1 }),
+    ], { group: searchGroup, default: 5, min: 1, max: 10, step: 1, hidden: true }),
     text('brave_api_key', ['Brave Search API Key', 'Brave Search API key'], [
       '仅在搜索方式为 brave 或作为自动兜底时使用；留空则只使用免费搜索。',
       'Used when the search engine is brave or as an automatic fallback; leave empty to use free search only.',
-    ], { group: searchGroup, default: '', secret: true }),
+    ], { group: searchGroup, default: '', secret: true, hidden: true }),
   ],
   accountFields: [],
   groupFields: [

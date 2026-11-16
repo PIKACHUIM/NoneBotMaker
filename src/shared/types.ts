@@ -36,6 +36,8 @@ export interface PluginFieldDefinition {
   required?: boolean;
   secret?: boolean;
   multiline?: boolean;
+  /** Kept for backward compatibility but hidden from the generic plugin form. */
+  hidden?: boolean;
   default?: string | number | boolean;
   min?: number;
   max?: number;

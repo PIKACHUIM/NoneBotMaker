@@ -916,10 +916,12 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
         </> : isSearchTool ? <>
           <Alert type="info" showIcon message={tr('搜索配置保存在这个工具上，不再依赖插件设置。免费引擎不需要 Key；Tavily / Serper / Brave / Google / Bing / SearXNG 可填对应 API 地址和 Key。')} />
           <div className="form-grid two-cols">
-            <Form.Item name={['config', 'engine']} label={tr('搜索引擎')}><Select options={SEARCH_ENGINE_OPTIONS} /></Form.Item>
+            <Form.Item name={['config', 'engine']} label={tr('搜索引擎')}><Select options={SEARCH_ENGINE_OPTIONS} onChange={(value: string) => {
+              if (!['brave', 'tavily', 'serper', 'google', 'bing', 'searxng'].includes(value)) form.setFieldValue(['config', 'apiKey'], '');
+            }} /></Form.Item>
             <Form.Item name={['config', 'limit']} label={tr('结果数量')}><InputNumber min={1} max={10} precision={0} className="full-width" /></Form.Item>
           </div>
-          <Form.Item name={['config', 'apiKey']} label={tr('API Key')} extra={tr('留空保留已保存的 Key；Key 会加密存储且不再显示明文。')}><Input.Password autoComplete="new-password" placeholder={searchEngine === 'bing' ? tr('可选；留空使用免费 Bing') : tr('填写对应引擎的 API Key')} /></Form.Item>
+          {['brave', 'tavily', 'serper', 'google', 'bing', 'searxng'].includes(searchEngine) && <Form.Item name={['config', 'apiKey']} label={tr('API Key')} extra={tr('留空保留已保存的 Key；Key 会加密存储且不再显示明文。')}><Input.Password autoComplete="new-password" placeholder={searchEngine === 'bing' ? tr('可选；留空使用免费 Bing') : searchEngine === 'searxng' ? tr('可选；实例未开启鉴权时留空') : tr('填写对应引擎的 API Key')} /></Form.Item>}
           {searchEngine === 'google' && <Form.Item name={['config', 'cx']} label={tr('Google 搜索引擎 ID（CX）')} rules={[{ required: true, message: tr('请输入 CX') }]}><Input placeholder="0123456789:abcdef" /></Form.Item>}
           {['tavily', 'serper', 'searxng'].includes(searchEngine) && <Form.Item name={['config', 'baseUrl']} label={tr('API 地址')}
             extra={searchEngine === 'searxng' ? tr('SearXNG 实例地址，必须支持 /search?format=json。') : tr('可选，留空使用官方默认地址。')}
@@ -1086,7 +1088,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
   const editing = data.find((item) => item.id === drawer.editingId);
   const selectedType = (Form.useWatch('type', { form, preserve: true }) as string | undefined) ?? editing?.type ?? CHATBOT_PLUGIN_TYPE;
   const definition = pluginDefinition(selectedType);
-  const configFields = definition?.configFields ?? [];
+  const configFields = definition?.configFields.filter((field) => !field.hidden) ?? [];
   const typeOptions = pluginDefinitions().map((item) => ({ value: item.type, label: `${localized(item.name)} · ${item.type}` }));
   if (selectedType && !definition) typeOptions.push({ value: selectedType, label: selectedType });
   const configSections = configFields.reduce<Array<{ label: string; fields: PluginFieldDefinition[] }>>((sections, field) => {
@@ -1135,7 +1137,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.savePlugin({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除插件')}“${row.name}”？`} description={tr('关联实例可能无法继续运行。')} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePlugin(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <section className="data-page"><PageToolbar count={data.length} noun="PLUGINS" action={tr('新增插件')} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<PluginRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有插件')} description={tr('创建插件记录，再配置平台账号与群聊。')} onCreate={() => drawer.edit()} action={tr('创建插件')} />}
+    {data.length ? <Table<PluginRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有插件')} description={tr('创建通用群聊助手插件，再到平台账号选择协议并绑定群聊。')} onCreate={() => drawer.edit()} action={tr('创建插件')} />}
     <Drawer title={<DrawerTitle label="PLUGIN RECORD" title={editing ? tr('编辑插件') : tr('新增插件')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存插件')}</Button></div>}>
       <Form
         key={editing?.id ?? 'new-plugin'}
@@ -1153,9 +1155,10 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
       >
         <Form.Item name="name" label={tr('插件名称')} rules={[{ required: true, message: tr('请输入插件名称') }]}><Input placeholder={tr('例如：群聊助手')} /></Form.Item>
         <Form.Item name="type" label={tr('插件类型')} rules={[{ required: true, message: tr('请输入插件类型') }]}><Select options={typeOptions} placeholder={CHATBOT_PLUGIN_TYPE} onChange={(type: string) => form.setFieldValue('config', editableFieldValues(pluginDefinition(type)?.configFields ?? [], type === editing?.type ? editing.config : {}))} /></Form.Item>
+        <Alert type="info" showIcon message={tr('插件是通用聊天运行时；QQ、OneBot、Telegram、飞书、钉钉、微信在「平台账号」中通过协议选择，不需要为每个平台新建插件。')} />
         <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={3} placeholder={tr('描述插件用途')} /></Form.Item>
         {configFields.length ? <div className="schema-fields">
-          <div className="form-section-heading"><span>{tr('插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>
+          <div className="form-section-heading"><span>{tr('通用插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>
           {configSections.map((section) => <div key={section.label} className="schema-section">
             <div className="form-section-heading"><span>{section.label}</span><small>{section.fields.length} FIELDS</small></div>
             {section.fields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}
@@ -1222,25 +1225,29 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
     { title: tr('群聊'), key: 'groups', render: (_, row) => <span className="table-mono">{row.config.groupCount as number ?? '—'}</span> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveAccount({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除账号')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteAccount(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
-  return <section className="data-page"><PageToolbar count={data.length} noun="BOT ACCOUNTS" action={tr('新增账号')} onCreate={() => drawer.edit()} />
-    {data.length ? <Table<BotAccountRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有机器人账号')} description={tr('选择插件并创建账号实例，可为每个平台分别保存凭据。')} onCreate={() => drawer.edit()} action={tr('新增机器人账号')} />}
-    <Drawer title={<DrawerTitle label="BOT INSTANCE" title={editing ? tr('编辑机器人账号') : tr('新增机器人账号')} />} width={600} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存账号')}</Button></div>}>
+  return <section className="data-page"><PageToolbar count={data.length} noun="BOT ACCOUNTS" action={tr('新增平台账号')} onCreate={() => drawer.edit()} />
+    {data.length ? <Table<BotAccountRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10, showSizeChanger: false }} scroll={{ x: 780 }} className="data-table" /> : <EmptyTable title={tr('还没有机器人账号')} description={tr('先创建通用群聊助手插件，再按平台协议新增账号并保存凭据。')} onCreate={() => drawer.edit()} action={tr('新增平台账号')} />}
+    <Drawer title={<DrawerTitle label="BOT INSTANCE" title={editing ? tr('编辑平台账号') : tr('新增平台账号')} />} width={600} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存账号')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('实例名称')} rules={[{ required: true, message: tr('请输入实例名称') }]}><Input placeholder={tr('例如：主群机器人')} /></Form.Item>
-        <Form.Item name="pluginId" label={tr('关联插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} onChange={(pluginId: string) => {
+        <Form.Item name="protocol" label={tr('平台协议')} rules={[{ required: true, message: tr('请选择平台协议') }]}><Select options={protocolOptions.map((protocol) => ({ label: localized(protocol.name), value: protocol.id }))} onChange={(protocol: string) => {
+          form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, selectedPlugin?.type), protocol === editing?.protocol ? editing.credentials : {}) });
+        }} /></Form.Item>
+        {protocolDefinition && <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>}
+        <Form.Item name="pluginId" label={tr('聊天运行时')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: `${item.name} · 群聊助手`, value: item.id }))} onChange={(pluginId: string) => {
           const nextDefinition = pluginDefinition(plugins.find((item) => item.id === pluginId)?.type);
-          const protocol = nextDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
+          const currentProtocol = form.getFieldValue('protocol') as string | undefined;
+          const protocol = nextDefinition?.protocolDefinitions?.some((entry) => entry.id === currentProtocol)
+            ? currentProtocol!
+            : nextDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
           form.setFieldsValue({
             protocol,
             credentials: editableFieldValues(chatProtocolCredentialFields(protocol, nextDefinition?.type), pluginId === editing?.pluginId ? editing.credentials : {}),
             config: editableFieldValues(nextDefinition?.accountFields ?? [], pluginId === editing?.pluginId ? editing.config : {}),
           });
         }} /></Form.Item>
+        <p className="form-note">{tr('群聊助手是通用运行时；平台协议在上方选择，账号凭据按协议保存。')}</p>
         {!plugins.length && <Alert type="warning" showIcon message={tr('当前没有插件记录，请先创建插件。')} />}
-        <Form.Item name="protocol" label={tr('平台协议')}><Select options={protocolOptions.map((protocol) => ({ label: localized(protocol.name), value: protocol.id }))} onChange={(protocol: string) => {
-          form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, selectedPlugin?.type), protocol === editing?.protocol ? editing.credentials : {}) });
-        }} /></Form.Item>
-        {protocolDefinition && <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>}
         {credentialFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{protocolDefinition?.id ?? definition?.type} / {credentialFields.length} FIELDS</small></div>
           {credentialFields.map((field) => <PluginField key={`${selectedProtocol}:${field.key}`} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
