@@ -4,8 +4,8 @@ import { boundedBytes, publicHttpsUrl, safeFetch, boundedText } from './network'
 /** QQ rich-media upload rejects anything above 5 MiB, so larger videos fail before sending. */
 export const MAX_VIDEO_BYTES = 5 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
-const DEFAULT_POLL_INTERVAL_MS = 5_000;
-const DEFAULT_MAX_POLLS = 36;
+const DEFAULT_POLL_INTERVAL_MS = 6_000;
+const DEFAULT_MAX_POLLS = 30;
 
 export type VideoProtocol = 'minimax' | 'openai';
 export type VideoResolution = '768P' | '1080P';

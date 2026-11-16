@@ -37,9 +37,7 @@ function publicIPv4(value: string): boolean {
     a === 203 && b === 0 && c === 113);
 }
 
-async function verifyPublicDns(url: URL, fetchImpl: typeof fetch): Promise<void> {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)) return;
-  // 边缘运行时缺少通用 DNS API，先拒绝解析结果中的非公网地址。
+async function resolvePublicDns(url: URL, fetchImpl: typeof fetch): Promise<void> {
   const answers = await Promise.all(['A', 'AAAA'].map(async (type) => {
     const response = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(url.hostname)}&type=${type}`, {
       headers: { accept: 'application/dns-json' }, redirect: 'manual', signal: AbortSignal.timeout(5_000),
@@ -53,6 +51,38 @@ async function verifyPublicDns(url: URL, fetchImpl: typeof fetch): Promise<void>
   if (!addresses.length || addresses.some((address) => address.includes(':')
     ? !/^[23][0-9a-f]{3}:/i.test(address) || /^2001:(db8|0):/i.test(address)
     : !publicIPv4(address))) throw new Error('Endpoint resolves to a non-public address.');
+}
+
+const dnsCaches = new WeakMap<typeof fetch, Map<string, { at: number; promise: Promise<void> }>>();
+const DNS_CACHE_MS = 60_000;
+
+function dnsCacheFor(fetchImpl: typeof fetch): Map<string, { at: number; promise: Promise<void> }> {
+  let cache = dnsCaches.get(fetchImpl);
+  if (!cache) {
+    cache = new Map();
+    dnsCaches.set(fetchImpl, cache);
+  }
+  return cache;
+}
+
+async function verifyPublicDns(url: URL, fetchImpl: typeof fetch): Promise<void> {
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)) return;
+  const cache = dnsCacheFor(fetchImpl);
+  const cached = cache.get(url.hostname);
+  if (cached && Date.now() - cached.at < DNS_CACHE_MS) return cached.promise;
+  // 边缘运行时缺少通用 DNS API，先拒绝解析结果中的非公网地址；短时缓存避免轮询消耗子请求配额。
+  const promise = resolvePublicDns(url, fetchImpl);
+  cache.set(url.hostname, { at: Date.now(), promise });
+  try {
+    await promise;
+  } catch (error) {
+    cache.delete(url.hostname);
+    throw error;
+  }
+  if (cache.size > 64) {
+    const oldest = [...cache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, cache.size - 64);
+    for (const [host] of oldest) cache.delete(host);
+  }
 }
 
 export async function boundedBytes(response: Response, limit = MAX_RESPONSE_BYTES): Promise<Uint8Array> {
