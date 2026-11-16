@@ -46,6 +46,7 @@ import {
   DesktopOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
+  FileTextOutlined,
   GithubOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -550,6 +551,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
       { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
       { key: 'groups', icon: <TeamOutlined />, label: tr('群聊管理') },
       { key: 'conversations', icon: <MessageOutlined />, label: tr('会话管理') },
+      { key: 'logs', icon: <FileTextOutlined />, label: tr('对话日志') },
     ] },
     { key: 'model', icon: <ApiOutlined />, label: tr('模型能力'), children: [
       { key: 'interfaces', label: tr('接口管理'), children: [
@@ -570,6 +572,11 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
     setMobileNav(false);
     go(`/admin/${key}`);
   };
+  const setNav = (key: string) => {
+    setMobileNav(false);
+    go(key === 'logs' ? '/admin/conversations/logs' : `/admin/${key}`);
+  };
+  const selectedNavKey = page === 'conversations' && view === 'logs' ? 'logs' : page;
   const logout = async () => {
     try { await api.logout(); } catch (reason) { handleError(reason); }
     onLogout();
@@ -580,7 +587,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
       <Sider className={`admin-sider${mobileNav ? ' admin-sider-open' : ''}`} width={252} theme={resolved === 'dark' ? 'dark' : 'light'} aria-label={tr('管理台导航')}>
         <a className="sider-brand" href="#/admin/overview"><BrandMark /></a>
         <div className="workspace-label"><span className="workspace-dot" /> LOCAL CONTROL PLANE</div>
-        <Menu mode="inline" selectedKeys={[page]} openKeys={openMenus} onOpenChange={setOpenMenus} items={navItems} onClick={({ key }) => setPage(key)} className="admin-menu" />
+        <Menu mode="inline" selectedKeys={[selectedNavKey]} openKeys={openMenus} onOpenChange={setOpenMenus} items={navItems} onClick={({ key }) => setNav(key)} className="admin-menu" />
         <div className="sider-bottom">
           <div className="sider-status"><span className="online-dot" /><span>{tr('管理会话已验证')}</span><span className="sider-status-meta">SECURE</span></div>
           <button type="button" className="logout-button" onClick={() => void logout()}><LogoutOutlined /> {tr('退出管理台')}</button>
@@ -2203,7 +2210,7 @@ function RoutedApp() {
   if (route.kind === 'setup') return <SetupPage />;
   if (authState === 'checking') return <div className="auth-check"><Spin /><span>正在验证管理员会话…</span></div>;
   if (authState === 'error') return <main className="auth-error"><BrandMark /><Alert type="error" showIcon message="无法验证管理员会话" description={authError || '请重新登录后再试。'} action={<Button type="primary" href="#/login">前往登录</Button>} /><Button type="link" href="#/">返回首页</Button></main>;
-  return <AdminConsole key={route.page} page={route.page} onLogout={logout} />;
+  return <AdminConsole key={route.page} page={route.page} view={route.view} onLogout={logout} />;
 }
 
 function ThemedApp() {
