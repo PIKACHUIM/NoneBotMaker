@@ -555,14 +555,14 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
     ] },
     { key: 'model', icon: <ApiOutlined />, label: tr('模型能力'), children: [
       { key: 'interfaces', label: tr('接口管理'), children: [
-        { key: 'providers', label: tr('AI 供应商') }, { key: 'prices', label: tr('AI 模型价格') }, { key: 'budgets', label: tr('AI 费用策略') },
+        { key: 'providers', label: tr('模型接口') }, { key: 'prices', label: tr('模型价格') }, { key: 'budgets', label: tr('费用策略') },
       ] },
       { key: 'strategies', label: tr('策略管理'), children: [
         { key: 'identities', label: tr('身份策略') }, { key: 'dialogs', label: tr('对话策略') },
         { key: 'voices', label: tr('语音策略') }, { key: 'memory-policies', label: tr('记忆策略') },
       ] },
       { key: 'capabilities', label: tr('能力管理'), children: [
-        { key: 'skills', label: 'Skills' }, { key: 'mcps', label: 'MCP' }, { key: 'rules', label: 'Rules' }, { key: 'tools', label: tr('工具') },
+        { key: 'skills', label: tr('可用技能') }, { key: 'mcps', label: tr('模型协议') }, { key: 'rules', label: tr('约束规则') }, { key: 'tools', label: tr('调用工具') },
       ] },
     ] },
   ];
