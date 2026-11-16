@@ -820,8 +820,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const observed = permitted.map((entry) => entry.text).filter(Boolean).join('\n').slice(0, 4000);
       if (!observed) return;
       // The configured window bounds how much recent group context is given to the extractor.
-      const tokenBudget = Math.max(4096, Math.min(selected.contextTokens ?? memoryContextTokens('32K'),
-        Math.trunc(configNumber(config, 'max_context', 262_144, 4096, 2_000_000))));
+      const tokenBudget = Math.max(4096, Math.min(selected.contextTokens ?? memoryContextTokens('32K'), 1_048_576));
       const charBudget = tokenBudget * 4;
       const transcript: Array<{ role: string; text: string }> = [];
       for (const entry of storedMessages(context, secrets).slice(-200).reverse()) {
