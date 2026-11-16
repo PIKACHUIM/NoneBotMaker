@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cronMatches, nextCronOccurrence, parseCron } from './schedules';
+import { buildCron, cronMatches, describeCron, nextCronOccurrence, parseCron, parseCronBuilder } from './schedules';
 
 describe('cron parsing', () => {
   it('parses standard fields, ranges, lists and steps', () => {
@@ -45,5 +45,34 @@ describe('cron occurrence calculation', () => {
 
   it('returns null for impossible dates', () => {
     expect(nextCronOccurrence('0 0 30 2 *', Date.parse('2026-11-16T00:00:00Z'), 'UTC')).toBeNull();
+  });
+});
+
+describe('friendly cron builder', () => {
+  it('builds common schedules', () => {
+    expect(buildCron('interval-minutes', { interval: 15 })).toBe('*/15 * * * *');
+    expect(buildCron('interval-hours', { interval: 4 })).toBe('0 */4 * * *');
+    expect(buildCron('daily', { hour: 9, minute: 5 })).toBe('5 9 * * *');
+    expect(buildCron('weekly', { hour: 18, minute: 30, weekday: 5 })).toBe('30 18 * * 5');
+    expect(buildCron('monthly', { hour: 8, minute: 0, day: 1 })).toBe('0 8 1 * *');
+  });
+
+  it('clamps invalid builder values instead of producing invalid cron', () => {
+    expect(buildCron('interval-minutes', { interval: 0 })).toBe('*/1 * * * *');
+    expect(buildCron('interval-minutes', { interval: 99 })).toBe('*/59 * * * *');
+    expect(buildCron('daily', { hour: 25, minute: -1 })).toBe('0 23 * * *');
+  });
+
+  it('recognizes generated expressions and describes them', () => {
+    expect(parseCronBuilder('*/10 * * * *')?.mode).toBe('interval-minutes');
+    expect(parseCronBuilder('0 9 * * *')?.options).toMatchObject({ hour: 9, minute: 0 });
+    expect(parseCronBuilder('30 18 * * 7')?.options.weekday).toBe(0);
+    expect(parseCronBuilder('0 9 1 * *')?.mode).toBe('monthly');
+    expect(parseCronBuilder('5 4 * * 1,3')).toBeNull();
+    expect(describeCron('*/10 * * * *')).toBe('每 10 分钟');
+    expect(describeCron('0 9 * * *')).toBe('每天 09:00');
+    expect(describeCron('30 18 * * 1')).toBe('每周一 18:30');
+    expect(describeCron('0 8 1 * *')).toBe('每月 1 日 08:00');
+    expect(describeCron('5 4 * * 1,3')).toBe('5 4 * * 1,3');
   });
 });

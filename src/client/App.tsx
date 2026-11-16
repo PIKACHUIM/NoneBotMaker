@@ -92,6 +92,7 @@ import type {
 } from '../shared/types';
 import { BUILTIN_CHAT_COMMANDS } from '../shared/commands';
 import { MEMORY_CONTEXT_OPTIONS } from '../shared/memory-context';
+import { buildCron, CRON_BUILDER_DEFAULTS, describeCron, parseCronBuilder, type CronBuilderMode, type CronBuilderOptions } from '../shared/schedules';
 import {
   conversationFields,
   conversationIdList,
@@ -2231,6 +2232,44 @@ const SCHEDULE_ACTION_LABELS: Record<ScheduleRecord['config']['action'], string>
 
 const COMMON_TIMEZONES = ['UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney'];
 
+const CRON_MODE_LABELS: Record<CronBuilderMode, string> = {
+  'interval-minutes': '每隔 N 分钟',
+  'interval-hours': '每隔 N 小时',
+  daily: '每天固定时间',
+  weekly: '每周固定时间',
+  monthly: '每月固定日期',
+  custom: '自定义 Cron',
+};
+
+const WEEKDAY_OPTIONS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'].map((label, value) => ({ value, label }));
+
+const EXTENSION_JS_SAMPLE = [
+  'const name = ctx.event.userName || ctx.event.userId;',
+  'ctx.reply(`你好，${name}！`);',
+  'ctx.reply(`收到：${ctx.args || ctx.event.text}`);',
+  '',
+  '// 也可以直接 return 字符串或字符串数组，返回值会被当作回复。',
+].join('\n');
+
+const EXTENSION_WEBHOOK_SAMPLE = [
+  'POST https://example.com/plugin',
+  'Content-Type: application/json',
+  '',
+  '{',
+  '  "event": { "source": "command", "command": "ping", "args": "hello", "text": "/ping hello",',
+  '             "accountId": "...", "groupId": "...", "groupName": "测试群",',
+  '             "userId": "...", "userName": "Pika", "conversationType": "group", "at": 1760000000000 },',
+  '  "extension": { "id": "...", "name": "Ping" },',
+  '  "post_type": "message", "message_type": "group", "raw_message": "/ping hello",',
+  '  "user_id": "...", "group_id": "...", "self_id": "..."',
+  '}',
+  '',
+  '// 任选一种响应：',
+  '{ "reply": "pong" }',
+  '{ "replies": ["pong", "第二行"] }',
+  'pong',
+].join('\n');
+
 function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
   data: ScheduleRecord[]; groups: GroupRecord[]; extensions: ExtensionRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
@@ -2241,8 +2280,23 @@ function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState('');
   const [runningDue, setRunningDue] = useState(false);
+  const [cronMode, setCronMode] = useState<CronBuilderMode>('daily');
+  const [cronOptions, setCronOptions] = useState<CronBuilderOptions>({ ...CRON_BUILDER_DEFAULTS, hour: 9 });
   const editing = data.find((item) => item.id === drawer.editingId);
   const action = Form.useWatch('config.action', { form, preserve: true }) as ScheduleRecord['config']['action'] | undefined;
+  const cronValue = Form.useWatch('config.cron', { form, preserve: true }) as string | undefined;
+  const applyCronBuilder = (mode: Exclude<CronBuilderMode, 'custom'>, options: CronBuilderOptions) => {
+    setCronOptions(options);
+    form.setFieldValue(['config', 'cron'], buildCron(mode, options));
+  };
+  const changeCronMode = (mode: CronBuilderMode) => {
+    setCronMode(mode);
+    if (mode !== 'custom') applyCronBuilder(mode, cronOptions);
+  };
+  const changeCronOption = (key: keyof CronBuilderOptions, value: number | null) => {
+    if (cronMode === 'custom' || value === null) return;
+    applyCronBuilder(cronMode, { ...cronOptions, [key]: value });
+  };
   const groupName = (groupId: string) => {
     const group = groups.find((item) => item.id === groupId);
     return group ? `${group.name || group.externalId} · ${group.conversationType === 'private' ? '私聊' : '群聊'}` : '—';
@@ -2250,6 +2304,9 @@ function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
   useEffect(() => {
     if (!drawer.open) return;
     form.resetFields();
+    const builder = editing ? parseCronBuilder(editing.config.cron) : { mode: 'daily' as const, options: { ...CRON_BUILDER_DEFAULTS, hour: 9 } };
+    setCronMode(builder?.mode ?? 'custom');
+    setCronOptions(builder?.options ?? { ...CRON_BUILDER_DEFAULTS, hour: 9 });
     form.setFieldsValue({
       name: editing?.name ?? '',
       description: editing?.description ?? '',
@@ -2294,7 +2351,7 @@ function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
   const columns: TableColumnsType<ScheduleRecord> = [
     { title: tr('任务名称'), key: 'name', render: (_, row) => <div className="table-identity"><span className="identity-icon"><ClockCircleOutlined /></span><span><strong>{row.name}</strong><small>{row.description || row.id}</small></span></div> },
     { title: tr('目标会话'), key: 'target', render: (_, row) => <span className="table-mono">{groupName(row.config.groupId)}</span> },
-    { title: tr('Cron'), key: 'cron', render: (_, row) => <span className="table-mono">{row.config.cron} · {row.config.timezone}</span> },
+    { title: tr('计划'), key: 'cron', render: (_, row) => <div className="table-identity"><span><strong>{describeCron(row.config.cron)}</strong><small>{row.config.cron} · {row.config.timezone}</small></span></div> },
     { title: tr('动作'), key: 'action', render: (_, row) => <Tag bordered={false}>{tr(SCHEDULE_ACTION_LABELS[row.config.action] ?? row.config.action)}</Tag> },
     { title: tr('下次运行'), dataIndex: 'nextRunAt', key: 'nextRunAt', render: (value: string) => prettyDate(value, language) },
     { title: tr('最近结果'), key: 'last', render: (_, row) => <span className="table-mono">{row.lastStatus ? `${row.lastStatus === 'success' ? tr('成功') : row.lastStatus === 'error' ? tr('失败') : tr('跳过')} · ${prettyDate(row.lastRunAt, language)}` : '—'}</span> },
@@ -2308,15 +2365,40 @@ function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
   ];
   return <div className="tab-panel">
     <PageToolbar count={data.length} noun="SCHEDULED JOBS" action={tr('新增定时任务')} onCreate={() => drawer.edit()} extra={<Button loading={runningDue} onClick={() => void runDue()}>{tr('检查到期任务')}</Button>} />
-    <Alert className="action-alert" type="info" showIcon message={tr('Cron 使用 5 段格式：分 时 日 月 周，按所选时区计算；例如 0 9 * * * 表示每天 09:00。')} />
+    <Alert className="action-alert" type="info" showIcon message={tr('可用快捷设置选择每隔几分钟/几小时、每天、每周或每月；定时器最小粒度为 1 分钟，不支持秒级。Cron 按所选时区计算。')} />
     {data.length ? <Table<ScheduleRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 1100 }} className="data-table" /> : <EmptyTable title={tr('还没有定时任务')} description={tr('创建按 Cron 运行的固定消息、AI 提示词、命令或插件。')} onCreate={() => drawer.edit()} action={tr('创建定时任务')} />}
     <Drawer title={<DrawerTitle label="SCHEDULE" title={`${editing ? tr('编辑定时任务') : tr('新增定时任务')}`} />} width={620} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存任务')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('任务名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input placeholder={tr('例如：每日早报')} /></Form.Item>
         <Form.Item name="description" label={tr('任务说明')}><Input.TextArea rows={2} placeholder={tr('说明该任务的用途')} /></Form.Item>
         <Form.Item name={['config', 'groupId']} label={tr('目标会话')} rules={[{ required: true, message: tr('请选择目标会话') }]}><Select showSearch optionFilterProp="label" options={groups.map((group) => ({ value: group.id, label: `${group.name || group.externalId} · ${group.conversationType === 'private' ? '私聊' : '群聊'}${group.enabled ? '' : ' · 已停用'}` }))} /></Form.Item>
+        <Form.Item label={tr('快捷设置')} extra={tr('选择常用节奏后会自动生成 Cron；需要更复杂的规则时切换到自定义。')}>
+          <Select value={cronMode} onChange={(value) => changeCronMode(value as CronBuilderMode)} options={(Object.keys(CRON_MODE_LABELS) as CronBuilderMode[]).map((mode) => ({ value: mode, label: tr(CRON_MODE_LABELS[mode]) }))} />
+        </Form.Item>
+        {(cronMode === 'interval-minutes' || cronMode === 'interval-hours') && <Form.Item label={tr('间隔')}>
+          <InputNumber min={1} max={cronMode === 'interval-minutes' ? 59 : 23} value={cronOptions.interval}
+            onChange={(value) => changeCronOption('interval', value)} addonAfter={cronMode === 'interval-minutes' ? tr('分钟') : tr('小时')} className="full-width" />
+        </Form.Item>}
+        {cronMode === 'weekly' && <div className="form-grid three-cols">
+          <Form.Item label={tr('星期')}><Select value={cronOptions.weekday} onChange={(value) => changeCronOption('weekday', value)} options={WEEKDAY_OPTIONS} /></Form.Item>
+          <Form.Item label={tr('小时')}><InputNumber min={0} max={23} value={cronOptions.hour} onChange={(value) => changeCronOption('hour', value)} className="full-width" /></Form.Item>
+          <Form.Item label={tr('分钟')}><InputNumber min={0} max={59} value={cronOptions.minute} onChange={(value) => changeCronOption('minute', value)} className="full-width" /></Form.Item>
+        </div>}
+        {cronMode === 'monthly' && <div className="form-grid three-cols">
+          <Form.Item label={tr('日期')}><InputNumber min={1} max={28} value={cronOptions.day} onChange={(value) => changeCronOption('day', value)} addonAfter={tr('日')} className="full-width" /></Form.Item>
+          <Form.Item label={tr('小时')}><InputNumber min={0} max={23} value={cronOptions.hour} onChange={(value) => changeCronOption('hour', value)} className="full-width" /></Form.Item>
+          <Form.Item label={tr('分钟')}><InputNumber min={0} max={59} value={cronOptions.minute} onChange={(value) => changeCronOption('minute', value)} className="full-width" /></Form.Item>
+        </div>}
+        {cronMode === 'daily' && <div className="form-grid two-cols">
+          <Form.Item label={tr('小时')}><InputNumber min={0} max={23} value={cronOptions.hour} onChange={(value) => changeCronOption('hour', value)} className="full-width" /></Form.Item>
+          <Form.Item label={tr('分钟')}><InputNumber min={0} max={59} value={cronOptions.minute} onChange={(value) => changeCronOption('minute', value)} className="full-width" /></Form.Item>
+        </div>}
+        {cronMode !== 'custom' && <p className="form-note">{tr('生成表达式')}：<code>{cronValue || buildCron(cronMode, cronOptions)}</code> · {describeCron(cronValue || buildCron(cronMode, cronOptions))}</p>}
         <div className="form-grid two-cols">
-          <Form.Item name={['config', 'cron']} label={tr('Cron 表达式')} rules={[{ required: true, message: tr('请输入 Cron 表达式') }]}><Input placeholder="0 9 * * *" /></Form.Item>
+          <Form.Item name={['config', 'cron']} label={tr('Cron 表达式')} rules={[{ required: true, message: tr('请输入 Cron 表达式') }]}
+            extra={cronMode === 'custom' ? tr('格式：分 时 日 月 周，例如 0 9 * * *。') : tr('由上方快捷设置生成；切换为自定义后可手动修改。')}>
+            <Input readOnly={cronMode !== 'custom'} placeholder="0 9 * * *" />
+          </Form.Item>
           <Form.Item name={['config', 'timezone']} label={tr('时区')} rules={[{ required: true }]}><Select showSearch options={COMMON_TIMEZONES.map((zone) => ({ value: zone, label: zone }))} /></Form.Item>
         </div>
         <Form.Item name={['config', 'action']} label={tr('执行动作')}><Select options={(Object.keys(SCHEDULE_ACTION_LABELS) as Array<ScheduleRecord['config']['action']>).map((value) => ({ value, label: tr(SCHEDULE_ACTION_LABELS[value]) }))} /></Form.Item>
@@ -2441,6 +2523,25 @@ function ExtensionsPanel({ data, onRefresh, onError }: { data: ExtensionRecord[]
   return <div className="tab-panel">
     <PageToolbar count={data.length} noun="EXTENSIONS" action={tr('新增插件')} onCreate={() => drawer.edit()} />
     <Alert className="action-alert" type="info" showIcon message={tr('HTTP Webhook 插件在所有部署可用；JavaScript 插件在 Node 运行时可用，Cloudflare 需 Workers Paid 的 Dynamic Workers 绑定。')} />
+    <Collapse className="extension-help" items={[
+      { key: 'steps', label: tr('插件如何使用'), children: <ol className="help-list">
+        <li>{tr('新建插件：选择 HTTP Webhook 或 JavaScript，设置触发方式和权限。')}</li>
+        <li>{tr('命令触发：到「命令管理」新增命令，类型选「调用扩展插件」；消息触发：把触发方式设为「每条 @ 消息」或「正则匹配」。')}</li>
+        <li>{tr('定时触发：到「定时任务」把执行动作设为「扩展插件」。')}</li>
+        <li>{tr('插件不需要身份策略授权；它由命令、消息或定时任务直接调用。')}</li>
+      </ol> },
+      { key: 'javascript', label: tr('JavaScript 插件怎么写'), children: <div className="help-block">
+        <p>{tr('填写函数体，不需要写 function 或 export。可用 ctx.args、ctx.command、ctx.event、ctx.state、ctx.reply()、ctx.send()、ctx.log()、ctx.now、ctx.random；Node 运行时还可用 await ctx.fetch(url)。返回字符串或字符串数组也会作为回复。')}</p>
+        <pre className="code-block">{EXTENSION_JS_SAMPLE}</pre>
+        <p className="form-note">{tr('当前 Cloudflare 生产环境不支持动态执行 JS；需要 JS 插件时请部署到 Node，或升级 Workers Paid 并启用 PLUGIN_LOADER。')}</p>
+      </div> },
+      { key: 'webhook', label: tr('HTTP Webhook 与 NapCat / Koishi'), children: <div className="help-block">
+        <p>{tr('Webhook 插件就是一个 HTTPS 服务：平台把事件 POST 过去，服务返回要发送的文本。请求同时带有 OneBot 风格字段，方便已有机器人服务复用。')}</p>
+        <pre className="code-block">{EXTENSION_WEBHOOK_SAMPLE}</pre>
+        <p>{tr('NapCat 是 OneBot 11 实现，Koishi 插件运行在 Koishi 自己的运行时里，二者都不能直接导入本平台。可行做法是让它们继续独立运行，再写一个很小的 HTTPS 适配层：接收本平台的 event，转换成 OneBot/Koishi 的调用，把结果放进 replies 返回。')}</p>
+        <p className="form-note">{tr('适配层示例：Node/Express 接收 /plugin，读取 req.body.event.text，调用你的机器人服务，然后 res.json({ replies: [...] })。平台会拒绝内网和 localhost 地址，所以适配层需要部署在公网 HTTPS。')}</p>
+      </div> },
+    ]} />
     {data.length ? <Table<ExtensionRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 900 }} className="data-table" /> : <EmptyTable title={tr('还没有扩展插件')} description={tr('用 HTTP Webhook 接收群聊事件，或用 JavaScript 编写本地逻辑。')} onCreate={() => drawer.edit()} action={tr('创建插件')} />}
     <Drawer title={<DrawerTitle label="EXTENSION" title={`${editing ? tr('编辑插件') : tr('新增插件')}`} />} width={680} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存插件')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
@@ -2458,6 +2559,7 @@ function ExtensionsPanel({ data, onRefresh, onError }: { data: ExtensionRecord[]
           <Form.Item name={['config', 'authToken']} label={tr('鉴权令牌')} extra={tr('可选，作为 Authorization: Bearer 发送；保存后不再回显。')}><Input.Password placeholder={tr('可选')} autoComplete="new-password" /></Form.Item>
         </> : <>
           <Alert className="action-alert" type="warning" showIcon message={tr('JavaScript 插件需要 Node 运行时，或 Cloudflare Workers Paid 的 Dynamic Workers（PLUGIN_LOADER）绑定；否则会返回明确的不可用错误。')} />
+          <div className="form-note extension-sample-row"><span>{tr('不确定怎么写？可以先填入示例再修改。')}</span><Button size="small" onClick={() => form.setFieldValue(['config', 'source'], EXTENSION_JS_SAMPLE)}>{tr('填入示例')}</Button></div>
           <Form.Item name={['config', 'source']} label="JavaScript" rules={[{ required: true, message: tr('请输入 JavaScript') }]} extra={tr('函数体可直接使用 ctx：ctx.args、ctx.event、ctx.reply(text)、ctx.fetch(url)、ctx.log()。')}><Input.TextArea rows={12} className="code-input" placeholder={"ctx.reply(`你好，${ctx.args || '世界'}`);"} /></Form.Item>
         </>}
         <Form.Item name={['config', 'timeoutMs']} label={tr('超时（毫秒）')}><InputNumber min={1000} max={15000} step={500} className="full-width" /></Form.Item>

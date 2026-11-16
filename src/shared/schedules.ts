@@ -197,3 +197,77 @@ export function nextCronOccurrenceIso(expression: string, fromMs: number, timeZo
   const next = nextCronOccurrence(expression, fromMs, timeZone);
   return next === null ? null : new Date(next).toISOString();
 }
+
+export type CronBuilderMode = 'interval-minutes' | 'interval-hours' | 'daily' | 'weekly' | 'monthly' | 'custom';
+
+export interface CronBuilderOptions {
+  interval: number;
+  hour: number;
+  minute: number;
+  /** 0 = Sunday. */
+  weekday: number;
+  day: number;
+}
+
+export const CRON_BUILDER_DEFAULTS: CronBuilderOptions = { interval: 10, hour: 9, minute: 0, weekday: 1, day: 1 };
+
+const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function clampInt(value: number, min: number, max: number, fallback: number): number {
+  return Number.isInteger(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function two(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+/** Builds a standard five-field cron expression from the friendly console controls. */
+export function buildCron(mode: Exclude<CronBuilderMode, 'custom'>, options: Partial<CronBuilderOptions> = {}): string {
+  const merged = { ...CRON_BUILDER_DEFAULTS, ...options };
+  const minute = clampInt(merged.minute, 0, 59, 0);
+  const hour = clampInt(merged.hour, 0, 23, 9);
+  switch (mode) {
+    case 'interval-minutes':
+      return `*/${clampInt(merged.interval, 1, 59, 10)} * * * *`;
+    case 'interval-hours':
+      return `0 */${clampInt(merged.interval, 1, 23, 1)} * * *`;
+    case 'daily':
+      return `${minute} ${hour} * * *`;
+    case 'weekly':
+      return `${minute} ${hour} * * ${clampInt(merged.weekday, 0, 6, 1)}`;
+    case 'monthly':
+      return `${minute} ${hour} ${clampInt(merged.day, 1, 28, 1)} * *`;
+  }
+}
+
+/** Recognizes expressions produced by the friendly builder; everything else is custom. */
+export function parseCronBuilder(expression: string): { mode: CronBuilderMode; options: CronBuilderOptions } | null {
+  const value = expression.trim();
+  const options = { ...CRON_BUILDER_DEFAULTS };
+  let match = /^\*\/(\d{1,2}) \* \* \* \*$/.exec(value);
+  if (match) return { mode: 'interval-minutes', options: { ...options, interval: Number(match[1]) } };
+  match = /^0 \*\/(\d{1,2}) \* \* \*$/.exec(value);
+  if (match) return { mode: 'interval-hours', options: { ...options, interval: Number(match[1]) } };
+  match = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(value);
+  if (match) return { mode: 'daily', options: { ...options, minute: Number(match[1]), hour: Number(match[2]) } };
+  match = /^(\d{1,2}) (\d{1,2}) \* \* ([0-7])$/.exec(value);
+  if (match) return { mode: 'weekly', options: { ...options, minute: Number(match[1]), hour: Number(match[2]), weekday: Number(match[3]) === 7 ? 0 : Number(match[3]) } };
+  match = /^(\d{1,2}) (\d{1,2}) (\d{1,2}) \* \*$/.exec(value);
+  if (match) return { mode: 'monthly', options: { ...options, minute: Number(match[1]), hour: Number(match[2]), day: Number(match[3]) } };
+  return null;
+}
+
+/** A short human-readable preview; unknown expressions fall back to the raw cron. */
+export function describeCron(expression: string): string {
+  const parsed = parseCronBuilder(expression);
+  if (!parsed) return expression.trim();
+  const { mode, options } = parsed;
+  if (mode === 'interval-minutes') return `每 ${options.interval} 分钟`;
+  if (mode === 'interval-hours') return `每 ${options.interval} 小时`;
+  const time = `${two(options.hour)}:${two(options.minute)}`;
+  if (mode === 'daily') return `每天 ${time}`;
+  if (mode === 'weekly') return `每${WEEKDAY_LABELS[options.weekday] ?? '周一'} ${time}`;
+  if (mode === 'monthly') return `每月 ${options.day} 日 ${time}`;
+  return expression.trim();
+}
+
