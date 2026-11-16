@@ -40,7 +40,7 @@
       "new_sqlite_classes": ["QQGatewayDurableObject"]
     }
   ],
-  "triggers": { "crons": ["0 3 * * *"] },
+  // Scheduled cleanup is intentionally not deployed while the account Cron quota is unresolved.
   "kv_namespaces": [
     {
       "binding": "KV",
