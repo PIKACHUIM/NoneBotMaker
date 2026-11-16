@@ -724,4 +724,18 @@ describe('chat protocol credentials', () => {
     expect(invalidOneBot.status).toBe(400);
     expect(await json(invalidOneBot)).toEqual({ error: 'invalid_apiBaseUrl' });
   });
+
+  it('creates the generic runtime automatically when an account omits the plugin', async () => {
+    const setup = createApp();
+    const created = await writeRequest(setup, '/accounts', {
+      protocol: 'feishu', name: 'Feishu account',
+      credentials: { appId: 'cli_auto', appSecret: 'secret', verificationToken: 'token' },
+    });
+    expect(created.status).toBe(201);
+    const account = (await json(created)).data as JsonObject;
+    expect(typeof account.pluginId).toBe('string');
+    const plugins = (await json(await setup.app.request('/plugins', {}, setup.bindings))).data as JsonObject[];
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]).toMatchObject({ type: 'elysia-best/plugin-chatbot', name: '群聊助手', enabled: true });
+  });
 });

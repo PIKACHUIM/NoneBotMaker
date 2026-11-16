@@ -158,7 +158,7 @@ function currentRoute(): Route {
     if (path === '/login') return { kind: 'login' };
     if (path.startsWith('/admin')) {
       const [, , requestedPage, requestedView] = path.split('/');
-      const valid = Object.keys(pageTitles) as AdminPage[];
+      const valid = (Object.keys(pageTitles) as AdminPage[]).filter((page) => page !== 'plugins') as AdminPage[];
       const page = requestedPage === 'integrations' ? 'providers' : requestedPage === 'logs' ? 'conversations' : requestedPage as AdminPage;
       const view = requestedPage === 'logs' ? 'logs' : requestedPage === 'conversations' && ['status', 'approvals', 'logs', 'statistics', 'memories'].includes(requestedView) ? requestedView as ConversationView : undefined;
       return { kind: 'admin', page: valid.includes(page) ? page : 'overview', view };
@@ -587,7 +587,6 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
   const navItems = [
     { key: 'overview', icon: <BookOutlined />, label: tr('运行总览') },
     { key: 'platform', icon: <CloudServerOutlined />, label: tr('运行平台'), children: [
-      { key: 'plugins', icon: <CodeOutlined />, label: tr('插件管理') },
       { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
       { key: 'groups', icon: <TeamOutlined />, label: tr('群聊管理') },
       { key: 'conversations', icon: <MessageOutlined />, label: tr('会话管理') },
@@ -664,10 +663,10 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
             <div className="page-error"><Alert type="error" showIcon message={tr('无法读取此页面数据')} description={loadError} action={<Button size="small" icon={<ReloadOutlined />} onClick={refresh}>{tr('重试')}</Button>} /></div>
           ) : (
             <>
-              {page === 'overview' && <OverviewPage plugins={plugins} accounts={accounts} groups={groups} providers={providers} policies={policies} onNavigate={setPage} />}
+              {page === 'overview' && <OverviewPage accounts={accounts} groups={groups} providers={providers} policies={policies} onNavigate={setPage} />}
               {page === 'plugins' && <PluginsPage data={plugins} onRefresh={refresh} onError={handleError} />}
-              {page === 'accounts' && <><AccountsPage plugins={plugins} data={accounts} onRefresh={refresh} onError={handleError} /><div className="account-memory-section"><h2>{tr('账号共享项目记忆')}</h2><p>{tr('共享项目记忆按平台账号存储，不等同于会话记忆策略。')}</p><ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={refresh} onError={handleError} /></div></>}
-              {page === 'groups' && <GroupsPage groups={groups} plugins={plugins} accounts={accounts} providers={providers} policies={policies} tools={tools} libraries={libraries} onRefresh={refresh} onError={handleError} />}
+              {page === 'accounts' && <><AccountsPage data={accounts} onRefresh={refresh} onError={handleError} /><div className="account-memory-section"><h2>{tr('账号共享项目记忆')}</h2><p>{tr('共享项目记忆按平台账号存储，不等同于会话记忆策略。')}</p><ProjectMemoriesPanel data={memories} accounts={accounts} onRefresh={refresh} onError={handleError} /></div></>}
+              {page === 'groups' && <GroupsPage groups={groups} accounts={accounts} providers={providers} policies={policies} tools={tools} libraries={libraries} onRefresh={refresh} onError={handleError} />}
               {page === 'conversations' && <section className="conversation-workspace"><Tabs activeKey={view} onChange={(key) => go(`/admin/conversations/${key}`)} items={[
                 { key: 'status', label: tr('运行状态'), children: view === 'status' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="status" /> },
                 { key: 'approvals', label: tr('操作审批'), children: view === 'approvals' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="approvals" /> },
@@ -936,17 +935,17 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
   </section>;
 }
 
-function OverviewPage({ plugins, accounts, groups, providers, policies, onNavigate }: {
-  plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; onNavigate: (page: string) => void;
+function OverviewPage({ accounts, groups, providers, policies, onNavigate }: {
+  accounts: BotAccountRecord[]; groups: GroupRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; onNavigate: (page: string) => void;
 }) {
   const { tr } = useI18n();
   const activeAccounts = accounts.filter((item) => item.enabled).length;
   const activeGroups = groups.filter((item) => item.enabled).length;
-  const activePlugins = plugins.filter((item) => item.enabled).length;
+  const activePlatforms = new Set(accounts.filter((item) => item.enabled).map((item) => item.protocol)).size;
   const steps = [
     { index: '01', title: tr('配置 AI 供应商'), detail: tr('填写兼容 API 地址、密钥和模型；常用单价可一键导入。'), done: providers.some((item) => item.enabled), page: 'providers' },
     { index: '02', title: tr('创建身份策略'), detail: tr('选择模型、写人设与基础规则，在身份中授权 Skills/MCP/Rules。'), done: policies.some((item) => item.type === 'identity' && item.enabled), page: 'identities' },
-    { index: '03', title: tr('添加平台账号'), detail: tr('把机器人 AppID 与密钥绑定到插件。'), done: accounts.length > 0, page: 'accounts' },
+    { index: '03', title: tr('添加平台账号'), detail: tr('选择平台协议并填写凭据；通用运行时由系统自动关联。'), done: accounts.length > 0, page: 'accounts' },
     { index: '04', title: tr('绑定群聊策略'), detail: tr('填写群 openid，选择身份策略和限额。'), done: groups.length > 0, page: 'groups' },
     { index: '05', title: tr('验证会话与日志'), detail: tr('在群里 @ 机器人，检查连接状态和对话日志。'), done: false, page: 'conversations' },
   ];
@@ -954,10 +953,10 @@ function OverviewPage({ plugins, accounts, groups, providers, policies, onNaviga
     <div className="overview-page">
       <section className="overview-banner">
         <div><span className="banner-label"><span className="online-dot" /> CONFIGURATION PLANE / ONLINE</span><h2>{tr('按顺序配置，跑通第一条消息。')}</h2><p>{tr('先配置供应商和身份、对话策略，再建账号并为群聊选择策略。')}</p></div>
-        <div className="banner-code"><span>ENVIRONMENT</span><strong>EDGE / SERVERLESS</strong><span>CONFIG ORDER</span><strong>AI → PLUGIN → ACCOUNT → GROUP</strong></div>
+        <div className="banner-code"><span>ENVIRONMENT</span><strong>EDGE / SERVERLESS</strong><span>CONFIG ORDER</span><strong>AI → ACCOUNT → GROUP</strong></div>
       </section>
       <div className="metric-grid">
-        <MetricTile index="01" label={tr('启用插件')} value={activePlugins} total={plugins.length} icon={<CodeOutlined />} onClick={() => onNavigate('plugins')} />
+        <MetricTile index="01" label={tr('接入平台')} value={activePlatforms} total={chatProtocols(CHATBOT_PLUGIN_TYPE).length} icon={<CloudServerOutlined />} onClick={() => onNavigate('accounts')} />
         <MetricTile index="02" label={tr('运行账号')} value={activeAccounts} total={accounts.length} icon={<RobotOutlined />} onClick={() => onNavigate('accounts')} />
         <MetricTile index="03" label={tr('启用群聊')} value={activeGroups} total={groups.length} icon={<TeamOutlined />} onClick={() => onNavigate('groups')} />
         <MetricTile index="04" label={tr('AI供应商')} value={providers.filter((item) => item.enabled).length} total={providers.length} icon={<ApiOutlined />} onClick={() => onNavigate('providers')} />
@@ -977,13 +976,13 @@ function OverviewPage({ plugins, accounts, groups, providers, policies, onNaviga
       </Card>
       <div className="overview-columns">
         <Card className="section-card overview-flow" title={<SectionTitle index="A" title={tr('运行拓扑')} subtitle="RUNTIME GRAPH" />} extra={<Button type="link" onClick={() => onNavigate('groups')}>{tr('管理群聊')} <ArrowRightOutlined /></Button>}>
-          <div className="flow-row"><span className="flow-icon"><CodeOutlined /></span><div><strong>{tr('插件')}</strong><small>{tr('逻辑与接入协议')}</small></div><b>{plugins.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><RobotOutlined /></span><div><strong>{tr('账号')}</strong><small>{tr('平台机器人实例')}</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>{tr('群聊')}</strong><small>{tr('引用策略并按群运行')}</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
-          <div className="flow-caption"><span>PLUGIN</span><i /><span>MULTI-ACCOUNT</span><i /><span>GROUP POLICY</span></div>
+          <div className="flow-row"><span className="flow-icon"><RobotOutlined /></span><div><strong>{tr('账号')}</strong><small>{tr('平台机器人实例')}</small></div><b>{accounts.length.toString().padStart(2, '0')}</b><ArrowRightOutlined className="flow-arrow" /><span className="flow-icon"><TeamOutlined /></span><div><strong>{tr('群聊')}</strong><small>{tr('引用策略并按群运行')}</small></div><b>{groups.length.toString().padStart(2, '0')}</b></div>
+          <div className="flow-caption"><span>PLATFORM ACCOUNT</span><i /><span>GROUP POLICY</span></div>
         </Card>
         <Card className="section-card overview-quick config-rules-card" title={<SectionTitle index="B" title={tr('配置原则')} subtitle="CONFIG RULES" />}>
           <div className="config-rules">
             <div className="config-rule"><span>01</span><div><strong>{tr('策略复用')}</strong><small>{tr('模型、提示词和工具放在身份策略里，群聊只做选择与覆盖。')}</small></div></div>
-            <div className="config-rule"><span>02</span><div><strong>{tr('留空继承')}</strong><small>{tr('群聊里的覆盖项留空时，自动使用身份策略或插件默认值。')}</small></div></div>
+            <div className="config-rule"><span>02</span><div><strong>{tr('留空继承')}</strong><small>{tr('群聊里的覆盖项留空时，自动使用身份策略或默认值。')}</small></div></div>
             <div className="config-rule"><span>03</span><div><strong>{tr('保存生效')}</strong><small>{tr('保存后下一条消息使用新配置，历史记录不会被重写。')}</small></div></div>
           </div>
         </Card>
@@ -1170,47 +1169,43 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
   </section>;
 }
 
-function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRecord[]; data: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+function AccountsPage({ data, onRefresh, onError }: { data: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { tr, language, localized } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = data.find((item) => item.id === drawer.editingId);
-  const selectedPluginId = (Form.useWatch('pluginId', { form, preserve: true }) as string | undefined) ?? editing?.pluginId;
-  const selectedPlugin = plugins.find((item) => item.id === selectedPluginId);
-  const definition = pluginDefinition(selectedPlugin?.type);
-  const protocolOptions = definition?.protocolDefinitions ?? chatProtocols(selectedPlugin?.type);
+  const definition = pluginDefinition(CHATBOT_PLUGIN_TYPE);
+  const protocolOptions = chatProtocols(CHATBOT_PLUGIN_TYPE);
   const selectedProtocol = (Form.useWatch('protocol', { form, preserve: true }) as string | undefined) ?? editing?.protocol ?? protocolOptions[0]?.id ?? 'qq';
-  const protocolDefinition = chatProtocolDefinition(selectedProtocol, selectedPlugin?.type);
+  const protocolDefinition = chatProtocolDefinition(selectedProtocol, CHATBOT_PLUGIN_TYPE);
   const credentialFields = protocolDefinition?.credentialFields ?? definition?.credentialFields ?? [];
   const accountFields = definition?.accountFields ?? [];
   useEffect(() => {
     if (!drawer.open) return;
-    const currentDefinition = pluginDefinition(plugins.find((item) => item.id === editing?.pluginId)?.type);
-    const protocol = editing?.protocol ?? currentDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
+    const protocol = editing?.protocol ?? protocolOptions[0]?.id ?? 'qq';
     form.resetFields();
     form.setFieldsValue({
-      pluginId: editing?.pluginId,
       protocol,
       name: editing?.name ?? '',
       enabled: editing?.enabled ?? true,
-      credentials: editableFieldValues(chatProtocolCredentialFields(protocol, currentDefinition?.type), editing?.credentials),
-      config: editableFieldValues(currentDefinition?.accountFields ?? [], editing?.config),
+      credentials: editableFieldValues(chatProtocolCredentialFields(protocol, CHATBOT_PLUGIN_TYPE), editing?.credentials),
+      config: editableFieldValues(definition?.accountFields ?? [], editing?.config),
     });
-  }, [drawer.open, editing, form, plugins]);
+  }, [drawer.open, editing, form]);
   const save = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
       const credentials = values.credentials as JsonObject ?? {};
       await api.saveAccount({
-        pluginId: values.pluginId as string,
+        ...(editing?.pluginId ? { pluginId: editing.pluginId } : {}),
         protocol: String(values.protocol ?? ''),
         name: String(values.name),
         enabled: Boolean(values.enabled),
         credentials,
         config: {
           ...(editing?.config ?? {}),
-          ...normalizeFieldValues(pluginDefinition(plugins.find((item) => item.id === values.pluginId)?.type)?.accountFields ?? [], values.config as JsonObject),
+          ...normalizeFieldValues(definition?.accountFields ?? [], values.config as JsonObject),
         },
       }, editing?.id);
       drawer.close(); onRefresh();
@@ -1219,8 +1214,7 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   };
   const columns: TableColumnsType<BotAccountRecord> = [
     { title: tr('机器人账号'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><RobotOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
-    { title: tr('插件'), dataIndex: 'pluginId', key: 'pluginId', render: (id: string) => plugins.find((item) => item.id === id)?.name ?? id },
-    { title: tr('平台协议'), dataIndex: 'protocol', key: 'protocol', render: (value: string, row) => chatProtocolLabel(value, language, plugins.find((item) => item.id === row.pluginId)?.type) || value || '—' },
+    { title: tr('平台协议'), dataIndex: 'protocol', key: 'protocol', render: (value: string) => chatProtocolLabel(value, language, CHATBOT_PLUGIN_TYPE) || value || '—' },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: tr('群聊'), key: 'groups', render: (_, row) => <span className="table-mono">{row.config.groupCount as number ?? '—'}</span> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveAccount({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除账号')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteAccount(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
@@ -1231,23 +1225,9 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('实例名称')} rules={[{ required: true, message: tr('请输入实例名称') }]}><Input placeholder={tr('例如：主群机器人')} /></Form.Item>
         <Form.Item name="protocol" label={tr('平台协议')} rules={[{ required: true, message: tr('请选择平台协议') }]}><Select options={protocolOptions.map((protocol) => ({ label: localized(protocol.name), value: protocol.id }))} onChange={(protocol: string) => {
-          form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, selectedPlugin?.type), protocol === editing?.protocol ? editing.credentials : {}) });
+          form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, CHATBOT_PLUGIN_TYPE), protocol === editing?.protocol ? editing.credentials : {}) });
         }} /></Form.Item>
         {protocolDefinition && <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>}
-        <Form.Item name="pluginId" label={tr('聊天运行时')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: `${item.name} · 群聊助手`, value: item.id }))} onChange={(pluginId: string) => {
-          const nextDefinition = pluginDefinition(plugins.find((item) => item.id === pluginId)?.type);
-          const currentProtocol = form.getFieldValue('protocol') as string | undefined;
-          const protocol = nextDefinition?.protocolDefinitions?.some((entry) => entry.id === currentProtocol)
-            ? currentProtocol!
-            : nextDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
-          form.setFieldsValue({
-            protocol,
-            credentials: editableFieldValues(chatProtocolCredentialFields(protocol, nextDefinition?.type), pluginId === editing?.pluginId ? editing.credentials : {}),
-            config: editableFieldValues(nextDefinition?.accountFields ?? [], pluginId === editing?.pluginId ? editing.config : {}),
-          });
-        }} /></Form.Item>
-        <p className="form-note">{tr('群聊助手是通用运行时；平台协议在上方选择，账号凭据按协议保存。')}</p>
-        {!plugins.length && <Alert type="warning" showIcon message={tr('当前没有插件记录，请先创建插件。')} />}
         {credentialFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{protocolDefinition?.id ?? definition?.type} / {credentialFields.length} FIELDS</small></div>
           {credentialFields.map((field) => <PluginField key={`${selectedProtocol}:${field.key}`} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
@@ -1526,19 +1506,17 @@ function PolicySelectCard({ type, name, required = false, policies, value, optio
   </div>;
 }
 
-function GroupsPage({ groups, plugins, accounts, providers, policies, tools, libraries, onRefresh, onError }: {
-  groups: GroupRecord[]; plugins: PluginRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; tools: LibraryRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
+function GroupsPage({ groups, accounts, providers, policies, tools, libraries, onRefresh, onError }: {
+  groups: GroupRecord[]; accounts: BotAccountRecord[]; providers: ProviderRecord[]; policies: PolicyRecord[]; tools: LibraryRecord[]; libraries: LibraryData; onRefresh: () => void; onError: (error: unknown) => void;
 }) {
-  const { tr } = useI18n();
+  const { tr, language } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const editing = groups.find((item) => item.id === drawer.editingId);
   const selectedAccountId = (Form.useWatch('accountId', { form, preserve: true }) as string | undefined) ?? editing?.accountId;
   const conversationType = (Form.useWatch('conversationType', { form, preserve: true }) as GroupRecord['conversationType']) ?? editing?.conversationType ?? 'group';
-  const selectedAccount = accounts.find((item) => item.id === selectedAccountId);
-  const selectedPlugin = plugins.find((item) => item.id === selectedAccount?.pluginId);
-  const definition = pluginDefinition(selectedPlugin?.type);
+  const definition = pluginDefinition(CHATBOT_PLUGIN_TYPE);
   // 私聊白名单只对私聊有意义；群聊的可达范围就是上面的群 ID 列表。
   const visibleConversationFields = conversationFields(definition?.type).filter((field) => field.key !== 'bridge_allowed_private' || conversationType === 'private');
   const basicConfigFields = visibleConversationFields.filter((field) => field.placement === 'basic');
@@ -1566,7 +1544,6 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, lib
   ].filter(Boolean).join(' · ') || tr('未启用额外设置');
   useEffect(() => {
     if (!drawer.open) return;
-    const currentPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === editing?.accountId)?.pluginId);
     form.resetFields();
     form.setFieldsValue({
       accountId: editing?.accountId,
@@ -1585,9 +1562,9 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, lib
       whitelistEnabled: editing?.whitelistEnabled ?? false,
       whitelistText: editing?.whitelistUserIds.join('\n') ?? '',
       skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
-      config: editableFieldValues(conversationFields(pluginDefinition(currentPlugin?.type)?.type), editing?.config),
+      config: editableFieldValues(conversationFields(CHATBOT_PLUGIN_TYPE), editing?.config),
     });
-  }, [drawer.open, editing, form, plugins, accounts]);
+  }, [drawer.open, editing, form]);
   const save = async (values: Record<string, unknown>) => {
     setSaving(true);
     try {
@@ -1653,9 +1630,8 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, lib
         <p className="form-note form-intro-note">{tr('先绑定账号与会话，再选身份和对话策略。语音、费用、记忆可选；群里仅保存群独有设置。')}</p>
         <div className="form-section-heading"><span>01 / {tr('基本信息')}</span><small>{tr('必填')}</small></div>
         <div className="form-grid two-cols">
-          <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select disabled={Boolean(editing)} placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: `${item.name} · ${plugins.find((plugin) => plugin.id === item.pluginId)?.name ?? item.pluginId}`, value: item.id }))} onChange={(accountId: string) => {
-            const nextPlugin = plugins.find((item) => item.id === accounts.find((account) => account.id === accountId)?.pluginId);
-            form.setFieldValue('config', editableFieldValues(conversationFields(nextPlugin?.type), accountId === editing?.accountId ? editing.config : {}));
+          <Form.Item name="accountId" label={tr('机器人账号')} rules={[{ required: true, message: tr('请选择机器人账号') }]}><Select disabled={Boolean(editing)} placeholder={tr('选择账号')} options={accounts.map((item) => ({ label: `${item.name} · ${chatProtocolLabel(item.protocol, language, CHATBOT_PLUGIN_TYPE)}`, value: item.id }))} onChange={(accountId: string) => {
+            form.setFieldValue('config', editableFieldValues(conversationFields(CHATBOT_PLUGIN_TYPE), accountId === editing?.accountId ? editing.config : {}));
           }} /></Form.Item>
           <Form.Item name="conversationType" label={tr('会话类型')} extra={tr('群聊绑定群 openid；私聊绑定用户 openid。')}><Select disabled={Boolean(editing)} options={[{ value: 'group', label: tr('群聊') }, { value: 'private', label: tr('私聊') }]} /></Form.Item>
         </div>
@@ -2711,7 +2687,7 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
   return <section className="data-page logs-page">
     <div className="log-toolbar"><Form form={form} layout="inline" onFinish={onFilter} className="log-filter-form">
       <Form.Item name="q"><Input allowClear prefix={<MessageOutlined />} placeholder={tr('搜索消息内容或用户 ID')} aria-label={tr('搜索消息内容或用户 ID')} /></Form.Item>
-      <Form.Item name="pluginId"><Select allowClear placeholder={tr('全部插件')} aria-label={tr('全部插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
+      <Form.Item name="pluginId"><Select allowClear placeholder={tr('全部运行时')} aria-label={tr('全部运行时')} options={plugins.map((item) => ({ label: tr('群聊助手'), value: item.id }))} /></Form.Item>
       <Form.Item name="openid"><Select allowClear showSearch optionFilterProp="label" popupMatchSelectWidth={false} placeholder={tr('选择群聊或私聊')} aria-label={tr('选择群聊或私聊')} options={sessionOptions} notFoundContent={tr('暂无已绑定会话')} /></Form.Item>
       <Form.Item name="from"><Input type="datetime-local" aria-label={tr('开始时间')} /></Form.Item>
       <Form.Item name="to"><Input type="datetime-local" aria-label={tr('结束时间')} /></Form.Item>
@@ -2732,7 +2708,7 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
         <h3>{tr('错误内容')}</h3>
         <pre className="log-error-message">{errorText || tr('无错误文本')}</pre>
         <h3>{tr('详细信息')}</h3>
-        <DetailFields values={errorDetails} labels={{ eventId: tr('事件 ID'), messageId: tr('消息 ID'), pluginId: tr('插件'), accountId: tr('账号'), groupId: tr('群聊'), groupExternalId: tr('群 openid'), userId: tr('用户 openid'), model: tr('模型'), providerId: tr('AI供应商') }} />
+        <DetailFields values={errorDetails} labels={{ eventId: tr('事件 ID'), messageId: tr('消息 ID'), pluginId: tr('运行时'), accountId: tr('账号'), groupId: tr('群聊'), groupExternalId: tr('群 openid'), userId: tr('用户 openid'), model: tr('模型'), providerId: tr('AI供应商') }} />
       </div>}
     </Modal>
   </section>;

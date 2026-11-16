@@ -127,7 +127,7 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
     case 'accounts':
       return {
         ...common,
-        pluginId: stringField(data, 'pluginId'),
+        pluginId: stringField(data, 'pluginId', ''),
         protocol: stringField(data, 'protocol'),
         name: stringField(data, 'name'),
         enabled: booleanField(data, 'enabled', true),
@@ -804,6 +804,22 @@ export function registerManagementRoutes(api: Hono<{ Bindings: RuntimeBindings }
     const id = typeof data.id === 'string' && data.id.length > 0 ? data.id : crypto.randomUUID();
     if (await repository.get(kind, id)) throw new ApiError(409, 'record_exists');
     const record = normalizedRecord(kind, data, id, now, now);
+    if (kind === 'accounts' && !record.pluginId) {
+      const existing = (await repository.list('plugins')).find((plugin) => plugin.type === CHATBOT_PLUGIN_TYPE && plugin.enabled);
+      if (existing) {
+        record.pluginId = existing.id;
+      } else {
+        const plugin = normalizedRecord('plugins', {
+          type: CHATBOT_PLUGIN_TYPE,
+          name: '群聊助手',
+          description: '通用聊天运行时，由平台账号自动关联。',
+          enabled: true,
+          config: {},
+        }, crypto.randomUUID(), now, now);
+        await repository.put('plugins', await encryptSecrets(plugin, undefined, context.env));
+        record.pluginId = plugin.id;
+      }
+    }
     await assertReferences(repository, kind, record);
     if (kind === 'accounts') await normalizeAccountCredentials(repository, record, undefined, context.env);
     if (kind === 'groups') await normalizeGroupConfig(repository, record, context.env);

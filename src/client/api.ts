@@ -160,7 +160,7 @@ export const api = {
   async listAccounts() {
     return records<BotAccountRecord>(await request('/api/accounts'));
   },
-  async saveAccount(data: Partial<BotAccountRecord> & Pick<BotAccountRecord, 'pluginId' | 'name'>, id?: string) {
+  async saveAccount(data: Partial<BotAccountRecord> & Pick<BotAccountRecord, 'name'> & { pluginId?: string }, id?: string) {
     const payload = await request(id ? `/api/accounts/${encodeURIComponent(id)}` : '/api/accounts', {
       method: id ? 'PUT' : 'POST',
       ...jsonBody(data),
