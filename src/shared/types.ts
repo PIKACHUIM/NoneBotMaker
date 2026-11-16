@@ -182,6 +182,13 @@ export interface ModelPriceRecord {
   imageInputCostPerMillion?: number;
   imageCachedInputCostPerMillion?: number;
   imageOutputCostPerMillion?: number;
+  /** Flat USD price per generated image at the 1K, 2K and 4K size tiers. */
+  imageCostPer1K?: number;
+  imageCostPer2K?: number;
+  imageCostPer4K?: number;
+  /** Flat USD price per second of generated video, standard and HD resolution. */
+  videoCostPerSecond?: number;
+  videoCostPerSecondHd?: number;
   currency: 'USD';
   unit?: 'tokens' | 'characters';
   sourceUrl?: string;

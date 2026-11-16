@@ -42,6 +42,7 @@ const bridgeGroup = group('消息与访问', 'Messages & Access');
 const contextGroup = group('上下文与媒体', 'Context & Media');
 const searchGroup = group('联网搜索', 'Web search');
 const voiceGroup = group('AI 语音', 'AI speech');
+const mediaGroup = group('生图与视频', 'Image & Video');
 
 /** Built-in functions that can be exposed by an identity's tool grants. */
 export const BUILTIN_CHAT_TOOL_NAMES = [
@@ -51,8 +52,28 @@ export const BUILTIN_CHAT_TOOL_NAMES = [
   'ProjectMemoryWrite', 'ProjectMemoryForget', 'chat_save_meme', 'chat_list_memes',
   'chat_send_meme', 'chat_delete_meme', 'chat_list_voices', 'chat_send_voice',
   'chat_save_voice', 'chat_delete_voice', 'chat_send_media', 'chat_tts', 'chat_wake',
-  'chat_generate_image',
+  'chat_generate_image', 'chat_generate_video', 'chat_calculate', 'chat_random',
+  'chat_uuid', 'chat_base64', 'chat_hash', 'chat_text_stats',
 ] as const;
+
+/** Safe, local-only helpers granted to the seeded default identity. */
+export const DEFAULT_IDENTITY_TOOL_NAMES = [
+  'chat_status', 'chat_time', 'chat_current_datetime', 'chat_timezone_info', 'chat_history',
+  'WebFetch', 'WebSearch', 'chat_calculate', 'chat_random', 'chat_uuid', 'chat_base64',
+  'chat_hash', 'chat_text_stats', 'chat_generate_image', 'chat_generate_video',
+] as const;
+
+/** Human-readable catalog names for built-in tools. */
+export const BUILTIN_TOOL_LABELS: Record<string, LocalizedText> = {
+  chat_generate_image: { zh: '图片生成', en: 'Image generation' },
+  chat_generate_video: { zh: '视频生成', en: 'Video generation' },
+  chat_calculate: { zh: '计算器', en: 'Calculator' },
+  chat_random: { zh: '随机数', en: 'Random' },
+  chat_uuid: { zh: 'UUID 生成', en: 'UUID' },
+  chat_base64: { zh: 'Base64 编解码', en: 'Base64' },
+  chat_hash: { zh: '文本哈希', en: 'Hash' },
+  chat_text_stats: { zh: '文本统计', en: 'Text statistics' },
+};
 
 const chatbotDefinition: PluginDefinition = {
   type: CHATBOT_PLUGIN_TYPE,
@@ -208,6 +229,53 @@ const chatbotDefinition: PluginDefinition = {
       '包含语音素材和语音合成的每会话小时上限，1–100，用于控制刷屏。',
       'Per-conversation hourly limit for both saved voice assets and synthesis, from 1 to 100.',
     ], { group: voiceGroup, default: 20, min: 1, max: 100, step: 1, scope: 'voice' }),
+    boolean('media_image_enabled', ['允许本会话生图', 'Allow image generation'], [
+      '需先在「调用工具」中配置并启用生图工具，并在身份策略授权；这里只放行本会话且费用受所选费用策略约束。',
+      'Requires the image tool to be configured and granted by the identity policy; this switch only enables the conversation and spending stays bounded by its cost policy.',
+    ], { group: mediaGroup, default: false }),
+    text('media_image_size', ['生图尺寸档位', 'Image size tier'], [
+      '1K / 2K / 4K 档位决定每张计费单价；实际接口若拒绝该分辨率会直接报错，不会静默降级。',
+      'The 1K / 2K / 4K tier selects the per-image price. A provider rejection is reported instead of silently downgrading.',
+    ], {
+      group: mediaGroup,
+      default: '1K',
+      options: [
+        { value: '1K', label: { zh: '1K / 1024 像素', en: '1K / 1024 px' } },
+        { value: '2K', label: { zh: '2K / 2048 像素', en: '2K / 2048 px' } },
+        { value: '4K', label: { zh: '4K / 4096 像素', en: '4K / 4096 px' } },
+      ],
+    }),
+    text('media_image_quality', ['生图质量', 'Image quality'], [
+      '供应商支持的质量档；只影响接口参数，费用按所选尺寸档位的单张价计算。',
+      'Provider quality hint; it only changes the request, while billing uses the selected size tier price.',
+    ], {
+      group: mediaGroup,
+      default: 'low',
+      options: [
+        { value: 'low', label: { zh: 'low / 快速', en: 'low / fast' } },
+        { value: 'medium', label: { zh: 'medium / 均衡', en: 'medium / balanced' } },
+        { value: 'high', label: { zh: 'high / 精细', en: 'high / detailed' } },
+      ],
+    }),
+    boolean('media_video_enabled', ['允许本会话生视频', 'Allow video generation'], [
+      '需先在「调用工具」中配置并启用视频工具，并在身份策略授权；视频耗时较长且按秒计费。',
+      'Requires the video tool to be configured and granted by the identity policy; generation is slow and billed per second.',
+    ], { group: mediaGroup, default: false }),
+    text('media_video_resolution', ['视频分辨率', 'Video resolution'], [
+      '768P 使用基础每秒单价，1080P/2K 使用高清每秒单价；不支持的组合由供应商拒绝。',
+      '768P uses the base per-second price; 1080P/2K uses the HD price. Unsupported combinations are rejected by the provider.',
+    ], {
+      group: mediaGroup,
+      default: '768P',
+      options: [
+        { value: '768P', label: { zh: '768P / 标准', en: '768P / standard' } },
+        { value: '1080P', label: { zh: '1080P / 高清', en: '1080P / HD' } },
+      ],
+    }),
+    number('media_video_duration', ['视频时长（秒）', 'Video seconds'], [
+      '请求的视频时长，4–15 秒；供应商可能只接受 6 或 10 秒，具体以接口返回为准。',
+      'Requested video duration, 4–15 seconds. Some providers accept only 6 or 10 seconds and their error is surfaced.',
+    ], { group: mediaGroup, default: 6, min: 4, max: 15, step: 1 }),
   ],
   credentialFields: [
     {

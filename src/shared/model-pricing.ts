@@ -2,6 +2,9 @@ import type { ModelPriceRecord } from './types';
 
 export const MODEL_PRICE_CHECKED_AT = '2026-11-12';
 export const IMAGE_MODEL_PRICE_CHECKED_AT = '2026-11-13';
+export const MEDIA_MODEL_PRICE_CHECKED_AT = '2026-11-16';
+export const MINIMAX_MEDIA_PRICING = 'https://platform.minimax.io/docs/pricing/overview';
+export const OPENAI_IMAGE_PRICING = 'https://developers.openai.com/api/docs/guides/image-generation';
 
 /** Used for budget accounting when a model has no enabled price record. */
 export const DEFAULT_MODEL_PRICE = {
@@ -178,12 +181,53 @@ export const MODEL_PRICE_PRESETS: ModelPriceRecord[] = [
     imageInputCostPerMillion: 8,
     imageCachedInputCostPerMillion: 2,
     imageOutputCostPerMillion: 30,
+    // OpenAI publishes per-image output prices. The 1K tier uses the official
+    // 1024x1024 medium-quality row; 2K/4K stay unset until an operator prices them.
+    ...(model === 'gpt-image-2' ? { imageCostPer1K: 0.053 } : {}),
     currency: 'USD' as const,
     unit: 'tokens' as const,
-    sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+    sourceUrl: OPENAI_IMAGE_PRICING,
     enabled: true,
     createdAt: IMAGE_MODEL_PRICE_CHECKED_AT,
     updatedAt: IMAGE_MODEL_PRICE_CHECKED_AT,
+  })),
+  {
+    id: 'minimax-image-01',
+    name: 'MiniMax image-01',
+    model: 'image-01',
+    inputCostPerMillion: 0,
+    outputCostPerMillion: 0,
+    imageCostPer1K: 0.0035,
+    imageCostPer2K: 0.0035,
+    imageCostPer4K: 0.0035,
+    currency: 'USD',
+    unit: 'tokens',
+    sourceUrl: MINIMAX_MEDIA_PRICING,
+    enabled: true,
+    createdAt: MEDIA_MODEL_PRICE_CHECKED_AT,
+    updatedAt: MEDIA_MODEL_PRICE_CHECKED_AT,
+  },
+  // MiniMax bills video per output second. Hailuo 2.3 / 02 list $0.28 per 6 s at
+  // 768P and $0.49 per 6 s at 1080P; H3 lists $0.08/s at 768P and $0.13/s at 2K.
+  ...([
+    ['minimax-h3', 'MiniMax H3', 'MiniMax-H3', 0.08, 0.13],
+    ['minimax-hailuo-2.3', 'MiniMax Hailuo 2.3', 'MiniMax-Hailuo-2.3', 0.28 / 6, 0.49 / 6],
+    ['minimax-hailuo-2.3-fast', 'MiniMax Hailuo 2.3 Fast', 'MiniMax-Hailuo-2.3-Fast', 0.19 / 6, 0.33 / 6],
+    ['minimax-hailuo-02', 'MiniMax Hailuo 02', 'MiniMax-Hailuo-02', 0.28 / 6, 0.49 / 6],
+  ] as const).map(([id, name, model, videoCostPerSecond, videoCostPerSecondHd]) => ({
+    id,
+    name,
+    model,
+    inputCostPerMillion: 0,
+    outputCostPerMillion: 0,
+    videoCostPerSecond: Number(videoCostPerSecond.toFixed(6)),
+    videoCostPerSecondHd: Number(videoCostPerSecondHd.toFixed(6)),
+    currency: 'USD' as const,
+    unit: 'tokens' as const,
+    sourceUrl: MINIMAX_MEDIA_PRICING,
+    enabled: true,
+    createdAt: MEDIA_MODEL_PRICE_CHECKED_AT,
+    updatedAt: MEDIA_MODEL_PRICE_CHECKED_AT,
   })),
 ];
 

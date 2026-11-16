@@ -13,10 +13,12 @@ import { createMemeLibrary, createMemeTools, type MemeStore } from './meme-libra
 import { SlangWorkflow } from './slang';
 import { createVoiceLibrary, type VoiceAssetStore } from './voice-library';
 import { createCustomApiToolsFromRecords } from './custom-tools';
-import { generateImage, ImageGenerationAttemptError, type ImageGenerationRequest } from './image-generation';
+import { generateImage, ImageGenerationAttemptError, type ImageGenerationRequest, type ImageSizeTier } from './image-generation';
+import { generateVideo, VideoGenerationAttemptError, type VideoGenerationRequest, type VideoProtocol, type VideoResolution } from './video-generation';
 import { ToolApprovalManager, type ApprovedToolResult } from './approval';
 import { incomingContent, storedMessages } from './media';
 import { connectMcp, executeTool, tool, validateToolArguments, webTools, type AgentTool } from './tools';
+import { createUtilityTools } from './utility-tools';
 
 export interface ReplyOptions { seq: number; conversationType: ConversationType }
 export interface OutboundMedia { type: 'image' | 'audio' | 'video' | 'file'; bytes: Uint8Array; contentType: string; filename: string }
@@ -62,6 +64,18 @@ function inlineDataUri(bytes: Uint8Array, contentType: string): string {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 16_384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16_384));
   return `data:${contentType};base64,${btoa(binary)}`;
+}
+
+const IMAGE_TIER_MAX_PIXELS: Record<ImageSizeTier, number> = { '1K': 1024, '2K': 2048, '4K': 4096 };
+
+/** Scales the tool's preferred aspect ratio to the conversation's 1K/2K/4K billing tier. */
+export function imageSizeForTier(tier: ImageSizeTier, preferred: string | undefined): string {
+  const match = /^(\d{3,4})x(\d{3,4})$/.exec(preferred ?? '');
+  const width = match ? Number(match[1]) : 1024;
+  const height = match ? Number(match[2]) : 1024;
+  const scale = IMAGE_TIER_MAX_PIXELS[tier] / Math.max(width, height);
+  const scaled = (value: number) => Math.max(256, Math.min(4096, Math.round(value * scale / 8) * 8));
+  return `${scaled(width)}x${scaled(height)}`;
 }
 
 function validAgentWait(value: unknown, at: number): PendingAgentWait | null {
@@ -139,6 +153,26 @@ function speechAuthorized(messages: NormalizedMessage[], scheduled: boolean): bo
   if (/(不要|不需要|别|禁止|不想|无需|价格|多少钱|是什么|怎么|如何|为什么|[?？]|\b(?:not|don't|never|price|cost|what|why|how)\b)/i.test(text)) return false;
   if (/^\/voice(?:\s+(?:list|delete|save)\b|\s*$)/i.test(text)) return false;
   return /^\/voice(?:\s|$)/i.test(text) || /^(?:请)?(?:用语音回复|语音回复|用声音回复|朗读|读出来)/.test(text) || /^(?:please\s+)?(?:read\s+(?:this|it)\s+aloud|reply\s+(?:with|in)\s+(?:voice|audio))\b/i.test(text);
+}
+
+function builtinCatalogId(id: string): string | undefined {
+  const name = (BUILTIN_CHAT_TOOL_NAMES as readonly string[]).find((entry) => entry === id || `builtin-${entry.replaceAll('_', '-')}` === id);
+  return name ? `builtin-${name.replaceAll('_', '-')}` : undefined;
+}
+
+/** Accepts both catalog ids and legacy function-name grants from identity policies. */
+async function resolveToolRecords(
+  findTool: ChatbotHandlerDependencies['findTool'],
+  ids: string[],
+): Promise<LibraryRecord[]> {
+  if (!findTool) return [];
+  const records = await Promise.all(ids.slice(0, 40).map(async (id) => {
+    const direct = await findTool(id);
+    if (direct) return direct;
+    const catalogId = builtinCatalogId(id);
+    return catalogId ? await findTool(catalogId) : null;
+  }));
+  return [...new Map(records.filter((record): record is LibraryRecord => record?.enabled === true).map((record) => [record.id, record])).values()];
 }
 
 export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): ChatbotMessageHandler {
@@ -222,8 +256,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         if (library?.enabled) selectedMcpLibraries.set(id, library);
       }));
     }
-    const configuredToolRecords = dependencies.findTool ? (await Promise.all((group.toolIds ?? []).slice(0, 20).map((id) => dependencies.findTool!(id))))
-      .filter((record): record is LibraryRecord => record?.enabled === true) : [];
+    const configuredToolRecords = await resolveToolRecords(dependencies.findTool, group.toolIds ?? []);
     const customTools = createCustomApiToolsFromRecords(configuredToolRecords.filter((record) => record.config.kind === 'https'), fetchImpl);
     const secrets = [account.appSecret ?? '', account.botSecret ?? '', account.clientSecret ?? '', ...(earlyProvider?.apiKey ? [earlyProvider.apiKey] : []),
       ...Object.entries(config).filter(([name]) => /secret|token|key|password/i.test(name)).map(([, value]) => typeof value === 'string' ? value : ''),
@@ -311,7 +344,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       if (override === 'disabled' || configIdSet(currentState.disabledTools).has(name)) return 'disabled';
       if (policyGroup.toolApprovalMode === 'all-approve') return 'approve';
       if (policyGroup.toolApprovalMode === 'all-allow') return 'allow';
-      return override ?? (entry.mcp && !entry.mcp.readOnly || entry.custom?.approvalRequired || name === 'chat_generate_image' ? 'approve' : 'allow');
+      return override ?? (entry.mcp && !entry.mcp.readOnly || entry.custom?.approvalRequired || name === 'chat_generate_image' || name === 'chat_generate_video' ? 'approve' : 'allow');
     }
     async function log(direction: 'in' | 'out', content: string, status: string, details: JsonObject = {}, incoming: NormalizedMessage = message): Promise<void> {
       if (!readBoolean(dependencies.logRecord, false)) return;
@@ -342,33 +375,39 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     }
     async function imageGenerationTool(record: LibraryRecord, billingGroup: GroupRecord = group!): Promise<AgentTool | null> {
       if (!dependencies.sendMedia || !record.enabled || record.config.kind !== 'builtin' || record.config.name !== 'chat_generate_image') return null;
+      const mediaConfig = { ...config, ...(billingGroup.config ?? {}) };
+      if (!configBoolean(mediaConfig, 'media_image_enabled', false)) return null;
       const providerId = configString(record.config, 'providerId');
       const imageModel = configString(record.config, 'model');
       const imageProvider = providerId ? await dependencies.findProvider(providerId) : null;
       if (!imageProvider?.enabled || !imageModel || !imageProvider.models.includes(imageModel)) return null;
+      const fallbackCostPerImage = configNumber(record.config, 'fallbackCostPerImage', 0, 0);
+      if (fallbackCostPerImage <= 0) return null;
       secrets.push(imageProvider.apiKey);
       const imagePrice = await dependencies.findPrice?.(imageModel, 'tokens');
-      const entry = tool('chat_generate_image', '为当前已授权的 QQ 会话生成并发送一张图片；该调用会产生模型费用。',
+      const configuredTier = configString(mediaConfig, 'media_image_size', '1K');
+      const sizeTier: ImageSizeTier = ['1K', '2K', '4K'].includes(configuredTier) ? configuredTier as ImageSizeTier : '1K';
+      const quality = configString(mediaConfig, 'media_image_quality', configString(record.config, 'quality', 'low')) as ImageGenerationRequest['quality'];
+      const imageSize = imageSizeForTier(sizeTier, configString(record.config, 'size', '1024x1024'));
+      const entry = tool('chat_generate_image', `为当前已授权的 QQ 会话生成并发送一张图片（${sizeTier} 档位）；该调用会按配置的每张单价产生费用。`,
         { prompt: { type: 'string', minLength: 1, maxLength: 4096 } }, ['prompt'], async (args) => {
           if (!(await dependencies.isWithinCostLimits(billingGroup, now()))) throw new Error('Image generation budget has been reached.');
           const request: ImageGenerationRequest = {
-            model: imageModel, prompt: String(args.prompt),
-            size: configString(record.config, 'size', '1024x1024') as ImageGenerationRequest['size'],
-            quality: configString(record.config, 'quality', 'low') as ImageGenerationRequest['quality'],
-            fallbackCostPerImage: configNumber(record.config, 'fallbackCostPerImage', 0, 0),
+            model: imageModel, prompt: String(args.prompt), size: imageSize, sizeTier, quality,
+            fallbackCostPerImage,
           };
           let result;
           try { result = await generateImage(imageProvider, request, imagePrice, fetchImpl); }
           catch (error) {
             if (error instanceof ImageGenerationAttemptError) {
               await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
-              await log('out', '', 'image_cost_estimated', { model: imageModel, providerId, cost: error.estimatedCost,
+              await log('out', '', 'image_cost_estimated', { model: imageModel, providerId, sizeTier, cost: error.estimatedCost,
                 estimated: true, pricingSource: error.pricingSource, error: error.message });
             }
             throw error;
           }
           await dependencies.recordGroupCost(billingGroup, result.cost, now());
-          await log('out', '', 'image_completed', { model: imageModel, providerId, cost: result.cost, usage: result.usage,
+          await log('out', '', 'image_completed', { model: imageModel, providerId, sizeTier, size: imageSize, cost: result.cost, usage: result.usage,
             pricingSource: result.pricingSource, estimated: result.estimated, priceId: result.priceId });
           if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, 1, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached after image generation.');
           seq += 1;
@@ -377,9 +416,58 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           sentCount += 1; toolSendSucceeded = true;
           try { await log('out', '[生成图片]', 'sent', { seq, media: { type: 'image', contentType: result.contentType, size: result.bytes.byteLength } }); }
           catch { postSendLogFailed = true; }
-          return JSON.stringify({ sent: true, model: imageModel, estimated: result.estimated });
+          return JSON.stringify({ sent: true, model: imageModel, sizeTier, size: imageSize, estimated: result.estimated });
         });
       return { ...entry, custom: { id: record.id, host: new URL(imageProvider.baseUrl).hostname, approvalRequired: true } };
+    }
+    async function videoGenerationTool(record: LibraryRecord, billingGroup: GroupRecord = group!): Promise<AgentTool | null> {
+      if (!dependencies.sendMedia || !record.enabled || record.config.kind !== 'builtin' || record.config.name !== 'chat_generate_video') return null;
+      const mediaConfig = { ...config, ...(billingGroup.config ?? {}) };
+      if (!configBoolean(mediaConfig, 'media_video_enabled', false)) return null;
+      const providerId = configString(record.config, 'providerId');
+      const videoModel = configString(record.config, 'model');
+      const videoProvider = providerId ? await dependencies.findProvider(providerId) : null;
+      if (!videoProvider?.enabled || !videoModel || !videoProvider.models.includes(videoModel)) return null;
+      const fallbackCostPerSecond = configNumber(record.config, 'fallbackCostPerSecond', 0, 0);
+      if (fallbackCostPerSecond <= 0) return null;
+      const protocol = configString(record.config, 'protocol', 'minimax');
+      if (!['minimax', 'openai'].includes(protocol)) return null;
+      secrets.push(videoProvider.apiKey);
+      const videoPrice = await dependencies.findPrice?.(videoModel);
+      const configuredResolution = configString(mediaConfig, 'media_video_resolution', configString(record.config, 'resolution', '768P'));
+      const resolution: VideoResolution = configuredResolution === '1080P' ? '1080P' : '768P';
+      const duration = Math.trunc(configNumber(mediaConfig, 'media_video_duration', configNumber(record.config, 'duration', 6, 1, 30), 1, 30));
+      const entry = tool('chat_generate_video', `为当前已授权的 QQ 会话生成并发送一段视频（${resolution}，${duration} 秒）；该调用会按配置的每秒单价产生费用，可能需要数分钟。`,
+        { prompt: { type: 'string', minLength: 1, maxLength: 4096 } }, ['prompt'], async (args) => {
+          if (!(await dependencies.isWithinCostLimits(billingGroup, now()))) throw new Error('Video generation budget has been reached.');
+          const request: VideoGenerationRequest = {
+            model: videoModel, prompt: String(args.prompt), duration, resolution,
+            protocol: protocol as VideoProtocol, fallbackCostPerSecond,
+          };
+          let result;
+          try { result = await generateVideo(videoProvider, request, videoPrice, fetchImpl); }
+          catch (error) {
+            if (error instanceof VideoGenerationAttemptError) {
+              await dependencies.recordGroupCost(billingGroup, error.estimatedCost, now());
+              await log('out', '', 'video_cost_estimated', { model: videoModel, providerId, resolution, duration,
+                cost: error.estimatedCost, estimated: true, pricingSource: error.pricingSource, error: error.message });
+            }
+            throw error;
+          }
+          await dependencies.recordGroupCost(billingGroup, result.cost, now());
+          await log('out', '', 'video_completed', { model: videoModel, providerId, resolution: result.resolution, duration: result.duration,
+            cost: result.cost, pricingSource: result.pricingSource, estimated: result.estimated, priceId: result.priceId,
+            media: { type: 'video', contentType: result.contentType, size: result.bytes.byteLength } });
+          if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, 1, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached after video generation.');
+          seq += 1;
+          await dependencies.sendMedia!(account, message.groupId, message.id,
+            { type: 'video', bytes: result.bytes, contentType: result.contentType, filename: result.filename }, { seq, conversationType: kind });
+          sentCount += 1; toolSendSucceeded = true;
+          try { await log('out', '[生成视频]', 'sent', { seq, media: { type: 'video', contentType: result.contentType, size: result.bytes.byteLength } }); }
+          catch { postSendLogFailed = true; }
+          return JSON.stringify({ sent: true, model: videoModel, resolution: result.resolution, duration: result.duration, estimated: result.estimated });
+        });
+      return { ...entry, custom: { id: record.id, host: new URL(videoProvider.baseUrl).hostname, approvalRequired: true } };
     }
     function currentVoiceSendTimes(): number[] {
       return (Array.isArray(state.voiceSendTimes) ? state.voiceSendTimes : []).filter((stamp): stamp is number => typeof stamp === 'number' && Number.isFinite(stamp) && now() - stamp < 60 * 60_000);
@@ -549,8 +637,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         const latestGroup = await dependencies.findGroup(account.account.id, message.groupId, kind);
         if (!latestGroup?.enabled || latestGroup.id !== group.id) throw new Error('Approved conversation is no longer available.');
         const latestState = await dependencies.getState?.(key) ?? state;
-        const latestToolRecords = dependencies.findTool ? (await Promise.all((latestGroup.toolIds ?? []).slice(0, 20).map((id) => dependencies.findTool!(id))))
-          .filter((record): record is LibraryRecord => record?.enabled === true) : [];
+        const latestToolRecords = await resolveToolRecords(dependencies.findTool, latestGroup.toolIds ?? []);
         const approvedTools: AgentTool[] = [];
         for (const id of latestGroup.mcpIds.slice(0, 20)) {
           const library = await dependencies.findLibrary?.('mcps', id);
@@ -563,6 +650,8 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         for (const record of latestToolRecords) {
           const imageTool = await imageGenerationTool(record, latestGroup);
           if (imageTool) approvedTools.push(imageTool);
+          const videoTool = await videoGenerationTool(record, latestGroup);
+          if (videoTool) approvedTools.push(videoTool);
         }
         const registry = new Map(approvedTools.filter((entry) => toolApprovalRule(entry, latestGroup, latestState) !== 'disabled')
           .map((entry) => [entry.definition.function.name, entry]));
@@ -778,6 +867,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           return JSON.stringify({ waitingForNextMessage: true, expiresAt: now() + waitRequested.seconds * 1000 });
         })] : []),
         ...webTools(config, fetchImpl),
+        ...createUtilityTools(),
         ...createKnowledgeTools(knowledgeContext),
       ];
       if (memoryEnabled && dependencies.findWorkspaceMemories) {
@@ -961,6 +1051,8 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       for (const record of configuredToolRecords) {
         const imageTool = await imageGenerationTool(record);
         if (imageTool) tools.push(imageTool);
+        const videoTool = await videoGenerationTool(record);
+        if (videoTool) tools.push(videoTool);
       }
       const allowedToolIds = new Set(configuredToolRecords.filter((record) => record.config.kind === 'builtin').map((record) => record.id));
       for (const grant of group.toolIds ?? []) {

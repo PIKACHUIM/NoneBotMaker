@@ -84,12 +84,19 @@ export async function boundedText(response: Response, limit = MAX_RESPONSE_BYTES
   return new TextDecoder().decode(await boundedBytes(response, limit));
 }
 
-export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl: typeof fetch = fetch, timeoutMs = 20_000): Promise<Response> {
+export async function safeFetch(value: string, init: RequestInit = {}, fetchImpl: typeof fetch = fetch, timeoutMs = 20_000, maxRedirects = 0): Promise<Response> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw new Error('Invalid request timeout.');
+  if (!Number.isSafeInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > 5) throw new Error('Invalid redirect limit.');
   const url = publicHttpsUrl(value);
   await verifyPublicDns(url, fetchImpl);
   // Workers边缘不支持redirect:'error'，只支持follow/manual；3xx手动判定为失败。
   const response = await fetchImpl(url.toString(), { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+  if (maxRedirects > 0 && response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location');
+    await response.body?.cancel();
+    if (!location) throw new Error('Redirect response is missing its location.');
+    return safeFetch(new URL(location, url).toString(), init, fetchImpl, timeoutMs, maxRedirects - 1);
+  }
   if (response.redirected || response.status >= 300 && response.status < 400) throw new Error('Redirects are not allowed.');
   if (!response.ok) {
     let detail = '';

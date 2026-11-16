@@ -95,11 +95,11 @@ import {
   pluginDefinitions,
   policyFields,
 } from '../shared/plugin-catalog';
-import { IMAGE_MODEL_PRICE_CHECKED_AT, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
+import { IMAGE_MODEL_PRICE_CHECKED_AT, MEDIA_MODEL_PRICE_CHECKED_AT, MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../shared/model-pricing';
 import { LanguageProvider, useI18n } from './i18n';
 import { ThemeProvider, useTheme, type ThemeMode } from './theme';
 import { ApiError, api } from './api';
-import type { ChatbotConversationStatus, ChatbotConversationStats, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake, ConversationMemoryItem, ConversationMemoryInput } from './api';
+import type { CapabilitySourceItem, ChatbotConversationStatus, ChatbotConversationStats, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake, ConversationMemoryItem, ConversationMemoryInput } from './api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
@@ -117,17 +117,17 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   accounts: { title: '平台账号', eyebrow: 'RUNTIME / ACCOUNTS', description: '配置机器人账号凭据与账号范围内的共享项目记忆。' },
   groups: { title: '群聊管理', eyebrow: 'RUNTIME / GROUPS', description: '绑定群聊或私聊，选择复用策略，只保留此群独有的覆盖。' },
   conversations: { title: '会话管理', eyebrow: 'RUNTIME / SESSIONS', description: '查看连接状态、待审批操作、聊天记录与记忆；临时控制只作用于当前会话。' },
-  providers: { title: 'AI 供应商', eyebrow: 'MODEL / INTERFACES', description: '管理兼容 API 地址、密钥与供应商支持的模型。' },
-  prices: { title: 'AI 模型价格', eyebrow: 'MODEL / PRICING', description: '登记文本与图像模型单价、来源和价格核对日期。' },
-  budgets: { title: 'AI 费用策略', eyebrow: 'MODEL / BUDGETS', description: '集中管理可复用预算，群聊只选择费用策略。' },
+  providers: { title: '模型接口', eyebrow: 'MODEL / INTERFACES', description: '管理兼容 API 地址、密钥与供应商支持的模型。' },
+  prices: { title: '模型价格', eyebrow: 'MODEL / PRICING', description: '登记文本与图像模型单价、来源和价格核对日期。' },
+  budgets: { title: '费用策略', eyebrow: 'MODEL / BUDGETS', description: '集中管理可复用预算，群聊只选择费用策略。' },
   identities: { title: '身份策略', eyebrow: 'MODEL / IDENTITY', description: '集中定义人设、基础规则、聊天模型与能力授权。' },
   dialogs: { title: '对话策略', eyebrow: 'MODEL / DIALOG', description: '控制模型流式响应、工具轮数与回复方式。' },
   voices: { title: '语音策略', eyebrow: 'MODEL / VOICE', description: '配置语音合成参数；未选择语音策略表示关闭。' },
   'memory-policies': { title: '记忆策略', eyebrow: 'MODEL / MEMORY', description: '集中管理会话记忆模式、容量与保留期限。' },
-  skills: { title: 'Skills', eyebrow: 'MODEL / CAPABILITIES', description: '编辑可复用技能内容；授权在身份策略中管理。' },
-  mcps: { title: 'MCP', eyebrow: 'MODEL / CAPABILITIES', description: '管理远端服务与认证；授权在身份策略中管理。' },
-  rules: { title: 'Rules', eyebrow: 'MODEL / CAPABILITIES', description: '编辑可复用规则；授权在身份策略中管理。' },
-  tools: { title: '工具', eyebrow: 'MODEL / CAPABILITIES', description: '管理内置工具及安全配置；身份策略决定授权范围。' },
+  skills: { title: '可用技能', eyebrow: 'MODEL / CAPABILITIES', description: '编辑可复用技能内容；授权在身份策略中管理。' },
+  mcps: { title: '模型协议', eyebrow: 'MODEL / CAPABILITIES', description: '管理远端服务与认证；授权在身份策略中管理。' },
+  rules: { title: '约束规则', eyebrow: 'MODEL / CAPABILITIES', description: '编辑可复用规则；授权在身份策略中管理。' },
+  tools: { title: '调用工具', eyebrow: 'MODEL / CAPABILITIES', description: '管理内置工具及安全配置；身份策略决定授权范围。' },
 };
 
 function currentRoute(): Route {
@@ -789,13 +789,16 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
   const providerId = Form.useWatch(['config', 'providerId'], { form, preserve: true }) as string | undefined;
   const imageModel = Form.useWatch(['config', 'model'], { form, preserve: true }) as string | undefined;
   const builtinName = editing?.config.kind === 'builtin' ? String(editing.config.name ?? '') : 'chat_generate_image';
-  const isImageTool = kind === 'builtin' && builtinName === 'chat_generate_image';
+  const currentKind = kind ?? (editing?.config.kind as string | undefined);
+  const isImageTool = currentKind === 'builtin' && builtinName === 'chat_generate_image';
+  const isVideoTool = currentKind === 'builtin' && builtinName === 'chat_generate_video';
   const supportsExtendedImageQuality = /^gpt-image-2\.5-(?:flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(imageModel ?? '');
   useEffect(() => {
     if (!drawer.open) return;
     form.resetFields();
     form.setFieldsValue({ name: editing?.name ?? '', description: editing?.description ?? '', enabled: editing?.enabled ?? false,
       config: { kind: 'https', name: '', method: 'POST', readOnly: false, url: '', providerId: '', model: '', size: '1024x1024', quality: 'low', fallbackCostPerImage: 0,
+        protocol: 'minimax', resolution: '768P', duration: 6, fallbackCostPerSecond: 0,
         ...editing?.config, authToken: '', parameterSchemaText: JSON.stringify(editing?.config.parameterSchema ?? {}, null, 2) },
     });
   }, [drawer.open, editing, form]);
@@ -812,6 +815,9 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
     if (isImageTool && values.enabled && (!config.providerId || !config.model || !Number(config.fallbackCostPerImage))) {
       onError(new Error(tr('启用生图工具前必须选供应商、模型并设置每张兜底价'))); return;
     }
+    if (isVideoTool && values.enabled && (!config.providerId || !config.model || !Number(config.fallbackCostPerSecond))) {
+      onError(new Error(tr('启用视频工具前必须选供应商、模型并设置每秒兜底价'))); return;
+    }
     setSaving(true);
     try {
       await api.saveTool({ name: values.name, description: values.description ?? '', enabled: values.enabled, config: { ...config, parameterSchema: schema } }, editing?.id);
@@ -821,8 +827,8 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
   };
   const columns: TableColumnsType<LibraryRecord> = [
     { title: tr('名称'), dataIndex: 'name', key: 'name' },
-    { title: tr('类型'), key: 'kind', render: (_, item) => item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' ? tr('内置生图') : tr('内置工具') : tr('自定义 HTTPS JSON API') },
-    { title: tr('接口地址 / 模型'), key: 'target', render: (_, item) => <span className="table-mono">{String(item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' ? item.config.model || tr('未配置') : item.config.name ?? '—' : item.config.url ?? '—')}</span> },
+    { title: tr('类型'), key: 'kind', render: (_, item) => item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' ? tr('内置生图') : item.config.name === 'chat_generate_video' ? tr('内置视频') : tr('内置工具') : tr('自定义 HTTPS JSON API') },
+    { title: tr('接口地址 / 模型'), key: 'target', render: (_, item) => <span className="table-mono">{String(item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' || item.config.name === 'chat_generate_video' ? item.config.model || tr('未配置') : item.config.name ?? '—' : item.config.url ?? '—')}</span> },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: tr('操作'), key: 'actions', render: (_, item) => <Space><Button size="small" onClick={() => drawer.edit(item.id)}>{tr('编辑')}</Button>{item.config.kind !== 'builtin' && <Popconfirm title={`${tr('删除')}“${item.name}”？`} onConfirm={() => void api.deleteTool(item.id).then(onRefresh).catch(onError)}><Button danger size="small">{tr('删除')}</Button></Popconfirm>}</Space> },
   ];
@@ -833,7 +839,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
       <Form form={form} layout="vertical" onFinish={save}>
         <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
         <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={2} /></Form.Item>
-        <Form.Item name={['config', 'kind']} label={tr('工具类型')}><Select disabled={Boolean(editing)} options={[{ value: 'https', label: tr('自定义 HTTPS JSON API') }, { value: 'builtin', label: tr('内置生图') }]} /></Form.Item>
+        <Form.Item name={['config', 'kind']} label={tr('工具类型')}><Select disabled={Boolean(editing)} options={[{ value: 'https', label: tr('自定义 HTTPS JSON API') }, { value: 'builtin', label: tr('内置生图 / 视频') }]} /></Form.Item>
         {kind === 'https' ? <>
           <Form.Item name={['config', 'name']} label={tr('工具函数名')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: tr('函数名只能使用英文、数字与下划线') }]}><Input placeholder="my_tool" /></Form.Item>
           <Form.Item name={['config', 'url']} label="HTTPS URL" rules={[{ required: true }, { type: 'url' }, { pattern: /^https:\/\//i, message: tr('只允许 HTTPS 地址') }]}><Input placeholder="https://api.example.com/tools" /></Form.Item>
@@ -848,6 +854,18 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
           <Form.Item name={['config', 'model']} label={tr('图像模型')} rules={[{ required: true, message: tr('请选择模型') }]}><Select showSearch onChange={(model: string) => { if (!/^gpt-image-2\.5-(?:flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(model) && ['xhigh', 'max'].includes(String(form.getFieldValue(['config', 'quality'])))) form.setFieldValue(['config', 'quality'], 'low'); }} options={prices.filter((item) => item.enabled && (providers.find((provider) => provider.id === providerId)?.models.includes(item.model) ?? true)).map((item) => ({ value: item.model, label: item.model }))} /></Form.Item>
           <div className="form-grid two-cols"><Form.Item name={['config', 'size']} label={tr('尺寸')}><Select options={['1024x1024', '1536x1024', '1024x1536'].map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name={['config', 'quality']} label={tr('质量')}><Select options={['low', 'medium', 'high', ...(supportsExtendedImageQuality ? ['xhigh', 'max'] : [])].map((value) => ({ value, label: value }))} /></Form.Item></div>
           <Form.Item name={['config', 'fallbackCostPerImage']} label={tr('每张兜底价（USD）')} extra={tr('接口不返回可计费用量时按此价计费；启用前必须大于 0。')}><InputNumber min={0} precision={4} addonBefore="$" className="full-width" /></Form.Item>
+        </> : isVideoTool ? <>
+          <Alert type="info" showIcon message={tr('视频工具默认关闭，启用前必须配置真实供应商、视频模型与每秒兜底价。')} description={tr('MiniMax 使用官方异步任务接口；OpenAI 兼容接口使用 /videos 任务与内容下载。QQ 富媒体单文件上限 5 MB。')} />
+          <Form.Item name={['config', 'providerId']} label={tr('AI 供应商')} rules={[{ required: true, message: tr('请选择AI供应商') }]}><Select options={providers.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
+          <Form.Item name={['config', 'model']} label={tr('视频模型')} rules={[{ required: true, message: tr('请选择模型') }]}><Select showSearch options={(providers.find((item) => item.id === providerId)?.models ?? []).map((model) => ({ value: model, label: model }))} /></Form.Item>
+          <div className="form-grid two-cols">
+            <Form.Item name={['config', 'protocol']} label={tr('接口协议')}><Select options={[{ value: 'minimax', label: tr('MiniMax 官方异步任务') }, { value: 'openai', label: tr('OpenAI 兼容 /videos') }]} /></Form.Item>
+            <Form.Item name={['config', 'resolution']} label={tr('默认分辨率')}><Select options={[{ value: '768P', label: '768P' }, { value: '1080P', label: '1080P / 2K' }]} /></Form.Item>
+          </div>
+          <div className="form-grid two-cols">
+            <Form.Item name={['config', 'duration']} label={tr('默认时长（秒）')}><InputNumber min={1} max={30} precision={0} className="full-width" /></Form.Item>
+            <Form.Item name={['config', 'fallbackCostPerSecond']} label={tr('每秒兜底价（USD）')} extra={tr('未配置每秒单价时按此价计费；启用前必须大于 0。')}><InputNumber min={0} precision={4} addonBefore="$" addonAfter="/s" className="full-width" /></Form.Item>
+          </div>
         </> : <Alert type="info" showIcon message={`${tr('内置工具函数')}：${builtinName}`} description={tr('此函数名不可改动；只在身份策略授权后才可用于聊天。')} />}
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch /></Form.Item>
       </Form>
@@ -1473,10 +1491,11 @@ function GroupsPage({ groups, plugins, accounts, providers, policies, tools, onR
       externalIds: editing ? conversationIdList(editing.externalId) : [''],
       conversationType: editing?.conversationType ?? 'group',
       name: editing?.name ?? '', enabled: editing?.enabled ?? true,
-      dialogPolicyId: editing?.dialogPolicyId || undefined,
-      voicePolicyId: editing?.voicePolicyId || undefined,
-      identityPolicyId: editing?.identityPolicyId || undefined,
-      memoryPolicyId: editing?.memoryPolicyId || undefined, costPolicyId: editing?.costPolicyId || undefined,
+      dialogPolicyId: editing?.dialogPolicyId || (!editing ? policies.find((item) => item.id === 'default-dialog' && item.enabled)?.id : undefined),
+      voicePolicyId: editing?.voicePolicyId || (!editing ? policies.find((item) => item.id === 'default-voice' && item.enabled)?.id : undefined),
+      identityPolicyId: editing?.identityPolicyId || (!editing ? policies.find((item) => item.id === 'default-identity' && item.enabled)?.id : undefined),
+      memoryPolicyId: editing?.memoryPolicyId || (!editing ? policies.find((item) => item.id === 'default-memory' && item.enabled)?.id : undefined),
+      costPolicyId: editing?.costPolicyId || (!editing ? policies.find((item) => item.id === 'default-cost' && item.enabled)?.id : undefined),
       toolApprovalMode: editing?.toolApprovalMode ?? 'per-tool', toolApprovalRules: editing?.toolApprovalRules ?? {},
       providerId: editing?.providerId || undefined, model: editing?.model || undefined,
       systemPrompt: editing?.systemPrompt ?? '',
@@ -1857,7 +1876,7 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
   useEffect(() => {
     if (!drawer.open) return;
     form.resetFields();
-    form.setFieldsValue({ name: editing?.name ?? '', model: editing?.model ?? '', inputCostPerMillion: editing?.inputCostPerMillion ?? 0, outputCostPerMillion: editing?.outputCostPerMillion ?? 0, cacheInputCostPerMillion: editing?.cacheInputCostPerMillion, imageTextInputCostPerMillion: editing?.imageTextInputCostPerMillion, imageInputCostPerMillion: editing?.imageInputCostPerMillion, imageCachedInputCostPerMillion: editing?.imageCachedInputCostPerMillion, imageOutputCostPerMillion: editing?.imageOutputCostPerMillion, unit: editing?.unit ?? 'tokens', sourceUrl: editing?.sourceUrl ?? '', enabled: editing?.enabled ?? true });
+    form.setFieldsValue({ name: editing?.name ?? '', model: editing?.model ?? '', inputCostPerMillion: editing?.inputCostPerMillion ?? 0, outputCostPerMillion: editing?.outputCostPerMillion ?? 0, cacheInputCostPerMillion: editing?.cacheInputCostPerMillion, imageTextInputCostPerMillion: editing?.imageTextInputCostPerMillion, imageInputCostPerMillion: editing?.imageInputCostPerMillion, imageCachedInputCostPerMillion: editing?.imageCachedInputCostPerMillion, imageOutputCostPerMillion: editing?.imageOutputCostPerMillion, imageCostPer1K: editing?.imageCostPer1K, imageCostPer2K: editing?.imageCostPer2K, imageCostPer4K: editing?.imageCostPer4K, videoCostPerSecond: editing?.videoCostPerSecond, videoCostPerSecondHd: editing?.videoCostPerSecondHd, unit: editing?.unit ?? 'tokens', sourceUrl: editing?.sourceUrl ?? '', enabled: editing?.enabled ?? true });
   }, [drawer.open, editing, form]);
   const save = async (values: Omit<ModelPriceRecord, 'cacheInputCostPerMillion'> & { cacheInputCostPerMillion?: number | null }) => {
     setSaving(true);
@@ -1872,7 +1891,7 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
     let imported = 0;
     try {
       for (const preset of MODEL_PRICE_PRESETS.filter((item) => presetIds.includes(item.id) && !data.some((saved) => saved.model === item.model))) {
-        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, imageTextInputCostPerMillion: preset.imageTextInputCostPerMillion, imageInputCostPerMillion: preset.imageInputCostPerMillion, imageCachedInputCostPerMillion: preset.imageCachedInputCostPerMillion, imageOutputCostPerMillion: preset.imageOutputCostPerMillion, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
+        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, imageTextInputCostPerMillion: preset.imageTextInputCostPerMillion, imageInputCostPerMillion: preset.imageInputCostPerMillion, imageCachedInputCostPerMillion: preset.imageCachedInputCostPerMillion, imageOutputCostPerMillion: preset.imageOutputCostPerMillion, imageCostPer1K: preset.imageCostPer1K, imageCostPer2K: preset.imageCostPer2K, imageCostPer4K: preset.imageCostPer4K, videoCostPerSecond: preset.videoCostPerSecond, videoCostPerSecondHd: preset.videoCostPerSecondHd, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
         imported += 1;
       }
       message.success(`${tr('已导入预置单价')}：${imported}`);
@@ -1891,7 +1910,7 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
     let imported = 0;
     try {
       for (const preset of missing) {
-        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, imageTextInputCostPerMillion: preset.imageTextInputCostPerMillion, imageInputCostPerMillion: preset.imageInputCostPerMillion, imageCachedInputCostPerMillion: preset.imageCachedInputCostPerMillion, imageOutputCostPerMillion: preset.imageOutputCostPerMillion, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
+        await api.savePrice({ name: preset.name, model: preset.model, inputCostPerMillion: preset.inputCostPerMillion, outputCostPerMillion: preset.outputCostPerMillion, cacheInputCostPerMillion: preset.cacheInputCostPerMillion, imageTextInputCostPerMillion: preset.imageTextInputCostPerMillion, imageInputCostPerMillion: preset.imageInputCostPerMillion, imageCachedInputCostPerMillion: preset.imageCachedInputCostPerMillion, imageOutputCostPerMillion: preset.imageOutputCostPerMillion, imageCostPer1K: preset.imageCostPer1K, imageCostPer2K: preset.imageCostPer2K, imageCostPer4K: preset.imageCostPer4K, videoCostPerSecond: preset.videoCostPerSecond, videoCostPerSecondHd: preset.videoCostPerSecondHd, currency: preset.currency, unit: preset.unit ?? 'tokens', sourceUrl: preset.sourceUrl, enabled: true });
         imported += 1;
       }
       message.success(`${tr('已导入预置单价')}：${imported}`);
@@ -1903,21 +1922,22 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
     }
   };
   const columns: TableColumnsType<ModelPriceRecord> = [
-    { title: tr('模型'), dataIndex: 'model', key: 'model', render: (value: string, row) => <div className="model-cell">{value}<small>{row.name}</small></div> },
-    { title: tr('计价单位'), dataIndex: 'unit', key: 'unit', render: (value?: string) => value === 'characters' ? tr('百万字符') : tr('百万 token') },
-    { title: tr('输入成本'), dataIndex: 'inputCostPerMillion', key: 'input', align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
-    { title: tr('输出成本'), dataIndex: 'outputCostPerMillion', key: 'output', align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
-    { title: tr('缓存输入单价'), dataIndex: 'cacheInputCostPerMillion', key: 'cache', align: 'right', render: (value?: number) => <span className="table-mono">{value === undefined ? '—' : `$${value}`}</span> },
-    { title: tr('图像输出单价'), dataIndex: 'imageOutputCostPerMillion', key: 'image-output', align: 'right', render: (value?: number) => <span className="table-mono">{value === undefined ? '—' : `$${value}`}</span> },
-    { title: tr('计价来源'), dataIndex: 'sourceUrl', key: 'source', ellipsis: true, render: (value: string | undefined, row) => <span className="price-source" title={value}>{value || tr('手动登记')} · {prettyDate(row.updatedAt)}</span> },
-    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (value: boolean) => <StatusTag enabled={value} /> },
-    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Button size="small" aria-label={`${tr('编辑')} ${row.model}`} icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /><Switch checked={row.enabled} aria-label={`${row.model} ${tr('启用状态')}`} onChange={(enabled) => void api.savePrice({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除模型单价')} ${row.model}？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePrice(row.id).then(onRefresh).catch(onError)}><Button danger size="small" aria-label={`${tr('删除')} ${row.model}`} icon={<DeleteOutlined />} /></Popconfirm></Space> },
+    { title: tr('模型'), dataIndex: 'model', key: 'model', width: 160, render: (value: string, row) => <div className="model-cell">{value}<small>{row.name}</small></div> },
+    { title: tr('计价单位'), dataIndex: 'unit', key: 'unit', width: 90, render: (value?: string) => value === 'characters' ? tr('百万字符') : tr('百万 token') },
+    { title: tr('输入成本'), dataIndex: 'inputCostPerMillion', key: 'input', width: 90, align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
+    { title: tr('输出成本'), dataIndex: 'outputCostPerMillion', key: 'output', width: 90, align: 'right', render: (value: number) => <span className="table-mono">${value}</span> },
+    { title: tr('缓存输入单价'), dataIndex: 'cacheInputCostPerMillion', key: 'cache', width: 110, align: 'right', render: (value?: number) => <span className="table-mono">{value === undefined ? '—' : `$${value}`}</span> },
+    { title: tr('图像输出单价'), dataIndex: 'imageOutputCostPerMillion', key: 'image-output', width: 110, align: 'right', render: (value?: number) => <span className="table-mono">{value === undefined ? '—' : `$${value}`}</span> },
+    { title: tr('媒体单价'), key: 'media-price', width: 170, align: 'right', render: (_, row) => <span className="table-mono">{[row.imageCostPer1K !== undefined ? `1K $${row.imageCostPer1K}` : '', row.imageCostPer2K !== undefined ? `2K $${row.imageCostPer2K}` : '', row.imageCostPer4K !== undefined ? `4K $${row.imageCostPer4K}` : '', row.videoCostPerSecond !== undefined ? `视频 $${row.videoCostPerSecond}/s` : ''].filter(Boolean).join(' · ') || '—'}</span> },
+    { title: tr('计价来源'), dataIndex: 'sourceUrl', key: 'source', width: 240, ellipsis: true, render: (value: string | undefined, row) => <span className="price-source" title={value}>{value || tr('手动登记')} · {prettyDate(row.updatedAt)}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', width: 90, render: (value: boolean) => <StatusTag enabled={value} /> },
+    { title: '', key: 'actions', width: 110, align: 'right', render: (_, row) => <Space><Button size="small" aria-label={`${tr('编辑')} ${row.model}`} icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /><Switch checked={row.enabled} aria-label={`${row.model} ${tr('启用状态')}`} onChange={(enabled) => void api.savePrice({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除模型单价')} ${row.model}？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deletePrice(row.id).then(onRefresh).catch(onError)}><Button danger size="small" aria-label={`${tr('删除')} ${row.model}`} icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun="USD / 1M UNITS" action={tr('新增模型单价')} onCreate={() => drawer.edit()} />
-    <p className="form-note">{tr('预置为公开价目快照，可能包含第三方比价，不会自动更新；导入前请核对来源。')} {tr('文本价格核对日期')}：{MODEL_PRICE_CHECKED_AT} · {tr('图像价格核对日期')}：{IMAGE_MODEL_PRICE_CHECKED_AT}</p>
+    <p className="form-note">{tr('预置为公开价目快照，可能包含第三方比价，不会自动更新；导入前请核对来源。')} {tr('文本价格核对日期')}：{MODEL_PRICE_CHECKED_AT} · {tr('图像价格核对日期')}：{IMAGE_MODEL_PRICE_CHECKED_AT} · {tr('视频价格核对日期')}：{MEDIA_MODEL_PRICE_CHECKED_AT}</p>
     <p className="form-note">{tr('未登记单价的文本模型按默认 $3 输入 / $15 输出每百万 token 计费，不再拒绝执行。')}</p>
-    <div className="preset-import"><Select mode="multiple" virtual={false} optionFilterProp="label" value={presetIds} onChange={setPresetIds} aria-label={tr('选择预置模型单价')} placeholder={tr('选择预置模型单价')} options={MODEL_PRICE_PRESETS.map((item) => ({ label: `${item.name} · $${item.inputCostPerMillion} / $${item.outputCostPerMillion}`, value: item.id, disabled: data.some((saved) => saved.model === item.model) }))} /><Button loading={importing} disabled={!presetIds.length} onClick={() => void importPresets()}>{tr('导入所选预置')}</Button><Popconfirm title={tr('导入全部缺少的预置？')} okText={tr('导入')} cancelText={tr('取消')} onConfirm={() => void importAllPresets()}><Button loading={importingAll}>{tr('导入全部缺少的预置')}</Button></Popconfirm></div>
-    {data.length ? <Table<ModelPriceRecord> rowKey="id" dataSource={data} columns={columns} className="data-table" scroll={{ x: 1000 }} pagination={{ pageSize: 8, showSizeChanger: false }} /> : <EmptyTable title={tr('还没有模型单价')} description={tr('手动登记或选择官方预置导入，再在群聊选择模型。')} />}
+    <div className="preset-import"><Select mode="multiple" virtual={false} optionFilterProp="label" value={presetIds} onChange={setPresetIds} aria-label={tr('选择预置模型单价')} placeholder={tr('选择预置模型单价')} options={MODEL_PRICE_PRESETS.map((item) => ({ label: `${item.name} · ${item.videoCostPerSecond !== undefined ? `视频 $${item.videoCostPerSecond}/s` : item.imageCostPer1K !== undefined ? `图片 1K $${item.imageCostPer1K}` : `$${item.inputCostPerMillion} / $${item.outputCostPerMillion}`}`, value: item.id, disabled: data.some((saved) => saved.model === item.model) }))} /><Button loading={importing} disabled={!presetIds.length} onClick={() => void importPresets()}>{tr('导入所选预置')}</Button><Popconfirm title={tr('导入全部缺少的预置？')} okText={tr('导入')} cancelText={tr('取消')} onConfirm={() => void importAllPresets()}><Button loading={importingAll}>{tr('导入全部缺少的预置')}</Button></Popconfirm></div>
+    {data.length ? <Table<ModelPriceRecord> rowKey="id" dataSource={data} columns={columns} className="data-table" scroll={{ x: 1260 }} pagination={{ pageSize: 8, showSizeChanger: false }} /> : <EmptyTable title={tr('还没有模型单价')} description={tr('手动登记或选择官方预置导入，再在群聊选择模型。')} />}
     <Drawer title={<DrawerTitle label="MODEL PRICING" title={editing ? tr('编辑模型单价') : tr('新增模型单价')} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
@@ -1934,6 +1954,17 @@ function PricesPanel({ data, onRefresh, onError }: { data: ModelPriceRecord[]; o
           <Form.Item name="imageCachedInputCostPerMillion" label={tr('图像缓存输入单价')}><InputNumber min={0} precision={6} addonBefore="$" className="full-width" /></Form.Item>
           <Form.Item name="imageOutputCostPerMillion" label={tr('图像输出单价')}><InputNumber min={0} precision={6} addonBefore="$" className="full-width" /></Form.Item>
         </div>
+        <div className="form-section-heading"><span>{tr('按张 / 按秒单价')}</span><small>USD</small></div>
+        <div className="form-grid three-cols">
+          <Form.Item name="imageCostPer1K" label={tr('生图 1K 单价')}><InputNumber min={0} precision={4} addonBefore="$" className="full-width" /></Form.Item>
+          <Form.Item name="imageCostPer2K" label={tr('生图 2K 单价')}><InputNumber min={0} precision={4} addonBefore="$" className="full-width" /></Form.Item>
+          <Form.Item name="imageCostPer4K" label={tr('生图 4K 单价')}><InputNumber min={0} precision={4} addonBefore="$" className="full-width" /></Form.Item>
+        </div>
+        <div className="form-grid two-cols">
+          <Form.Item name="videoCostPerSecond" label={tr('视频每秒单价（768P）')}><InputNumber min={0} precision={6} addonBefore="$" addonAfter="/s" className="full-width" /></Form.Item>
+          <Form.Item name="videoCostPerSecondHd" label={tr('视频每秒单价（1080P）')} extra={tr('留空沿用 768P 单价。')}><InputNumber min={0} precision={6} addonBefore="$" addonAfter="/s" className="full-width" /></Form.Item>
+        </div>
+        <p className="form-note">{tr('群聊选择生图档位或视频分辨率后，按这里对应的单价计费；留空时使用工具配置的兜底价，不会按 0 计费。')}</p>
         <Form.Item name="unit" label={tr('计价单位')}><Select options={[{ value: 'tokens', label: tr('百万 token') }, { value: 'characters', label: tr('百万字符') }]} /></Form.Item>
         <p className="form-note">{tr('价格按 USD / 百万所选单位登记。缓存单价可选，未填写时使用标准输入单价。')}</p>
         <Form.Item name="sourceUrl" label={tr('来源地址')} rules={[{ type: 'url', message: tr('请输入有效 URL') }]}><Input /></Form.Item>
@@ -1962,10 +1993,47 @@ function DetailFields({ values, labels = {} }: { values: JsonObject; labels?: Re
 
 function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; data: LibraryRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
   const { language, tr } = useI18n();
+  const { message } = AntApp.useApp();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [sourceQuery, setSourceQuery] = useState('');
+  const [sourceInput, setSourceInput] = useState('');
+  const [sourceItems, setSourceItems] = useState<CapabilitySourceItem[]>([]);
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [importingKey, setImportingKey] = useState('');
   const editing = data.find((item) => item.id === drawer.editingId);
+  const searchSources = async (query = sourceQuery) => {
+    setSourceBusy(true);
+    try { setSourceItems(await api.searchCapabilitySources(kind, query)); }
+    catch (reason) { onError(reason); }
+    finally { setSourceBusy(false); }
+  };
+  const openImport = () => {
+    setImportOpen(true);
+    setSourceItems([]);
+    setSourceQuery('');
+    setSourceInput('');
+    void searchSources('');
+  };
+  const importSource = async (item?: CapabilitySourceItem) => {
+    const source = item?.source ?? sourceInput.trim();
+    if (!item && !source) { onError(new Error(tr(kind === 'skills' ? '请输入 SkillHub 链接或 owner/repo/skill' : '请输入规则链接或 owner/repo/path'))); return; }
+    setImportingKey(item?.id ?? 'manual');
+    try {
+      if (kind === 'mcps') {
+        if (!item) return;
+        await api.importCapabilitySource(kind, { name: item.name, description: item.description, url: item.source });
+      } else {
+        await api.importCapabilitySource(kind, { source });
+      }
+      message.success(tr('已导入在线源'));
+      setImportOpen(false);
+      onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setImportingKey(''); }
+  };
   useEffect(() => {
     if (!drawer.open) return;
     form.resetFields();
@@ -2009,7 +2077,26 @@ function LibraryPanel({ kind, data, onRefresh, onError }: { kind: LibraryKind; d
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveLibrary(kind, { ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteLibrary(kind, row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
   ];
   return <div className="tab-panel"><PageToolbar count={data.length} noun={libraryNames[kind].toUpperCase()} action={`${tr('新增')} ${libraryNames[kind]}`} onCreate={() => drawer.edit()} />
+    <div className="library-source-bar"><Button icon={<CloudServerOutlined />} onClick={openImport}>{tr('从在线源导入')}</Button><span className="form-note">{tr('Skill 来自 SkillHub，MCP 来自官方 Registry，规则来自 GitHub 规则库。')}</span></div>
     {data.length ? <Table<LibraryRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 760 }} className="data-table" /> : <EmptyTable title={`${tr('还没有')} ${libraryNames[kind]}`} description={`${tr('添加')} ${libraryNames[kind]}${tr('，再按群聊策略选择启用范围。')}`} onCreate={() => drawer.edit()} action={`${tr('新增')} ${libraryNames[kind]}`} />}
+    <Modal title={<DrawerTitle label="ONLINE SOURCE" title={`${tr('从在线源导入')} · ${libraryNames[kind]}`} />} open={importOpen} onCancel={() => setImportOpen(false)} footer={null} width={660} destroyOnClose>
+      <Space.Compact className="full-width">
+        <Input value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} onPressEnter={() => void searchSources()} allowClear
+          placeholder={kind === 'skills' ? tr('搜索 SkillHub 技能') : kind === 'mcps' ? tr('搜索 MCP 官方 Registry') : tr('搜索规则名称')} />
+        <Button loading={sourceBusy} onClick={() => void searchSources()}>{tr('搜索')}</Button>
+      </Space.Compact>
+      {(kind === 'skills' || kind === 'rules') && <div className="source-manual">
+        <Input value={sourceInput} onChange={(event) => setSourceInput(event.target.value)} allowClear
+          placeholder={kind === 'skills' ? 'https://skills.palebluedot.live/en/skill/owner/repo/skill 或 owner/repo/skill' : 'https://github.com/owner/repo 或 raw 规则链接'} />
+        <Button type="primary" loading={importingKey === 'manual'} onClick={() => void importSource()}>{tr('按链接导入')}</Button>
+      </div>}
+      {sourceBusy ? <Skeleton active paragraph={{ rows: 4 }} /> : sourceItems.length ? <div className="source-list">
+        {sourceItems.map((item, index) => <div className="source-item" key={`${item.id}-${item.source}-${index}`}>
+          <div className="source-copy"><strong>{item.name}</strong><small>{item.description || item.source}</small>{item.hint && <em>{item.hint}</em>}</div>
+          <Button size="small" type="primary" loading={importingKey === item.id} onClick={() => void importSource(item)}>{item.requiresAuth ? tr('导入并配置令牌') : tr('导入')}</Button>
+        </div>)}
+      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('没有找到可导入的条目；可改用上方链接直接导入。')} />}
+    </Modal>
     <Drawer title={<DrawerTitle label={`${kind.toUpperCase()} / LIBRARY`} title={editing ? `${tr('编辑')} ${libraryNames[kind]}` : `${tr('新增')} ${libraryNames[kind]}`} />} width={560} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存')}</Button></div>}>
       <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
         <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>

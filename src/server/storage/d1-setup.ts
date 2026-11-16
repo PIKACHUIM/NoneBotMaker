@@ -1,4 +1,4 @@
-import { BUILTIN_CHAT_TOOL_NAMES, defaultFieldValues, policyFields } from '../../shared/plugin-catalog';
+import { BUILTIN_CHAT_TOOL_NAMES, BUILTIN_TOOL_LABELS, DEFAULT_IDENTITY_TOOL_NAMES, defaultFieldValues, policyFields } from '../../shared/plugin-catalog';
 import { MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import type { DatabaseSetupStatus, D1DatabaseLike, RecordKind, RuntimeBindings } from '../../shared/types';
 import { createRepository, type StoredRecord } from './repository';
@@ -9,6 +9,7 @@ const MIGRATION_NAMES = [
   '0003_chatbot_runtime_state.sql',
   '0004_plugin_conversation_logs.sql',
   '0005_conversation_memories.sql',
+  '0006_default_media_tools.sql',
 ] as const;
 
 const LOG_COLUMNS = {
@@ -103,7 +104,8 @@ function defaultRecords(now: string): Array<{ kind: RecordKind; record: StoredRe
   return [
     { kind: 'policies', record: {
       ...policy('identity', '默认身份'), persona: '', providerId: '', model: '', systemPrompt: '',
-      reasoningEffort: 'default', skillIds: [], mcpIds: [], ruleIds: [], toolIds: [],
+      reasoningEffort: 'default', skillIds: [], mcpIds: [], ruleIds: [],
+      toolIds: DEFAULT_IDENTITY_TOOL_NAMES.map((name) => `builtin-${name.replaceAll('_', '-')}`),
     } },
     { kind: 'policies', record: policy('dialog', '默认对话') },
     { kind: 'policies', record: policy('voice', '默认语音') },
@@ -115,12 +117,17 @@ function defaultRecords(now: string): Array<{ kind: RecordKind; record: StoredRe
     }) },
     ...BUILTIN_CHAT_TOOL_NAMES.map((name) => ({ kind: 'tools' as const, record: {
       ...common, id: `builtin-${name.replaceAll('_', '-')}`,
-      name: name === 'chat_generate_image' ? '图片生成' : name,
-      description: name === 'chat_generate_image' ? '经授权后调用已配置的图像模型。' : '内置工具；实际调用须经身份策略授权。',
-      enabled: name !== 'chat_generate_image',
+      name: BUILTIN_TOOL_LABELS[name]?.zh ?? name,
+      description: name === 'chat_generate_image' ? '经授权后调用已配置的图像模型，按 1K/2K/4K 档位单价计费。'
+        : name === 'chat_generate_video' ? '经授权后调用已配置的视频接口，按每秒单价计费。'
+          : '内置工具；实际调用须经身份策略授权。',
+      enabled: name !== 'chat_generate_image' && name !== 'chat_generate_video',
       config: name === 'chat_generate_image' ? {
         kind: 'builtin', name, providerId: '', model: '',
         size: '1024x1024', quality: 'low', fallbackCostPerImage: 0,
+      } : name === 'chat_generate_video' ? {
+        kind: 'builtin', name, providerId: '', model: '', protocol: 'minimax',
+        resolution: '768P', duration: 6, fallbackCostPerSecond: 0,
       } : { kind: 'builtin', name },
     } })),
     ...MODEL_PRICE_PRESETS.map((price) => ({ kind: 'prices' as const, record: { ...price } })),

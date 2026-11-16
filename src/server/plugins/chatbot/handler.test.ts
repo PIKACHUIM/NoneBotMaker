@@ -403,7 +403,7 @@ describe('createChatbotHandler', () => {
     const toolRecord = { id: 'builtin-chat-generate-image', name: 'Generate image', description: '', enabled: true,
       config: { kind: 'builtin', name: 'chat_generate_image', providerId: 'image-provider', model: 'gpt-image-2', fallbackCostPerImage: 0.08, size: '1024x1024', quality: 'low' }, createdAt: '', updatedAt: '' };
     const { deps, writtenLogs } = dependencies({ fetch, sendMedia, logRecord: 'true',
-      findGroup: vi.fn(async () => ({ ...group, toolIds: [toolRecord.id], toolApprovalMode: 'all-allow' as const })),
+      findGroup: vi.fn(async () => ({ ...group, config: { ...(group.config ?? {}), media_image_enabled: true }, toolIds: [toolRecord.id], toolApprovalMode: 'all-allow' as const })),
       findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
       findProvider: vi.fn(async (id) => id === 'image-provider' ? { ...provider, id, models: ['gpt-image-2'] } : provider),
       findPrice: vi.fn(async (model) => model === 'gpt-image-2' ? { id: 'image-price', model, name: model, enabled: true, currency: 'USD' as const, unit: 'tokens' as const,
@@ -415,6 +415,40 @@ describe('createChatbotHandler', () => {
     expect(sendMedia.mock.calls[0][3]).toMatchObject({ type: 'image', contentType: 'image/png', bytes: image });
     expect(deps.recordGroupCost).toHaveBeenCalledWith(expect.any(Object), 0.0175, 1_000);
     expect(writtenLogs.mock.calls.flatMap(([logs]) => logs).some((item) => item.status === 'image_completed' && item.details?.pricingSource === 'total_estimate')).toBe(true);
+  });
+
+  it('runs a conversation-gated video tool through MiniMax and charges per second', async () => {
+    const videoBytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0]);
+    const sendMedia = vi.fn(async (_bot: QQAccountContext, _target: string, _messageId: string, _media: OutboundMedia, _options: ReplyOptions) => undefined);
+    let chatRounds = 0;
+    const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://api.minimax.io/v1/video_generation') return Response.json({ task_id: 'task-1' });
+      if (url.startsWith('https://api.minimax.io/v1/query/video_generation?')) return Response.json({ status: 'Success', file_id: 'file-1' });
+      if (url.startsWith('https://api.minimax.io/v1/files/retrieve?')) return Response.json({ file: { download_url: 'https://cdn.example.com/video.mp4' } });
+      if (url === 'https://cdn.example.com/video.mp4') return new Response(videoBytes, { headers: { 'content-type': 'video/mp4' } });
+      chatRounds += 1;
+      return Response.json({ choices: [{ message: chatRounds === 1
+        ? { content: '', tool_calls: [{ id: 'video-call', type: 'function', function: { name: 'chat_generate_video', arguments: '{"prompt":"waves"}' } }] }
+        : { content: 'done' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const toolRecord = { id: 'builtin-chat-generate-video', name: 'Video', description: '', enabled: true,
+      config: { kind: 'builtin', name: 'chat_generate_video', providerId: 'video-provider', model: 'MiniMax-H3',
+        protocol: 'minimax', resolution: '768P', duration: 6, fallbackCostPerSecond: 0.2 }, createdAt: '', updatedAt: '' };
+    const textPrice = { id: 'text-price', model: 'test-model', name: 'text', enabled: true, currency: 'USD' as const, unit: 'tokens' as const, inputCostPerMillion: 1, outputCostPerMillion: 2, createdAt: '', updatedAt: '' };
+    const videoPrice = { id: 'h3-price', model: 'MiniMax-H3', name: 'H3', enabled: true, currency: 'USD' as const, unit: 'tokens' as const, inputCostPerMillion: 0, outputCostPerMillion: 0, videoCostPerSecond: 0.08, videoCostPerSecondHd: 0.13, createdAt: '', updatedAt: '' };
+    const { deps } = dependencies({ fetch, sendMedia, logRecord: 'true',
+      findGroup: vi.fn(async () => ({ ...group, config: { media_video_enabled: true, media_video_resolution: '768P', media_video_duration: 6 },
+        toolIds: [toolRecord.id], toolApprovalMode: 'all-allow' as const })),
+      findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
+      findProvider: vi.fn(async (id) => id === 'video-provider'
+        ? { ...provider, id, baseUrl: 'https://api.minimax.io', models: ['MiniMax-H3'] } : provider),
+      findPrice: vi.fn(async (model) => model === 'MiniMax-H3' ? videoPrice : textPrice),
+    });
+    await createChatbotHandler(deps)(account, message());
+    expect(sendMedia).toHaveBeenCalledOnce();
+    expect(sendMedia.mock.calls[0][3]).toMatchObject({ type: 'video', contentType: 'video/mp4', bytes: videoBytes });
+    expect(deps.recordGroupCost).toHaveBeenCalledWith(expect.any(Object), 0.48, 1_000);
   });
 
   it('never exposes a disabled built-in tool even when its identity grants the function', async () => {

@@ -1,7 +1,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import type { D1DatabaseLike, D1StatementLike, KVNamespaceLike, RuntimeBindings } from '../../shared/types';
-import { BUILTIN_CHAT_TOOL_NAMES } from '../../shared/plugin-catalog';
+import { BUILTIN_CHAT_TOOL_NAMES, DEFAULT_IDENTITY_TOOL_NAMES } from '../../shared/plugin-catalog';
 import { MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { createApiRouter } from './index';
 
@@ -101,13 +101,14 @@ describe('online setup routes', () => {
       const policies = seeded.filter((row) => row.kind === 'policies').map((row) => JSON.parse(row.value) as Record<string, unknown>);
       expect(policies.map((policy) => policy.type).sort()).toEqual(['cost', 'dialog', 'identity', 'memory', 'voice']);
       expect(policies.find((policy) => policy.type === 'identity')).toMatchObject({
-        providerId: '', model: '', systemPrompt: '', skillIds: [], mcpIds: [], ruleIds: [], toolIds: [],
+        providerId: '', model: '', systemPrompt: '', skillIds: [], mcpIds: [], ruleIds: [],
+        toolIds: DEFAULT_IDENTITY_TOOL_NAMES.map((name) => `builtin-${name.replaceAll('_', '-')}`),
       });
       expect(policies.find((policy) => policy.type === 'voice')).toMatchObject({ config: { voice_model: '' } });
       expect(policies.find((policy) => policy.type === 'memory')).toMatchObject({ config: { memory_enabled: true, maxEntries: 100, retentionDays: 7, memoryMode: 'manual' } });
       expect(policies.find((policy) => policy.type === 'cost')).toMatchObject({ config: { dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0 } });
       const prices = seeded.filter((row) => row.kind === 'prices').map((row) => JSON.parse(row.value) as Record<string, unknown>);
-      expect(MODEL_PRICE_PRESETS).toHaveLength(56); // Preserve the existing 52 text/speech snapshots and add four image models.
+      expect(MODEL_PRICE_PRESETS).toHaveLength(61); // 52 text/speech + four image models + five media records.
       expect(prices).toHaveLength(MODEL_PRICE_PRESETS.length);
       expect(prices.every((price) => typeof price.sourceUrl === 'string' && typeof price.updatedAt === 'string')).toBe(true);
       expect(prices.filter((price) => price.imageOutputCostPerMillion !== undefined).map((price) => price.model).sort()).toEqual([
@@ -130,6 +131,7 @@ describe('online setup routes', () => {
       expect(tools.map((tool) => tool.id).sort()).toEqual(BUILTIN_CHAT_TOOL_NAMES.map((name) => `builtin-${name.replaceAll('_', '-')}`).sort());
       expect(tools.filter((tool) => !tool.enabled)).toMatchObject([
         { id: 'builtin-chat-generate-image', config: { kind: 'builtin', name: 'chat_generate_image', providerId: '', model: '', fallbackCostPerImage: 0 } },
+        { id: 'builtin-chat-generate-video', config: { kind: 'builtin', name: 'chat_generate_video', providerId: '', model: '', fallbackCostPerSecond: 0 } },
       ]);
       expect(tools.filter((tool) => tool.enabled).every((tool) => Object.keys(tool.config).sort().join(',') === 'kind,name')).toBe(true);
 

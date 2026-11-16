@@ -38,6 +38,13 @@ describe('Images API generation', () => {
     expect(cached).toMatchObject({ cost: (80 * 5 + 8 * 3 + 12 + 1000 * 20) / 1e6, pricingSource: 'modalities', usage: { cachedImageInputTokens: 12 } });
   });
 
+  it('bills the conversation size tier instead of token usage when a tier price is configured', async () => {
+    const fetchImpl = stub(payload({ total_tokens: 10_000 }));
+    const result = await generateImage(provider, { ...request, size: '2048x2048', sizeTier: '2K' }, { ...price, imageCostPer2K: 1.25 }, fetchImpl);
+    expect(result).toMatchObject({ cost: 1.25, pricingSource: 'size_tier', estimated: false, sizeTier: '2K' });
+    expect(JSON.parse(String(fetchImpl.mock.calls.at(-1)![1]?.body)).size).toBe('2048x2048');
+  });
+
   it('requires a positive fallback even if a model has a price, and charges it when usage is absent', async () => {
     await expect(generateImage(provider, { ...request, fallbackCostPerImage: 0 }, price, vi.fn())).rejects.toThrow('fallback');
     const result = await generateImage(provider, request, price, stub(payload()));

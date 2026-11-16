@@ -193,7 +193,8 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         inputCostPerMillion: numberField(data, 'inputCostPerMillion', 0, 0),
         outputCostPerMillion: numberField(data, 'outputCostPerMillion', 0, 0),
         ...(data.cacheInputCostPerMillion === undefined || data.cacheInputCostPerMillion === null ? {} : { cacheInputCostPerMillion: numberField(data, 'cacheInputCostPerMillion', 0, 0) }),
-        ...Object.fromEntries(['imageTextInputCostPerMillion', 'imageInputCostPerMillion', 'imageCachedInputCostPerMillion', 'imageOutputCostPerMillion']
+        ...Object.fromEntries(['imageTextInputCostPerMillion', 'imageInputCostPerMillion', 'imageCachedInputCostPerMillion', 'imageOutputCostPerMillion',
+          'imageCostPer1K', 'imageCostPer2K', 'imageCostPer4K', 'videoCostPerSecond', 'videoCostPerSecondHd']
           .filter((key) => data[key] !== undefined && data[key] !== null).map((key) => [key, numberField(data, key, 0, 0)])),
         ...(data.sourceUrl === undefined ? {} : { sourceUrl: httpUrl(stringField(data, 'sourceUrl'), 'sourceUrl') }),
       };
@@ -264,6 +265,12 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
       const enabled = booleanField(data, 'enabled', false);
       if (toolKind === 'builtin' && config.name === 'chat_generate_image' && enabled &&
         (!stringField(config, 'providerId', '') || !stringField(config, 'model', '') || numberField(config, 'fallbackCostPerImage', 0, 0) <= 0)) throw new ApiError(400, 'image_tool_requires_provider_model_and_fallback_price');
+      if (toolKind === 'builtin' && config.name === 'chat_generate_video' && enabled &&
+        (!stringField(config, 'providerId', '') || !stringField(config, 'model', '') || numberField(config, 'fallbackCostPerSecond', 0, 0) <= 0)) throw new ApiError(400, 'video_tool_requires_provider_model_and_fallback_price');
+      const videoProtocol = stringField(config, 'protocol', 'minimax');
+      if (!['minimax', 'openai'].includes(videoProtocol)) throw new ApiError(400, 'invalid_video_protocol');
+      const videoResolution = stringField(config, 'resolution', '768P');
+      if (!['768P', '1080P'].includes(videoResolution)) throw new ApiError(400, 'invalid_video_resolution');
       return {
         ...common, name: nonEmptyStringField(data, 'name'),
         description: stringField(data, 'description', ''), enabled,
@@ -275,7 +282,9 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
           parameterSchema: objectField(config, 'parameterSchema'),
           providerId: stringField(config, 'providerId', ''), model: stringField(config, 'model', ''),
           fallbackCostPerImage: numberField(config, 'fallbackCostPerImage', 0, 0),
+          fallbackCostPerSecond: numberField(config, 'fallbackCostPerSecond', 0, 0),
           size: stringField(config, 'size', '1024x1024'), quality: stringField(config, 'quality', 'low'),
+          protocol: videoProtocol, resolution: videoResolution, duration: numberField(config, 'duration', 6, 1, 30),
         },
       };
     }

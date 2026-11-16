@@ -436,7 +436,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .log-details h3 { margin: 0 0 12px; font-size: 14px; color: var(--accent); }
 .price-estimate { margin-bottom: 24px; }
 .price-estimate .ant-alert-description { line-height: 1.8; }
-.price-source { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.price-source { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .preset-import { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .preset-import .ant-select { min-width: 240px; flex: 1; }
 @media (max-width: 560px) {
@@ -692,6 +692,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .logs-disabled { padding: 30px 22px; }
   .disabled-meta { gap: 8px; flex-wrap: wrap; }
   .disabled-meta b { margin-right: 7px; }
+}
+
+.library-source-bar { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; flex-wrap: wrap; }
+.library-source-bar .form-note { margin: 0; }
+.source-manual { display: flex; gap: 8px; margin-top: 12px; }
+.source-manual .ant-input { min-width: 0; }
+.source-list { display: grid; gap: 8px; margin-top: 14px; max-height: 420px; overflow: auto; }
+.source-item { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.source-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.source-copy strong { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-copy small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-copy em { font-size: 11px; font-style: normal; color: var(--warning, #b56a00); }
+
+@media (max-width: 640px) {
+  .source-manual { flex-direction: column; }
+  .source-item { align-items: flex-start; flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

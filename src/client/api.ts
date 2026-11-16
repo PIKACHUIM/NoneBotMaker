@@ -20,6 +20,15 @@ export interface ChatbotWake { id: string; dueAt: number; reason: string }
 export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
 export interface ChatbotSlangCandidate { id: string; term: string; context: string; definition: string; meaning?: string; usage?: string; example?: string; risk?: string; sources: string[]; status: 'pending' | 'confirmed' | 'rejected'; hits: number; distinctUsers: number; createdAt: number; updatedAt: number }
 export interface ChatbotVoiceSummary { accountId: string; name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
+export interface CapabilitySourceItem {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  url?: string;
+  requiresAuth?: boolean;
+  hint?: string;
+}
 export interface ConversationMemoryItem { id: string; name: string; title: string; description: string; type: MemoryType; content: string; status: 'pending' | 'confirmed'; createdAt: number; updatedAt: number; expiresAt: number }
 export type ConversationMemoryInput = Pick<ConversationMemoryItem, 'name' | 'title' | 'type' | 'content' | 'status'> & Partial<Pick<ConversationMemoryItem, 'description'>>;
 
@@ -278,6 +287,14 @@ export const api = {
   },
   async deleteLibrary(kind: LibraryKind, id: string) {
     return request(`/api/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async searchCapabilitySources(kind: LibraryKind, query: string) {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set('q', query.trim());
+    return records<CapabilitySourceItem>(await request(collectionPath(`/api/capability-sources/${kind}/search`, params)));
+  },
+  async importCapabilitySource(kind: LibraryKind, payload: Record<string, unknown>) {
+    return record<LibraryRecord>(await request(`/api/capability-sources/${kind}/import`, { method: 'POST', ...jsonBody(payload) }));
   },
   async clearLogs() {
     return request<{ cleared?: number }>('/api/logs', { method: 'DELETE' });

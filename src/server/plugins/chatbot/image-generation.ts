@@ -4,11 +4,16 @@ import { boundedText, openAiEndpoint, publicHttpsUrl, safeFetch } from './networ
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 
+export type ImageSizeTier = '1K' | '2K' | '4K';
+
 export interface ImageGenerationRequest {
   model: string;
   prompt: string;
-  size?: 'auto' | '1024x1024' | '1536x1024' | '1024x1536';
+  /** Any provider-supported WIDTHxHEIGHT value within 256–4096 px. */
+  size?: string;
   quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /** Billing tier selected by the conversation; overrides token-based image pricing when priced. */
+  sizeTier?: ImageSizeTier;
   /** Administrator-configured USD charge for one image when usage is absent/incomplete. Required even for priced models. */
   fallbackCostPerImage: number;
 }
@@ -21,6 +26,9 @@ export interface ImageGenerationPrice {
   imageInputCostPerMillion?: number;
   imageCachedInputCostPerMillion?: number;
   imageOutputCostPerMillion?: number;
+  imageCostPer1K?: number;
+  imageCostPer2K?: number;
+  imageCostPer4K?: number;
 }
 
 export class ImageGenerationAttemptError extends Error {
@@ -41,8 +49,9 @@ export interface ImageGenerationResult {
   usage: { textInputTokens?: number; imageInputTokens?: number; cachedImageInputTokens?: number; imageOutputTokens?: number; totalTokens?: number };
   /** USD; never silently zero-priced. Provider multiplier, if present, is already included. */
   cost: number;
-  pricingSource: 'modalities' | 'total_estimate' | 'per_image_fallback';
+  pricingSource: 'modalities' | 'total_estimate' | 'size_tier' | 'per_image_fallback';
   estimated: boolean;
+  sizeTier?: ImageSizeTier;
   priceId?: string;
 }
 
@@ -77,15 +86,23 @@ export async function generateImage(
   const prompt = request.prompt?.trim();
   if (!model || model.length > 256 || !/^[\w./:-]+$/.test(model) || !provider.models.includes(model)) throw new Error('Image model is not configured for this provider.');
   if (!prompt || Array.from(prompt).length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(prompt)) throw new Error('Invalid image prompt.');
-  if (request.size !== undefined && !['auto', '1024x1024', '1536x1024', '1024x1536'].includes(request.size)) throw new Error('Invalid image size.');
+  const imageSize = request.size ?? 'auto';
+  if (imageSize !== 'auto' && (!/^\d{3,4}x\d{3,4}$/.test(imageSize) ||
+    imageSize.split('x').map(Number).some((value) => value < 256 || value > 4096))) throw new Error('Invalid image size.');
+  if (request.sizeTier !== undefined && !['1K', '2K', '4K'].includes(request.sizeTier)) throw new Error('Invalid image size tier.');
   if (request.quality !== undefined && !['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(request.quality) ||
       ['xhigh', 'max'].includes(request.quality ?? '') && !/^gpt-image-2\.5-(?:flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(model)) throw new Error('Invalid image quality for model.');
   if (!validMoney(request.fallbackCostPerImage) || request.fallbackCostPerImage <= 0) throw new Error('A positive per-image fallback price is required.');
   const multiplier = provider.priceMultiplier ?? 1;
   if (!Number.isFinite(multiplier) || multiplier <= 0 || multiplier > 1_000) throw new Error('Invalid provider price multiplier.');
-  for (const value of [price?.inputCostPerMillion, price?.outputCostPerMillion, price?.imageTextInputCostPerMillion, price?.imageInputCostPerMillion, price?.imageCachedInputCostPerMillion, price?.imageOutputCostPerMillion]) {
+  for (const value of [price?.inputCostPerMillion, price?.outputCostPerMillion, price?.imageTextInputCostPerMillion, price?.imageInputCostPerMillion, price?.imageCachedInputCostPerMillion, price?.imageOutputCostPerMillion,
+    price?.imageCostPer1K, price?.imageCostPer2K, price?.imageCostPer4K]) {
     if (value !== undefined && !validMoney(value)) throw new Error('Invalid image model price.');
   }
+  const tierPrice = request.sizeTier === '1K' ? price?.imageCostPer1K
+    : request.sizeTier === '2K' ? price?.imageCostPer2K
+      : request.sizeTier === '4K' ? price?.imageCostPer4K : undefined;
+  const attemptCost = (tierPrice !== undefined && tierPrice > 0 ? tierPrice : request.fallbackCostPerImage) * multiplier;
 
   try {
   let response: Response;
@@ -93,7 +110,7 @@ export async function generateImage(
     response = await safeFetch(openAiEndpoint(provider.baseUrl, 'images/generations'), {
       method: 'POST',
       headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ model, prompt, n: 1, size: request.size ?? 'auto', quality: request.quality ?? 'auto', output_format: 'png' }),
+      body: JSON.stringify({ model, prompt, n: 1, size: imageSize, quality: request.quality ?? 'auto', output_format: 'png' }),
     }, fetchImpl, 120_000);
   } catch { throw new Error('Image provider request failed.'); } // Remote errors may echo the credential.
 
@@ -112,6 +129,17 @@ export async function generateImage(
   const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
   if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('Image provider image exceeds the size limit.');
   const contentType = imageMime(bytes);
+  // Per-image tier pricing is authoritative and does not depend on provider usage.
+  if (tierPrice !== undefined && tierPrice > 0) {
+    const cost = tierPrice * multiplier;
+    if (!Number.isFinite(cost) || cost <= 0) throw new Error('Image generation price cannot be calculated.');
+    return {
+      bytes, contentType, filename: contentType === 'image/jpeg' ? 'generated.jpg' : contentType === 'image/webp' ? 'generated.webp' : 'generated.png',
+      usage: {}, cost, pricingSource: 'size_tier', estimated: false,
+      ...(request.sizeTier ? { sizeTier: request.sizeTier } : {}),
+      ...(price?.id ? { priceId: price.id } : {}),
+    };
+  }
   const details = result.usage;
   if (details !== undefined && (!details || typeof details !== 'object' || Array.isArray(details))) throw new Error('Image provider usage is invalid.');
   const usage = (details ?? {}) as Record<string, unknown>;
@@ -142,15 +170,17 @@ export async function generateImage(
   const averageCost = totalTokens !== undefined && textRate !== undefined && outputRate !== undefined
     ? totalTokens * ((textRate + outputRate) / 2) / 1_000_000 : 0;
   const pricingSource = modalCost > 0 ? 'modalities' : averageCost > 0 ? 'total_estimate' : 'per_image_fallback';
-  // Zero tokens or zero-valued prices are not evidence that the image was free.
-  const cost = (pricingSource === 'modalities' ? modalCost : pricingSource === 'total_estimate' ? averageCost : request.fallbackCostPerImage) * multiplier;
+  const cost = (pricingSource === 'modalities' ? modalCost
+    : pricingSource === 'total_estimate' ? averageCost : request.fallbackCostPerImage) * multiplier;
   if (!Number.isFinite(cost) || cost <= 0) throw new Error('Image generation price cannot be calculated.');
   return {
     bytes, contentType, filename: contentType === 'image/jpeg' ? 'generated.jpg' : contentType === 'image/webp' ? 'generated.webp' : 'generated.png',
     usage: { ...(textInputTokens !== undefined ? { textInputTokens } : {}), ...(inputImageCount !== undefined ? { imageInputTokens: inputImageCount } : {}), ...(cachedImageInputTokens !== undefined ? { cachedImageInputTokens } : {}), ...(imageOutputTokens !== undefined ? { imageOutputTokens } : {}), ...(totalTokens !== undefined ? { totalTokens } : {}) },
-    cost, pricingSource, estimated: pricingSource !== 'modalities', ...(price?.id && pricingSource !== 'per_image_fallback' ? { priceId: price.id } : {}),
+    cost, pricingSource, estimated: pricingSource === 'per_image_fallback' || pricingSource === 'total_estimate',
+    ...(request.sizeTier ? { sizeTier: request.sizeTier } : {}),
+    ...(price?.id && pricingSource !== 'per_image_fallback' ? { priceId: price.id } : {}),
   };
   } catch (error) {
-    throw new ImageGenerationAttemptError(error instanceof Error ? error.message : 'Image generation failed.', request.fallbackCostPerImage * multiplier);
+    throw new ImageGenerationAttemptError(error instanceof Error ? error.message : 'Image generation failed.', attemptCost);
   }
 }
