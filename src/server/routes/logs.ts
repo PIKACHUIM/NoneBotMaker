@@ -57,7 +57,7 @@ export function mergeConversationTurns(items: ConversationLog[]): ConversationLo
       const replied = turn.replies.length > 0;
       const retryErrors = replied && turn.errors.length ? turn.errors : undefined;
       const details = { ...turn.details };
-      if (replied) { delete details.error; delete details.errorCode; }
+      if (replied) { delete details.error; delete details.errorCode; delete details.sentCount; }
       return {
         ...turn.base,
         content: turn.inputs.length ? turn.inputs.join('\n') : turn.base.content,

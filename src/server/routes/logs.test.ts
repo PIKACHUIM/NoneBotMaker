@@ -44,13 +44,14 @@ describe('conversation cost aggregation', () => {
     const base = { accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1', eventId: 'retry-event', expiresAt: 9999999 };
     const entries: ConversationLog[] = [
       { ...base, id: 'incoming', direction: 'in', content: 'hello', createdAt: 1 },
-      { ...base, id: 'timeout-1', direction: 'out', content: '', status: 'error', createdAt: 2, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout' } },
-      { ...base, id: 'timeout-2', direction: 'out', content: '', status: 'error', createdAt: 3, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout' } },
+      { ...base, id: 'timeout-1', direction: 'out', content: '', status: 'error', createdAt: 2, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout', sentCount: 0 } },
+      { ...base, id: 'timeout-2', direction: 'out', content: '', status: 'error', createdAt: 3, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout', sentCount: 0 } },
       { ...base, id: 'reply', direction: 'out', content: 'hello back', status: 'sent', createdAt: 4 },
     ];
     const [turn] = mergeConversationTurns(entries);
     expect(turn.status).toBe('sent');
     expect(turn.details?.error).toBeUndefined();
+    expect(turn.details?.sentCount).toBeUndefined();
     expect(turn.details?.retryErrors).toEqual(['The operation was aborted due to timeout', 'The operation was aborted due to timeout']);
     expect(turn.details?.reply).toBe('hello back');
   });
