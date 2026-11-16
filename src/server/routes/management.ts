@@ -8,6 +8,7 @@ import { isValidTimeZone, nextCronOccurrence, parseCron } from '../../shared/sch
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
+import { SEARCH_ENGINES } from '../plugins/chatbot/search';
 import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
@@ -281,6 +282,23 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
       if (!['minimax', 'openai'].includes(videoProtocol)) throw new ApiError(400, 'invalid_video_protocol');
       const videoResolution = stringField(config, 'resolution', '768P');
       if (!['768P', '1080P'].includes(videoResolution)) throw new ApiError(400, 'invalid_video_resolution');
+      const isWebSearch = toolKind === 'builtin' && config.name === 'WebSearch';
+      const searchEngine = stringField(config, 'engine', 'auto');
+      if (!(SEARCH_ENGINES as string[]).includes(searchEngine)) throw new ApiError(400, 'invalid_search_engine');
+      const searchBaseUrl = stringField(config, 'baseUrl', '');
+      if (searchBaseUrl) {
+        const url = httpUrl(searchBaseUrl, 'search_base_url');
+        if (!url.startsWith('https://')) throw new ApiError(400, 'invalid_search_base_url');
+      }
+      const searchApiKey = stringField(config, 'apiKey', '');
+      const searchCx = stringField(config, 'cx', '');
+      const searchLimit = numberField(config, 'limit', 5, 1, 10);
+      if (enabled && isWebSearch) {
+        if (searchApiKey && searchEngine === 'auto') throw new ApiError(400, 'search_engine_required_for_api_key');
+        if (['brave', 'tavily', 'serper', 'google'].includes(searchEngine) && !searchApiKey) throw new ApiError(400, 'search_engine_requires_api_key');
+        if (searchEngine === 'google' && !searchCx) throw new ApiError(400, 'google_search_requires_cx');
+        if (searchEngine === 'searxng' && !searchBaseUrl) throw new ApiError(400, 'searxng_requires_base_url');
+      }
       return {
         ...common, name: nonEmptyStringField(data, 'name'),
         description: stringField(data, 'description', ''), enabled,
@@ -289,6 +307,10 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
           ...(toolKind === 'https' ? { url: httpUrl(nonEmptyStringField(config, 'url'), 'tool_url') } : {}),
           method, readOnly: booleanField(config, 'readOnly', false),
           ...(config.authToken === undefined ? {} : { authToken: stringField(config, 'authToken') }),
+          ...(isWebSearch ? {
+            engine: searchEngine, baseUrl: searchBaseUrl, cx: searchCx, limit: searchLimit,
+            ...(searchApiKey ? { apiKey: searchApiKey } : {}),
+          } : {}),
           parameterSchema: objectField(config, 'parameterSchema'),
           providerId: stringField(config, 'providerId', ''), model: stringField(config, 'model', ''),
           fallbackCostPerImage: numberField(config, 'fallbackCostPerImage', 0, 0),

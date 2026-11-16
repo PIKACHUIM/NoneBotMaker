@@ -276,6 +276,9 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       }));
     }
     const configuredToolRecords = await resolveToolRecords(dependencies.findTool, group.toolIds ?? []);
+    const searchToolConfig = configuredToolRecords.find((record) => record.enabled && record.config.kind === 'builtin' && record.config.name === 'WebSearch')?.config;
+    // Tool-level search settings take precedence; do not reuse a legacy Brave key for a different engine.
+    const webSearchConfig = searchToolConfig ? { ...config, ...searchToolConfig, apiKey: searchToolConfig.apiKey ?? '' } : config;
     const customTools = createCustomApiToolsFromRecords(configuredToolRecords.filter((record) => record.config.kind === 'https'), fetchImpl);
     const secrets = [account.appSecret ?? '', account.botSecret ?? '', account.clientSecret ?? '',
       ...Object.values(account.credentials ?? {}).filter((value): value is string => typeof value === 'string'),
@@ -985,7 +988,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           waitRequested = { seconds: Number(args.seconds), prompt: typeof args.prompt === 'string' ? args.prompt : '' };
           return JSON.stringify({ waitingForNextMessage: true, expiresAt: now() + waitRequested.seconds * 1000 });
         })] : []),
-        ...webTools(config, fetchImpl),
+        ...webTools(webSearchConfig, fetchImpl),
         ...createUtilityTools(),
         ...createKnowledgeTools(knowledgeContext),
       ];

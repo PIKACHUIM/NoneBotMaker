@@ -611,6 +611,21 @@ describe('capability policies', () => {
     expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-4', externalId: 'external-4', ruleIds: ['missing-rule'] })).status).toBe(400);
   });
 
+  it('stores search engine settings on the WebSearch tool and masks the API key', async () => {
+    const setup = configuredApp();
+    const created = await writeRequest(setup, '/tools', {
+      name: 'Web search', enabled: true,
+      config: { kind: 'builtin', name: 'WebSearch', engine: 'tavily', apiKey: 'tvly-secret', limit: 3 },
+    });
+    expect(created.status).toBe(201);
+    const tool = (await json(created)).data as JsonObject;
+    expect(tool).toMatchObject({ config: { kind: 'builtin', name: 'WebSearch', engine: 'tavily', limit: 3, apiKey: '********' } });
+    const stored = setup.values.get(`nonebotmaker:records:tools:${String(tool.id)}`) as string;
+    expect(stored).not.toContain('tvly-secret');
+    expect((await writeRequest(setup, '/tools', { name: 'Missing key', enabled: true, config: { kind: 'builtin', name: 'WebSearch', engine: 'serper' } })).status).toBe(400);
+    expect((await writeRequest(setup, '/tools', { name: 'Auto with key', enabled: true, config: { kind: 'builtin', name: 'WebSearch', engine: 'auto', apiKey: 'key' } })).status).toBe(400);
+  });
+
   it('blocks deleting skills that only a policy references', async () => {
     const setup = configuredApp();
     seed(setup.values, 'skills', { id: 'skill-1', name: 'Skill', description: '', enabled: true, config: { prompt: 'do it' } });

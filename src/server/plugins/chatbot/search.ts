@@ -1,6 +1,9 @@
 import { boundedText, safeFetch } from './network';
 
-export type WebSearchEngine = 'auto' | 'duckduckgo' | 'baidu' | 'bing' | 'brave';
+export type WebSearchEngine = 'auto' | 'duckduckgo' | 'baidu' | 'bing' | 'brave' | 'tavily' | 'serper' | 'google' | 'searxng';
+
+export const SEARCH_ENGINES: WebSearchEngine[] = ['auto', 'duckduckgo', 'baidu', 'bing', 'brave', 'tavily', 'serper', 'google', 'searxng'];
+export const KEYED_SEARCH_ENGINES: WebSearchEngine[] = ['brave', 'tavily', 'serper', 'google', 'bing'];
 
 export interface WebSearchResult {
   title: string;
@@ -22,7 +25,7 @@ const BROWSER_HEADERS: Record<string, string> = {
 };
 
 export function normalizeSearchEngine(value: unknown): WebSearchEngine {
-  return value === 'duckduckgo' || value === 'baidu' || value === 'bing' || value === 'brave' ? value : 'auto';
+  return typeof value === 'string' && (SEARCH_ENGINES as string[]).includes(value) ? value as WebSearchEngine : 'auto';
 }
 
 function clampLimit(value: unknown): number {
@@ -215,25 +218,102 @@ async function brave(query: string, limit: number, apiKey: string, fetchImpl: ty
     : []), limit);
 }
 
+async function tavily(query: string, limit: number, apiKey: string, baseUrl: string | undefined, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  const response = await safeFetch(baseUrl || 'https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, query, max_results: limit, search_depth: 'basic' }),
+  }, fetchImpl);
+  const payload = JSON.parse(await boundedText(response, 512 * 1024)) as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown }> };
+  return dedupe((payload.results ?? []).flatMap((item) => typeof item.url === 'string'
+    ? [{ title: trimText(String(item.title ?? ''), 300), url: item.url, snippet: trimText(String(item.content ?? ''), 500) }]
+    : []), limit);
+}
+
+async function serper(query: string, limit: number, apiKey: string, baseUrl: string | undefined, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  const response = await safeFetch(baseUrl || 'https://google.serper.dev/search', {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json', 'X-API-KEY': apiKey },
+    body: JSON.stringify({ q: query, num: limit }),
+  }, fetchImpl);
+  const payload = JSON.parse(await boundedText(response, 512 * 1024)) as { organic?: Array<{ title?: unknown; link?: unknown; snippet?: unknown }> };
+  return dedupe((payload.organic ?? []).flatMap((item) => typeof item.link === 'string'
+    ? [{ title: trimText(String(item.title ?? ''), 300), url: item.link, snippet: trimText(String(item.snippet ?? ''), 500) }]
+    : []), limit);
+}
+
+async function google(query: string, limit: number, apiKey: string, cx: string, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  if (!cx.trim()) throw new Error('Google Search requires a Search Engine ID (cx) in the WebSearch tool settings.');
+  const endpoint = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(apiKey)}&cx=${encodeURIComponent(cx.trim())}&q=${encodeURIComponent(query)}&num=${limit}`;
+  const response = await safeFetch(endpoint, { headers: { accept: 'application/json' } }, fetchImpl);
+  const payload = JSON.parse(await boundedText(response, 512 * 1024)) as { items?: Array<{ title?: unknown; link?: unknown; snippet?: unknown }> };
+  return dedupe((payload.items ?? []).flatMap((item) => typeof item.link === 'string'
+    ? [{ title: trimText(String(item.title ?? ''), 300), url: item.link, snippet: trimText(String(item.snippet ?? ''), 500) }]
+    : []), limit);
+}
+
+async function bingApi(query: string, limit: number, apiKey: string, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  const market = /[\u3400-\u9fff]/.test(query) ? 'zh-CN' : 'en-US';
+  const endpoint = `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=${limit}&mkt=${market}`;
+  const response = await safeFetch(endpoint, { headers: { accept: 'application/json', 'Ocp-Apim-Subscription-Key': apiKey } }, fetchImpl);
+  const payload = JSON.parse(await boundedText(response, 512 * 1024)) as { webPages?: { value?: Array<{ name?: unknown; url?: unknown; snippet?: unknown }> } };
+  return dedupe((payload.webPages?.value ?? []).flatMap((item) => typeof item.url === 'string'
+    ? [{ title: trimText(String(item.name ?? ''), 300), url: item.url, snippet: trimText(String(item.snippet ?? ''), 500) }]
+    : []), limit);
+}
+
+async function searxng(query: string, limit: number, baseUrl: string | undefined, apiKey: string, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  if (!baseUrl?.trim()) throw new Error('SearXNG requires a base URL in the WebSearch tool settings.');
+  const endpoint = `${baseUrl.trim().replace(/\/+$/, '')}/search?q=${encodeURIComponent(query)}&format=json&limit=${limit}`;
+  const response = await safeFetch(endpoint, { headers: { accept: 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) } }, fetchImpl);
+  const payload = JSON.parse(await boundedText(response, 512 * 1024)) as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown }> };
+  return dedupe((payload.results ?? []).flatMap((item) => typeof item.url === 'string'
+    ? [{ title: trimText(String(item.title ?? ''), 300), url: item.url, snippet: trimText(String(item.content ?? ''), 500) }]
+    : []), limit);
+}
+
+export interface WebSearchOptions {
+  engine?: unknown;
+  limit?: unknown;
+  /** Preferred key name for tool-level configuration. */
+  apiKey?: unknown;
+  /** Backward-compatible key used by older plugin settings. */
+  braveApiKey?: unknown;
+  baseUrl?: unknown;
+  cx?: unknown;
+}
+
 export async function webSearch(
   query: string,
-  options: { engine?: unknown; limit?: unknown; braveApiKey?: unknown } = {},
+  options: WebSearchOptions = {},
   fetchImpl: typeof fetch = fetch,
 ): Promise<WebSearchResponse> {
   const text = query.normalize('NFKC').trim();
   if (!text || text.length > 500) throw new Error('Search query must be between 1 and 500 characters.');
   const limit = clampLimit(options.limit);
   const selected = normalizeSearchEngine(options.engine);
-  const braveKey = typeof options.braveApiKey === 'string' ? options.braveApiKey.trim() : '';
-  const order: Array<'duckduckgo' | 'baidu' | 'bing' | 'brave'> = selected === 'auto' ? ['duckduckgo', 'baidu', 'bing', ...(braveKey ? ['brave' as const] : [])] : [selected];
+  const apiKey = (typeof options.apiKey === 'string' ? options.apiKey : typeof options.braveApiKey === 'string' ? options.braveApiKey : '').trim();
+  const baseUrl = typeof options.baseUrl === 'string' ? options.baseUrl.trim() : '';
+  const cx = typeof options.cx === 'string' ? options.cx.trim() : '';
+  const requiresKey: WebSearchEngine[] = ['brave', 'tavily', 'serper', 'google'];
+  if (selected !== 'auto' && requiresKey.includes(selected) && !apiKey) {
+    throw new Error(`${selected} search requires an API key in the WebSearch tool settings.`);
+  }
+  if (selected === 'google' && !cx) throw new Error('Google Search requires a Search Engine ID (cx) in the WebSearch tool settings.');
+  if (selected === 'searxng' && !baseUrl) throw new Error('SearXNG requires a base URL in the WebSearch tool settings.');
+
+  const order: WebSearchEngine[] = selected === 'auto' ? ['duckduckgo', 'baidu', 'bing'] : [selected];
   const failures: string[] = [];
   for (const engine of order) {
-    if (engine === 'brave' && !braveKey) throw new Error('Brave Search requires brave_api_key in the plugin settings.');
     try {
       const results = engine === 'duckduckgo' ? await duckDuckGo(text, limit, fetchImpl)
         : engine === 'baidu' ? await baidu(text, limit, fetchImpl)
-          : engine === 'bing' ? await bing(text, limit, fetchImpl)
-            : await brave(text, limit, braveKey, fetchImpl);
+          : engine === 'bing' ? apiKey ? await bingApi(text, limit, apiKey, fetchImpl) : await bing(text, limit, fetchImpl)
+            : engine === 'brave' ? await brave(text, limit, apiKey, fetchImpl)
+              : engine === 'tavily' ? await tavily(text, limit, apiKey, baseUrl || undefined, fetchImpl)
+                : engine === 'serper' ? await serper(text, limit, apiKey, baseUrl || undefined, fetchImpl)
+                  : engine === 'google' ? await google(text, limit, apiKey, cx, fetchImpl)
+                    : await searxng(text, limit, baseUrl || undefined, apiKey, fetchImpl);
       if (results.length) return { engine, query: text, results };
       failures.push(`${engine}: no results`);
     } catch (error) {

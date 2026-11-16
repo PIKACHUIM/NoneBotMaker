@@ -69,8 +69,32 @@ describe('free web search parsers', () => {
     });
   });
 
-  it('requires a key for Brave and rejects oversized queries', async () => {
-    await expect(webSearch('test', { engine: 'brave' }, vi.fn() as unknown as typeof fetch)).rejects.toThrow('brave_api_key');
+  it('uses keyed Tavily and Serper APIs from the tool settings', async () => {
+    const tavilyFetch = routed((url) => {
+      expect(url).toBe('https://api.tavily.com/search');
+      return json({ results: [{ title: 'Tavily', url: 'https://t.example', content: 'tavily snippet' }] });
+    });
+    await expect(webSearch('news', { engine: 'tavily', apiKey: 'tvly-key', limit: 3 }, tavilyFetch as typeof fetch)).resolves.toMatchObject({
+      engine: 'tavily', results: [{ title: 'Tavily', url: 'https://t.example', snippet: 'tavily snippet' }],
+    });
+    const serperFetch = routed((url) => {
+      expect(url).toBe('https://google.serper.dev/search');
+      return json({ organic: [{ title: 'Serper', link: 'https://s.example', snippet: 'serper snippet' }] });
+    });
+    await expect(webSearch('news', { engine: 'serper', apiKey: 'serper-key' }, serperFetch as typeof fetch)).resolves.toMatchObject({
+      engine: 'serper', results: [{ title: 'Serper', url: 'https://s.example', snippet: 'serper snippet' }],
+    });
+  });
+
+  it('validates keyed engine settings and uses a configured SearXNG base URL', async () => {
+    await expect(webSearch('test', { engine: 'brave' }, vi.fn() as unknown as typeof fetch)).rejects.toThrow('API key');
+    await expect(webSearch('test', { engine: 'google', apiKey: 'key' }, vi.fn() as unknown as typeof fetch)).rejects.toThrow('Search Engine ID');
+    await expect(webSearch('test', { engine: 'searxng' }, vi.fn() as unknown as typeof fetch)).rejects.toThrow('base URL');
+    const searxFetch = routed((url) => {
+      expect(url).toContain('https://searx.example/search?');
+      return json({ results: [{ title: 'SearXNG', url: 'https://x.example', content: 'searx snippet' }] });
+    });
+    await expect(webSearch('test', { engine: 'searxng', baseUrl: 'https://searx.example' }, searxFetch as typeof fetch)).resolves.toMatchObject({ engine: 'searxng' });
     await expect(webSearch('x'.repeat(501), {}, vi.fn() as unknown as typeof fetch)).rejects.toThrow('500');
   });
 });

@@ -835,6 +835,8 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
   const currentKind = kind ?? (editing?.config.kind as string | undefined);
   const isImageTool = currentKind === 'builtin' && builtinName === 'chat_generate_image';
   const isVideoTool = currentKind === 'builtin' && builtinName === 'chat_generate_video';
+  const isSearchTool = currentKind === 'builtin' && builtinName === 'WebSearch';
+  const searchEngine = (Form.useWatch(['config', 'engine'], { form, preserve: true }) as string | undefined) ?? 'auto';
   const supportsExtendedImageQuality = /^gpt-image-2\.5-(?:flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(imageModel ?? '');
   useEffect(() => {
     if (!drawer.open) return;
@@ -842,6 +844,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
     form.setFieldsValue({ name: editing?.name ?? '', description: editing?.description ?? '', enabled: editing?.enabled ?? false,
       config: { kind: 'https', name: '', method: 'POST', readOnly: false, url: '', providerId: '', model: '', size: '1024x1024', quality: 'low', fallbackCostPerImage: 0,
         protocol: 'minimax', resolution: '768P', duration: 6, fallbackCostPerSecond: 0,
+        engine: 'auto', baseUrl: '', cx: '', limit: 5, apiKey: '',
         ...editing?.config, authToken: '', parameterSchemaText: JSON.stringify(editing?.config.parameterSchema ?? {}, null, 2) },
     });
   }, [drawer.open, editing, form]);
@@ -854,6 +857,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
     }
     const { parameterSchemaText: _, ...config } = values.config;
     if (!config.authToken) delete config.authToken;
+    if (!config.apiKey) delete config.apiKey;
     if (config.kind === 'builtin') config.name = builtinName;
     if (isImageTool && values.enabled && (!config.providerId || !config.model || !Number(config.fallbackCostPerImage))) {
       onError(new Error(tr('启用生图工具前必须选供应商、模型并设置每张兜底价'))); return;
@@ -870,8 +874,8 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
   };
   const columns: TableColumnsType<LibraryRecord> = [
     { title: tr('名称'), dataIndex: 'name', key: 'name' },
-    { title: tr('类型'), key: 'kind', render: (_, item) => item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' ? tr('内置生图') : item.config.name === 'chat_generate_video' ? tr('内置视频') : tr('内置工具') : tr('自定义 HTTPS JSON API') },
-    { title: tr('接口地址 / 模型'), key: 'target', render: (_, item) => <span className="table-mono">{String(item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' || item.config.name === 'chat_generate_video' ? item.config.model || tr('未配置') : item.config.name ?? '—' : item.config.url ?? '—')}</span> },
+    { title: tr('类型'), key: 'kind', render: (_, item) => item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' ? tr('内置生图') : item.config.name === 'chat_generate_video' ? tr('内置视频') : item.config.name === 'WebSearch' ? tr('联网搜索') : tr('内置工具') : tr('自定义 HTTPS JSON API') },
+    { title: tr('接口地址 / 模型'), key: 'target', render: (_, item) => <span className="table-mono">{String(item.config.kind === 'builtin' ? item.config.name === 'chat_generate_image' || item.config.name === 'chat_generate_video' ? item.config.model || tr('未配置') : item.config.name === 'WebSearch' ? `${tr('引擎')}：${String(item.config.engine ?? 'auto')}` : item.config.name ?? '—' : item.config.url ?? '—')}</span> },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: tr('操作'), key: 'actions', render: (_, item) => <Space><Button size="small" onClick={() => drawer.edit(item.id)}>{tr('编辑')}</Button>{item.config.kind !== 'builtin' && <Popconfirm title={`${tr('删除')}“${item.name}”？`} onConfirm={() => void api.deleteTool(item.id).then(onRefresh).catch(onError)}><Button danger size="small">{tr('删除')}</Button></Popconfirm>}</Space> },
   ];
@@ -882,7 +886,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
       <Form form={form} layout="vertical" onFinish={save}>
         <Form.Item name="name" label={tr('名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input /></Form.Item>
         <Form.Item name="description" label={tr('说明')}><Input.TextArea rows={2} /></Form.Item>
-        <Form.Item name={['config', 'kind']} label={tr('工具类型')}><Select disabled={Boolean(editing)} options={[{ value: 'https', label: tr('自定义 HTTPS JSON API') }, { value: 'builtin', label: tr('内置生图 / 视频') }]} /></Form.Item>
+        <Form.Item name={['config', 'kind']} label={tr('工具类型')}><Select disabled={Boolean(editing)} options={[{ value: 'https', label: tr('自定义 HTTPS JSON API') }, { value: 'builtin', label: tr('内置工具（生图 / 视频 / 搜索）') }]} /></Form.Item>
         {kind === 'https' ? <>
           <Form.Item name={['config', 'name']} label={tr('工具函数名')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]*$/, message: tr('函数名只能使用英文、数字与下划线') }]}><Input placeholder="my_tool" /></Form.Item>
           <Form.Item name={['config', 'url']} label="HTTPS URL" rules={[{ required: true }, { type: 'url' }, { pattern: /^https:\/\//i, message: tr('只允许 HTTPS 地址') }]}><Input placeholder="https://api.example.com/tools" /></Form.Item>
@@ -909,6 +913,20 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
             <Form.Item name={['config', 'duration']} label={tr('默认时长（秒）')}><InputNumber min={1} max={30} precision={0} className="full-width" /></Form.Item>
             <Form.Item name={['config', 'fallbackCostPerSecond']} label={tr('每秒兜底价（USD）')} extra={tr('未配置每秒单价时按此价计费；启用前必须大于 0。')}><InputNumber min={0} precision={4} addonBefore="$" addonAfter="/s" className="full-width" /></Form.Item>
           </div>
+        </> : isSearchTool ? <>
+          <Alert type="info" showIcon message={tr('搜索配置保存在这个工具上，不再依赖插件设置。免费引擎不需要 Key；Tavily / Serper / Brave / Google / Bing / SearXNG 可填对应 API 地址和 Key。')} />
+          <div className="form-grid two-cols">
+            <Form.Item name={['config', 'engine']} label={tr('搜索引擎')}><Select options={SEARCH_ENGINE_OPTIONS} /></Form.Item>
+            <Form.Item name={['config', 'limit']} label={tr('结果数量')}><InputNumber min={1} max={10} precision={0} className="full-width" /></Form.Item>
+          </div>
+          <Form.Item name={['config', 'apiKey']} label={tr('API Key')} extra={tr('留空保留已保存的 Key；Key 会加密存储且不再显示明文。')}><Input.Password autoComplete="new-password" placeholder={searchEngine === 'bing' ? tr('可选；留空使用免费 Bing') : tr('填写对应引擎的 API Key')} /></Form.Item>
+          {searchEngine === 'google' && <Form.Item name={['config', 'cx']} label={tr('Google 搜索引擎 ID（CX）')} rules={[{ required: true, message: tr('请输入 CX') }]}><Input placeholder="0123456789:abcdef" /></Form.Item>}
+          {['tavily', 'serper', 'searxng'].includes(searchEngine) && <Form.Item name={['config', 'baseUrl']} label={tr('API 地址')}
+            extra={searchEngine === 'searxng' ? tr('SearXNG 实例地址，必须支持 /search?format=json。') : tr('可选，留空使用官方默认地址。')}
+            rules={searchEngine === 'searxng' ? [{ required: true, message: tr('请输入 SearXNG 地址') }, { type: 'url' }, { pattern: /^https:\/\//i, message: tr('只允许 HTTPS 地址') }] : [{ type: 'url' }, { pattern: /^https:\/\//i, message: tr('只允许 HTTPS 地址') }]}>
+            <Input placeholder={searchEngine === 'tavily' ? 'https://api.tavily.com/search' : searchEngine === 'serper' ? 'https://google.serper.dev/search' : 'https://search.example.com'} />
+          </Form.Item>}
+          <Alert type="warning" showIcon message={tr('自动模式只使用免费引擎，结果可能不稳定；新闻类查询建议配置 Tavily、Serper 或 Brave 等带 Key 的搜索 API。')} />
         </> : <Alert type="info" showIcon message={`${tr('内置工具函数')}：${builtinName}`} description={tr('此函数名不可改动；只在身份策略授权后才可用于聊天。')} />}
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch /></Form.Item>
       </Form>
@@ -2272,6 +2290,18 @@ const CRON_MODE_LABELS: Record<CronBuilderMode, string> = {
 };
 
 const WEEKDAY_OPTIONS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'].map((label, value) => ({ value, label }));
+
+const SEARCH_ENGINE_OPTIONS = [
+  { value: 'auto', label: '自动（免费：DuckDuckGo / 百度 / Bing）' },
+  { value: 'duckduckgo', label: 'DuckDuckGo（免费）' },
+  { value: 'baidu', label: '百度（免费）' },
+  { value: 'bing', label: 'Bing（有 API Key 时走官方 API）' },
+  { value: 'brave', label: 'Brave Search（需要 API Key）' },
+  { value: 'tavily', label: 'Tavily（需要 API Key）' },
+  { value: 'serper', label: 'Serper / Google（需要 API Key）' },
+  { value: 'google', label: 'Google Custom Search（需要 API Key + CX）' },
+  { value: 'searxng', label: 'SearXNG（自建，需要 Base URL）' },
+];
 
 const EXTENSION_JS_SAMPLE = [
   'const name = ctx.event.userName || ctx.event.userId;',
