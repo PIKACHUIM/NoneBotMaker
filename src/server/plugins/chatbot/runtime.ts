@@ -1,7 +1,9 @@
 import { CHATBOT_PLUGIN_TYPE } from '../../../shared/types';
 import type {
   ChatMessage,
+  CommandRecord,
   D1DatabaseLike,
+  ExtensionRecord,
   LibraryRecord,
   ModelPriceRecord,
   ProjectMemoryRecord,
@@ -15,6 +17,7 @@ import { readBoolean } from '../../env';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
 import { findModelPrice } from '../../../shared/model-pricing';
 import { matchesConversationId } from '../../../shared/plugin-catalog';
+import { runExtension, type WorkerLoaderLike } from '../../automation/extensions';
 import { createD1MatcherSessionStore, PluginRuntime } from '../dispatcher';
 import { createConversationLogRepository, type ConversationLogRepository } from '../../storage/conversation-log-repository';
 import { createConversationMemoryRepository } from '../../storage/conversation-memory-repository';
@@ -318,6 +321,14 @@ export function createStoredChatbotHandler(
     findTool: async (id) => {
       const record = await records.get('tools', id);
       return record ? await decryptSecrets(record as JsonObject, bindings) as unknown as LibraryRecord : null;
+    },
+    listCommands: async () => (await records.list('commands')) as unknown as CommandRecord[],
+    listExtensions: async () => (await records.list('extensions')) as unknown as ExtensionRecord[],
+    runExtension: async (id, event) => {
+      const record = await records.get('extensions', id);
+      if (!record) throw new Error('Plugin extension was not found.');
+      const extension = await decryptSecrets(record as JsonObject, bindings) as unknown as ExtensionRecord;
+      return runExtension(extension, event, { fetch: services.fetch, loader: bindings.PLUGIN_LOADER as WorkerLoaderLike | undefined });
     },
     findWorkspaceMemories: async (accountId) => (await records.list('memories')).filter((record) => record.accountId === accountId) as unknown as ProjectMemoryRecord[],
     saveWorkspaceMemory: async (accountId, memory) => {

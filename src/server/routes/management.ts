@@ -1,14 +1,17 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
-import type { BotAccountRecord, GroupRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings } from '../../shared/types';
+import type { BotAccountRecord, GroupRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings, ScheduleActionType } from '../../shared/types';
 import { BUILTIN_CHAT_TOOL_NAMES, missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationFields, conversationIdList } from '../../shared/plugin-catalog';
+import { BUILTIN_COMMAND_NAMES } from '../../shared/commands';
+import { MEMORY_CONTEXT_OPTIONS } from '../../shared/memory-context';
+import { isValidTimeZone, nextCronOccurrence, parseCron } from '../../shared/schedules';
 import { MODEL_PRICE_CHECKED_AT, MODEL_PRICE_PRESETS } from '../../shared/model-pricing';
 import { chatbotCostConsistency } from '../plugins/chatbot/runtime';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
 import { decryptSecrets, encryptSecrets, isEncryptedSecret, redactSecrets } from '../storage/secrets';
 import { createRepository, type RecordRepository, type StoredRecord, StorageUnavailableError } from '../storage/repository';
 
-const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'tools', 'memories', 'policies'];
+const RECORD_KINDS: RecordKind[] = ['plugins', 'accounts', 'groups', 'providers', 'prices', 'skills', 'mcps', 'rules', 'tools', 'memories', 'policies', 'schedules', 'commands', 'extensions'];
 const ACCOUNT_SCOPED_KINDS = new Set<RecordKind>(['memories']);
 const MAX_CONVERSATION_IDS = 100;
 
@@ -226,9 +229,13 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
         memoryMode: stringField(config, 'memoryMode', 'manual'),
         maxEntries: numberField(config, 'maxEntries', 100, 1, 1000),
         retentionDays: numberField(config, 'retentionDays', 7, 1, 365),
+        memoryContextLength: stringField(config, 'memoryContextLength', '32K'),
         memory_enabled: booleanField(config, 'memory_enabled', true),
       } : normalizeFieldValues(policyFields(policyType), config);
       if (policyType === 'memory' && !['manual', 'review', 'auto'].includes(policyConfig.memoryMode as string)) throw new ApiError(400, 'invalid_memoryMode');
+      if (policyType === 'memory' && !MEMORY_CONTEXT_OPTIONS.some((option) => option.value === policyConfig.memoryContextLength)) {
+        throw new ApiError(400, 'invalid_memoryContextLength');
+      }
       const base = {
         ...common, type: policyType, name: nonEmptyStringField(data, 'name'),
         description: stringField(data, 'description', ''), enabled: booleanField(data, 'enabled', true),
@@ -285,6 +292,95 @@ function normalizedRecord(kind: RecordKind, data: JsonObject, id: string, create
           fallbackCostPerSecond: numberField(config, 'fallbackCostPerSecond', 0, 0),
           size: stringField(config, 'size', '1024x1024'), quality: stringField(config, 'quality', 'low'),
           protocol: videoProtocol, resolution: videoResolution, duration: numberField(config, 'duration', 6, 1, 30),
+        },
+      };
+    }
+    case 'schedules': {
+      const config = objectField(data, 'config');
+      const cron = nonEmptyStringField(config, 'cron').trim();
+      const parsed = parseCron(cron);
+      if (!parsed) throw new ApiError(400, 'invalid_cron');
+      const timezone = stringField(config, 'timezone', 'UTC').trim() || 'UTC';
+      if (!isValidTimeZone(timezone)) throw new ApiError(400, 'invalid_timezone');
+      const action = stringField(config, 'action', 'message') as ScheduleActionType;
+      if (!['message', 'prompt', 'command', 'extension'].includes(action)) throw new ApiError(400, 'invalid_schedule_action');
+      const content = stringField(config, 'content', '');
+      if (new TextEncoder().encode(content).byteLength > 8000) throw new ApiError(400, 'invalid_schedule_content');
+      const extensionId = stringField(config, 'extensionId', '');
+      if (action === 'extension' && !extensionId) throw new ApiError(400, 'missing_extensionId');
+      return {
+        ...common,
+        name: nonEmptyStringField(data, 'name'),
+        description: stringField(data, 'description', ''),
+        enabled: booleanField(data, 'enabled', true),
+        config: {
+          cron, timezone, groupId: nonEmptyStringField(config, 'groupId'), action, content,
+          extensionId, maxCatchUpMinutes: numberField(config, 'maxCatchUpMinutes', 0, 0, 1440),
+        },
+        ...(typeof data.lastRunAt === 'string' ? { lastRunAt: data.lastRunAt } : {}),
+        ...(typeof data.lastStatus === 'string' ? { lastStatus: data.lastStatus } : {}),
+        ...(typeof data.lastError === 'string' ? { lastError: data.lastError } : {}),
+        ...(typeof data.lastDurationMs === 'number' ? { lastDurationMs: data.lastDurationMs } : {}),
+        ...(typeof data.nextRunAt === 'string' ? { nextRunAt: data.nextRunAt } : {}),
+      };
+    }
+    case 'commands': {
+      const config = objectField(data, 'config');
+      const trigger = nonEmptyStringField(config, 'trigger').trim().replace(/^\//, '').toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(trigger)) throw new ApiError(400, 'invalid_command_trigger');
+      if (BUILTIN_COMMAND_NAMES.has(trigger)) throw new ApiError(400, 'command_conflicts_with_builtin');
+      const aliases = stringArrayField(config, 'aliases').map((value) => value.trim().replace(/^\//, '').toLowerCase()).filter(Boolean);
+      if (aliases.length > 5 || aliases.some((value) => !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(value)) ||
+          aliases.some((value) => BUILTIN_COMMAND_NAMES.has(value)) || new Set([trigger, ...aliases]).size !== aliases.length + 1) {
+        throw new ApiError(400, 'invalid_command_aliases');
+      }
+      const action = stringField(config, 'action', 'prompt');
+      if (!['prompt', 'extension'].includes(action)) throw new ApiError(400, 'invalid_command_action');
+      const permission = stringField(config, 'permission', 'everyone');
+      if (!['everyone', 'owner'].includes(permission)) throw new ApiError(400, 'invalid_command_permission');
+      const prompt = stringField(config, 'prompt', '');
+      if (prompt.length > 8000) throw new ApiError(400, 'invalid_command_prompt');
+      const extensionId = stringField(config, 'extensionId', '');
+      if (action === 'extension' && !extensionId) throw new ApiError(400, 'missing_extensionId');
+      return {
+        ...common,
+        name: nonEmptyStringField(data, 'name'),
+        description: stringField(data, 'description', ''),
+        enabled: booleanField(data, 'enabled', true),
+        config: { trigger, aliases, action, permission, prompt, extensionId, argsHint: stringField(config, 'argsHint', '').slice(0, 200) },
+      };
+    }
+    case 'extensions': {
+      const config = objectField(data, 'config');
+      const engine = stringField(config, 'engine', 'webhook');
+      if (!['webhook', 'javascript'].includes(engine)) throw new ApiError(400, 'invalid_extension_engine');
+      const webhookUrl = engine === 'webhook' ? httpUrl(stringField(config, 'webhookUrl', ''), 'extension_webhookUrl') : '';
+      if (engine === 'webhook' && !webhookUrl.startsWith('https://')) throw new ApiError(400, 'invalid_extension_webhookUrl');
+      const source = engine === 'javascript' ? stringField(config, 'source', '') : '';
+      if (source.length > 200 * 1024) throw new ApiError(400, 'invalid_extension_source');
+      const trigger = stringField(config, 'trigger', 'manual');
+      if (!['manual', 'message', 'regex'].includes(trigger)) throw new ApiError(400, 'invalid_extension_trigger');
+      const pattern = stringField(config, 'pattern', '');
+      if (pattern.length > 200) throw new ApiError(400, 'invalid_extension_pattern');
+      if (trigger === 'regex') {
+        if (!pattern) throw new ApiError(400, 'missing_extension_pattern');
+        try { new RegExp(pattern); } catch { throw new ApiError(400, 'invalid_extension_pattern'); }
+      }
+      const permission = stringField(config, 'permission', 'everyone');
+      if (!['everyone', 'owner'].includes(permission)) throw new ApiError(400, 'invalid_extension_permission');
+      const enabled = booleanField(data, 'enabled', true);
+      if (enabled && engine === 'webhook' && !webhookUrl) throw new ApiError(400, 'missing_extension_webhookUrl');
+      if (enabled && engine === 'javascript' && !source.trim()) throw new ApiError(400, 'missing_extension_source');
+      return {
+        ...common,
+        name: nonEmptyStringField(data, 'name'),
+        description: stringField(data, 'description', ''),
+        enabled,
+        config: {
+          engine, webhookUrl, source, trigger, pattern, permission,
+          stopOnReply: booleanField(config, 'stopOnReply', false),
+          ...(config.authToken === undefined ? {} : { authToken: stringField(config, 'authToken') }),
+          timeoutMs: numberField(config, 'timeoutMs', 5000, 1000, 15000),
         },
       };
     }
@@ -447,6 +543,21 @@ async function assertReferences(repository: RecordRepository, kind: RecordKind, 
       if ((BUILTIN_CHAT_TOOL_NAMES as readonly string[]).includes(id)) continue;
       await requireRecord('tools', id);
     }
+  } else if (kind === 'schedules') {
+    const config = record.config as JsonObject;
+    await requireRecord('groups', config.groupId as string);
+    if (config.action === 'extension' && config.extensionId) await requireRecord('extensions', config.extensionId as string);
+  } else if (kind === 'commands') {
+    const config = record.config as JsonObject;
+    if (config.action === 'extension' && config.extensionId) await requireRecord('extensions', config.extensionId as string);
+    const names = new Set([config.trigger as string, ...(config.aliases as string[] ?? [])]);
+    for (const existing of await repository.list('commands')) {
+      if (existing.id === record.id) continue;
+      const other = existing.config as JsonObject | undefined;
+      const otherNames = [other?.trigger, ...(Array.isArray(other?.aliases) ? other.aliases as string[] : [])]
+        .filter((value): value is string => typeof value === 'string');
+      if (otherNames.some((name) => names.has(name))) throw new ApiError(409, 'duplicate_command_trigger');
+    }
   }
 }
 
@@ -469,6 +580,16 @@ async function assertNotReferenced(repository: RecordRepository, kind: RecordKin
       : record[field] === target)) {
       throw new ApiError(409, 'record_in_use');
     }
+  }
+  if (kind === 'groups') {
+    const schedules = await repository.list('schedules');
+    if (schedules.some((schedule) => (schedule.config as JsonObject | undefined)?.groupId === id)) throw new ApiError(409, 'record_in_use');
+  }
+  if (kind === 'extensions') {
+    const commands = await repository.list('commands');
+    if (commands.some((command) => (command.config as JsonObject | undefined)?.extensionId === id)) throw new ApiError(409, 'record_in_use');
+    const schedules = await repository.list('schedules');
+    if (schedules.some((schedule) => (schedule.config as JsonObject | undefined)?.extensionId === id)) throw new ApiError(409, 'record_in_use');
   }
 }
 
@@ -519,7 +640,8 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
       ...record,
       enabled: record.enabled !== false,
       description: typeof record.description === 'string' ? record.description : '',
-      config: { ...config, ...normalizeFieldValues(policyFields(type), config) },
+      config: { ...config, ...normalizeFieldValues(policyFields(type), config),
+        ...(type === 'memory' ? { memoryContextLength: typeof config?.memoryContextLength === 'string' ? config.memoryContextLength : '32K' } : {}) },
       ...(type === 'identity' ? {
         providerId: typeof record.providerId === 'string' ? record.providerId : '',
         model: typeof record.model === 'string' ? record.model : '',
@@ -543,6 +665,34 @@ async function visibleRecord(repository: RecordRepository, kind: RecordKind, rec
     record = { ...record, unit: record.unit ?? 'tokens' };
   } else if (kind === 'mcps') {
     record = { ...record, config: normalizedMcpConfig(objectField(await redactSecrets(record), 'config')) };
+  } else if (kind === 'schedules') {
+    const config = objectField(record, 'config');
+    record = { ...record, description: typeof record.description === 'string' ? record.description : '',
+      enabled: record.enabled !== false, config: {
+        cron: stringField(config, 'cron', '0 9 * * *'), timezone: stringField(config, 'timezone', 'UTC'),
+        groupId: stringField(config, 'groupId', ''), action: stringField(config, 'action', 'message'),
+        content: stringField(config, 'content', ''), extensionId: stringField(config, 'extensionId', ''),
+        maxCatchUpMinutes: numberField(config, 'maxCatchUpMinutes', 0, 0, 1440),
+      } };
+  } else if (kind === 'commands') {
+    const config = objectField(record, 'config');
+    record = { ...record, description: typeof record.description === 'string' ? record.description : '',
+      enabled: record.enabled !== false, config: {
+        trigger: stringField(config, 'trigger', ''), aliases: stringArrayField(config, 'aliases'),
+        action: stringField(config, 'action', 'prompt'), permission: stringField(config, 'permission', 'everyone'),
+        prompt: stringField(config, 'prompt', ''), extensionId: stringField(config, 'extensionId', ''),
+        argsHint: stringField(config, 'argsHint', ''),
+      } };
+  } else if (kind === 'extensions') {
+    const config = objectField(record, 'config');
+    record = { ...record, description: typeof record.description === 'string' ? record.description : '',
+      enabled: record.enabled !== false, config: {
+        engine: stringField(config, 'engine', 'webhook'), webhookUrl: stringField(config, 'webhookUrl', ''),
+        source: stringField(config, 'source', ''), timeoutMs: numberField(config, 'timeoutMs', 5000, 1000, 15000),
+        trigger: stringField(config, 'trigger', 'manual'), pattern: stringField(config, 'pattern', ''),
+        stopOnReply: booleanField(config, 'stopOnReply', false), permission: stringField(config, 'permission', 'everyone'),
+        ...(config.authToken === undefined ? {} : { authToken: config.authToken }),
+      } };
   }
   return redacted(record, kind, bindings);
 }

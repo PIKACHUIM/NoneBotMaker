@@ -23,13 +23,23 @@
       {
         "name": "QQ_GATEWAY_SESSIONS",
         "class_name": "QQGatewayDurableObject"
+      },
+      {
+        "name": "AUTOMATION_SCHEDULER",
+        "class_name": "AutomationDurableObject"
       }
     ]
   },
+  // Workers Paid only: uncomment to run JavaScript extensions in Dynamic Workers.
+  // "worker_loaders": [{ "binding": "PLUGIN_LOADER" }],
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["QQGatewayDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AutomationDurableObject"]
     }
   ],
   "kv_namespaces": [

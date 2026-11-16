@@ -620,6 +620,7 @@ const EN: Record<string, string> = {
   '先配置 AI 供应商、模型单价与身份策略，再供群聊策略引用。': 'Set up AI providers, model prices and identity policies before group policies reference them.',
   '选择账号与群 ID，引用身份策略，并按会话覆盖模型、提示词与限额。': 'Choose an account and group IDs, reference an identity policy, and override model, prompt and limits per conversation.',
   '运行平台': 'Runtime platform', '模型能力': 'Model capabilities', '接口管理': 'Interfaces', '策略管理': 'Policies', '能力管理': 'Capabilities',
+  '定时任务': 'Scheduled tasks', '命令管理': 'Commands', '扩展插件': 'Extensions',
   '群聊管理': 'Conversations', 'AI 供应商': 'AI providers', 'AI 模型价格': 'Model prices', 'AI 费用策略': 'Spending policies',
   '记忆策略': 'Memory policies', '工具审批': 'Tool approvals', '授权工具': 'Authorized tools', '选择可用工具': 'Select tools',
   '管理插件逻辑与技术默认值。': 'Manage plugin behavior and technical defaults.',

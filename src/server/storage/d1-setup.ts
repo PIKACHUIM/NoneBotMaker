@@ -110,7 +110,7 @@ function defaultRecords(now: string): Array<{ kind: RecordKind; record: StoredRe
     { kind: 'policies', record: policy('dialog', '默认对话') },
     { kind: 'policies', record: policy('voice', '默认语音') },
     { kind: 'policies', record: policy('memory', '默认记忆', {
-      memoryMode: 'manual', maxEntries: 100, retentionDays: 7, memory_enabled: true,
+      memoryMode: 'manual', maxEntries: 100, retentionDays: 7, memoryContextLength: '32K', memory_enabled: true,
     }) },
     { kind: 'policies', record: policy('cost', '默认费用', {
       dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0,

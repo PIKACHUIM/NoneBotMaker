@@ -1,5 +1,6 @@
 import type { PolicyRecord, PolicyType, GroupRecord, JsonObject } from '../../../shared/types';
 import { effectivePolicyConfig, resolveGroupIdentity, type GroupPolicyLayers } from '../../../shared/plugin-catalog';
+import { memoryContextTokens } from '../../../shared/memory-context';
 import type { RecordRepository } from '../../storage/repository';
 
 const POLICY_FIELDS: Array<[PolicyType, 'identityPolicyId' | 'dialogPolicyId' | 'voicePolicyId' | 'memoryPolicyId' | 'costPolicyId']> = [
@@ -59,6 +60,7 @@ export function applyGroupPolicies(group: GroupRecord, layers: GroupPolicyLayers
         ? layers.memory.config.memoryMode as 'manual' | 'review' | 'auto' : 'manual',
       maxEntries: typeof layers.memory.config?.maxEntries === 'number' ? layers.memory.config.maxEntries : 100,
       retentionDays: typeof layers.memory.config?.retentionDays === 'number' ? layers.memory.config.retentionDays : 7,
+      contextTokens: memoryContextTokens(layers.memory.config?.memoryContextLength),
     } : undefined,
     dailyCostLimit: typeof cost?.dailyCostLimit === 'number' ? cost.dailyCostLimit : 0,
     monthlyCostLimit: typeof cost?.monthlyCostLimit === 'number' ? cost.monthlyCostLimit : 0,

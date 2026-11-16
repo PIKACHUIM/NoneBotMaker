@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Alert,
   App as AntApp,
@@ -38,6 +38,7 @@ import {
   ArrowUpOutlined,
   BookOutlined,
   CheckCircleOutlined,
+  ClockCircleOutlined,
   CodeOutlined,
   CloudServerOutlined,
   CopyOutlined,
@@ -70,8 +71,10 @@ import {
 } from '../shared/types';
 import type {
   BotAccountRecord,
+  CommandRecord,
   ConversationLog,
   DatabaseSetupStatus,
+  ExtensionRecord,
   GroupRecord,
   JsonObject,
   Language,
@@ -85,7 +88,10 @@ import type {
   ProjectMemoryRecord,
   MemoryType,
   ProviderRecord,
+  ScheduleRecord,
 } from '../shared/types';
+import { BUILTIN_CHAT_COMMANDS } from '../shared/commands';
+import { MEMORY_CONTEXT_OPTIONS } from '../shared/memory-context';
 import {
   conversationFields,
   conversationIdList,
@@ -104,7 +110,7 @@ import type { CapabilitySourceItem, ChatbotConversationStatus, ChatbotConversati
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
 
-type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'conversations' | 'providers' | 'prices' | 'budgets' | 'identities' | 'dialogs' | 'voices' | 'memory-policies' | 'skills' | 'mcps' | 'rules' | 'tools';
+type AdminPage = 'overview' | 'plugins' | 'accounts' | 'groups' | 'conversations' | 'providers' | 'prices' | 'budgets' | 'identities' | 'dialogs' | 'voices' | 'memory-policies' | 'skills' | 'mcps' | 'rules' | 'tools' | 'schedules' | 'commands' | 'extensions';
 type ConversationView = 'status' | 'approvals' | 'logs' | 'statistics' | 'memories';
 type Route = { kind: 'home' } | { kind: 'login' } | { kind: 'setup' } | { kind: 'admin'; page: AdminPage; view?: ConversationView };
 type LibraryData = Record<LibraryKind, LibraryRecord[]>;
@@ -128,6 +134,9 @@ const pageTitles: Record<AdminPage, { title: string; eyebrow: string; descriptio
   mcps: { title: '模型协议', eyebrow: 'MODEL / CAPABILITIES', description: '管理远端服务与认证；授权在身份策略中管理。' },
   rules: { title: '约束规则', eyebrow: 'MODEL / CAPABILITIES', description: '编辑可复用规则；授权在身份策略中管理。' },
   tools: { title: '调用工具', eyebrow: 'MODEL / CAPABILITIES', description: '管理内置工具及安全配置；身份策略决定授权范围。' },
+  schedules: { title: '定时任务', eyebrow: 'RUNTIME / SCHEDULES', description: '按 Cron 表达式定时发送消息、触发提示词、命令或扩展插件。' },
+  commands: { title: '命令管理', eyebrow: 'RUNTIME / COMMANDS', description: '查看内置命令，并添加提示词命令或插件命令。' },
+  extensions: { title: '扩展插件', eyebrow: 'RUNTIME / EXTENSIONS', description: '通过 HTTP 或自定义 JavaScript 扩展群聊行为。' },
 };
 
 const SKILL_HUB_OPTIONS = [
@@ -458,6 +467,9 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
   const [libraries, setLibraries] = useState<LibraryData>({ skills: [], mcps: [], rules: [] });
   const [policies, setPolicies] = useState<PolicyRecord[]>([]);
   const [tools, setTools] = useState<LibraryRecord[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
+  const [commands, setCommands] = useState<CommandRecord[]>([]);
+  const [extensions, setExtensions] = useState<ExtensionRecord[]>([]);
   const [memories, setMemories] = useState<ProjectMemoryRecord[]>([]);
   const [logs, setLogs] = useState<ConversationLog[]>([]);
   const [logsTotal, setLogsTotal] = useState(0);
@@ -539,6 +551,22 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
             setTools(toolData); setProviders(providerData); setPrices(priceData);
             break;
           }
+          case 'schedules': {
+            const [scheduleData, groupData, extensionData] = await Promise.all([api.listSchedules(), api.listGroups(), api.listExtensions()]);
+            if (!active) return;
+            setSchedules(scheduleData); setGroups(groupData); setExtensions(extensionData);
+            break;
+          }
+          case 'commands': {
+            const [commandData, extensionData] = await Promise.all([api.listCommands(), api.listExtensions()]);
+            if (!active) return;
+            setCommands(commandData); setExtensions(extensionData);
+            break;
+          }
+          case 'extensions': {
+            setExtensions(await api.listExtensions());
+            break;
+          }
         }
       } catch (reason) {
         if (active) setLoadError(formatError(reason));
@@ -557,6 +585,8 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
       { key: 'accounts', icon: <RobotOutlined />, label: tr('平台账号') },
       { key: 'groups', icon: <TeamOutlined />, label: tr('群聊管理') },
       { key: 'conversations', icon: <MessageOutlined />, label: tr('会话管理') },
+      { key: 'schedules', icon: <ClockCircleOutlined />, label: tr('定时任务') },
+      { key: 'commands', icon: <CodeOutlined />, label: tr('命令管理') },
       { key: 'logs', icon: <FileTextOutlined />, label: tr('对话日志') },
     ] },
     { key: 'model', icon: <ApiOutlined />, label: tr('模型能力'), children: [
@@ -568,7 +598,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
         { key: 'voices', label: tr('语音策略') }, { key: 'memory-policies', label: tr('记忆策略') },
       ] },
       { key: 'capabilities', label: tr('能力管理'), children: [
-        { key: 'skills', label: tr('可用技能') }, { key: 'mcps', label: tr('模型协议') }, { key: 'rules', label: tr('约束规则') }, { key: 'tools', label: tr('调用工具') },
+        { key: 'skills', label: tr('可用技能') }, { key: 'mcps', label: tr('模型协议') }, { key: 'rules', label: tr('约束规则') }, { key: 'tools', label: tr('调用工具') }, { key: 'extensions', label: tr('扩展插件') },
       ] },
     ] },
   ];
@@ -649,6 +679,9 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
               {(page === 'budgets' || page === 'memory-policies') && <PolicyPanel type={page === 'budgets' ? 'cost' : 'memory'} data={policies} providers={providers} libraries={libraries} onRefresh={refresh} onError={handleError} />}
               {(page === 'skills' || page === 'mcps' || page === 'rules') && <LibraryPanel kind={page} data={libraries[page]} onRefresh={refresh} onError={handleError} />}
               {page === 'tools' && <ToolsPanel data={tools} providers={providers} prices={prices} onRefresh={refresh} onError={handleError} />}
+              {page === 'schedules' && <SchedulesPage data={schedules} groups={groups} extensions={extensions} onRefresh={refresh} onError={handleError} />}
+              {page === 'commands' && <CommandsPage data={commands} extensions={extensions} onRefresh={refresh} onError={handleError} />}
+              {page === 'extensions' && <ExtensionsPanel data={extensions} onRefresh={refresh} onError={handleError} />}
             </>
           )}
           <footer className="content-footer"><span>EDGE CONFIGURATION / NONEBOTMAKER</span><span>SESSION ISOLATED <i /></span></footer>
@@ -945,8 +978,8 @@ function SectionTitle({ index, title, subtitle }: { index: string; title: string
   return <div className="section-title"><span>{index}</span><div><strong>{title}</strong><small>{subtitle}</small></div></div>;
 }
 
-function PageToolbar({ count, noun, action, onCreate }: { count: number; noun: string; action: string; onCreate: () => void }) {
-  return <div className="page-toolbar"><span>RECORDS <b>{String(count).padStart(2, '0')}</b> / {noun}</span><Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>{action}</Button></div>;
+function PageToolbar({ count, noun, action, onCreate, extra }: { count: number; noun: string; action: string; onCreate: () => void; extra?: ReactNode }) {
+  return <div className="page-toolbar"><span>RECORDS <b>{String(count).padStart(2, '0')}</b> / {noun}</span><Space>{extra}<Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>{action}</Button></Space></div>;
 }
 
 function EmptyTable({ title, description, onCreate, action }: { title: string; description: string; onCreate?: () => void; action?: string }) {
@@ -1709,7 +1742,7 @@ function policySummary(type: PolicyType, policy: PolicyRecord, providers: Provid
     return [value('voice_model', '—'), value('voice_id', 'alloy'), `${count('voice_speed', 1)}x`, `${count('voice_max_text_chars', 500)} chars`].join(' · ');
   }
   if (type === 'cost') return `USD · daily $${count('dailyCostLimit', 0)} · monthly $${count('monthlyCostLimit', 0)} · total $${count('totalCostLimit', 0)}`;
-  if (type === 'memory') return [value('memoryMode', 'manual'), `${count('maxEntries', 100)} items`, `${count('retentionDays', 7)} days`].join(' · ');
+  if (type === 'memory') return [value('memoryMode', 'manual'), `${count('maxEntries', 100)} items`, `${count('retentionDays', 7)} days`, value('memoryContextLength', '32K')].join(' · ');
   const provider = providers.find((item) => item.id === policy.providerId);
   return [policy.model || '—', provider?.name ?? '', policy.reasoningEffort && policy.reasoningEffort !== 'default' ? policy.reasoningEffort : 'model default',
     `Skills ${policy.skillIds?.length ?? 0} / MCP ${policy.mcpIds?.length ?? 0} / Rules ${policy.ruleIds?.length ?? 0}`].filter(Boolean).join(' · ');
@@ -1742,7 +1775,7 @@ function PolicyPanel({ type, data, providers, libraries, tools = [], onRefresh, 
       systemPrompt: editing?.systemPrompt ?? '',
       skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [], toolIds: editing?.toolIds ?? [],
       config: type === 'cost' ? { dailyCostLimit: 0, monthlyCostLimit: 0, totalCostLimit: 0, ...editing?.config }
-        : type === 'memory' ? { memoryMode: 'manual', maxEntries: 100, retentionDays: 7, memory_enabled: true, ...editing?.config }
+        : type === 'memory' ? { memoryMode: 'manual', maxEntries: 100, retentionDays: 7, memoryContextLength: '32K', memory_enabled: true, ...editing?.config }
           : editableFieldValues(fields, editing?.config),
     });
   }, [drawer.open, editing, form, fields, type]);
@@ -1804,7 +1837,7 @@ function PolicyPanel({ type, data, providers, libraries, tools = [], onRefresh, 
         {type === 'memory' && <><Form.Item name={['config', 'memoryMode']} label={tr('记忆写入模式')}><Select options={[{ value: 'manual', label: tr('仅 owner 手动 /save') }, { value: 'review', label: tr('自动候选，管理员审核') }, { value: 'auto', label: tr('自动写入') }]} /></Form.Item><div className="form-grid two-cols">
           <Form.Item name={['config', 'maxEntries']} label={tr('最大记忆条数')}><InputNumber min={1} max={1000} className="full-width" /></Form.Item>
           <Form.Item name={['config', 'retentionDays']} label={tr('最近更新后保留天数')}><InputNumber min={1} max={365} className="full-width" /></Form.Item>
-        </div><Form.Item name={['config', 'memory_enabled']} label={tr('启用会话记忆')} valuePropName="checked"><Switch /></Form.Item></>}
+        </div><Form.Item name={['config', 'memoryContextLength']} label={tr('自动写入上下文长度')} extra={tr('自动提取记忆时读取的最近群聊上下文长度；越大越完整，但单次提取的 token 费用更高。')}><Select options={MEMORY_CONTEXT_OPTIONS.map((option) => ({ value: option.value, label: `${option.value} · ${option.tokens.toLocaleString()} tokens` }))} /></Form.Item><Form.Item name={['config', 'memory_enabled']} label={tr('启用会话记忆')} valuePropName="checked"><Switch /></Form.Item></>}
         {type !== 'cost' && type !== 'memory' && <SchemaFields fields={fields} path="config" editing={Boolean(editing)} />}
         <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
       </Form>
@@ -2189,6 +2222,251 @@ function CopyId({ value, label }: { value?: string; label: string }) {
     }
   };
   return <span className="copy-id"><Tooltip title={<span className="table-mono">{value}</span>}><span className="copy-id-short">{short}</span></Tooltip><Tooltip title={tr('复制 openid')}><Button type="text" size="small" icon={<CopyOutlined />} aria-label={`${tr('复制')} ${label}`} onClick={() => void copy()} /></Tooltip></span>;
+}
+
+const SCHEDULE_ACTION_LABELS: Record<ScheduleRecord['config']['action'], string> = {
+  message: '固定消息',
+  prompt: 'AI 提示词',
+  command: '聊天命令',
+  extension: '扩展插件',
+};
+
+const COMMON_TIMEZONES = ['UTC', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney'];
+
+function SchedulesPage({ data, groups, extensions, onRefresh, onError }: {
+  data: ScheduleRecord[]; groups: GroupRecord[]; extensions: ExtensionRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+}) {
+  const { message } = AntApp.useApp();
+  const { language, tr } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState('');
+  const [runningDue, setRunningDue] = useState(false);
+  const editing = data.find((item) => item.id === drawer.editingId);
+  const action = Form.useWatch('config.action', { form, preserve: true }) as ScheduleRecord['config']['action'] | undefined;
+  const groupName = (groupId: string) => {
+    const group = groups.find((item) => item.id === groupId);
+    return group ? `${group.name || group.externalId} · ${group.conversationType === 'private' ? '私聊' : '群聊'}` : '—';
+  };
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      name: editing?.name ?? '',
+      description: editing?.description ?? '',
+      enabled: editing?.enabled ?? true,
+      config: editing?.config ?? {
+        cron: '0 9 * * *', timezone: 'Asia/Shanghai', groupId: groups.find((group) => group.enabled)?.id ?? '',
+        action: 'message', content: '', extensionId: undefined, maxCatchUpMinutes: 0,
+      },
+    });
+  }, [drawer.open, editing, form, groups]);
+  const save = async (values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const config = values.config as ScheduleRecord['config'];
+      await api.saveSchedule({
+        name: String(values.name ?? ''), description: String(values.description ?? ''),
+        enabled: Boolean(values.enabled), config: { ...config, content: String(config.content ?? '') },
+      }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const runNow = async (row: ScheduleRecord) => {
+    setRunning(row.id);
+    try {
+      const result = await api.runSchedule(row.id);
+      if (result.status === 'error') message.error(result.error || tr('定时任务执行失败'));
+      else message.success(tr('定时任务已执行'));
+      onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setRunning(''); }
+  };
+  const runDue = async () => {
+    setRunningDue(true);
+    try {
+      const result = await api.runDueSchedules();
+      message.success(`${tr('已检查到期任务')}：${result.ran}`);
+      onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setRunningDue(false); }
+  };
+  const columns: TableColumnsType<ScheduleRecord> = [
+    { title: tr('任务名称'), key: 'name', render: (_, row) => <div className="table-identity"><span className="identity-icon"><ClockCircleOutlined /></span><span><strong>{row.name}</strong><small>{row.description || row.id}</small></span></div> },
+    { title: tr('目标会话'), key: 'target', render: (_, row) => <span className="table-mono">{groupName(row.config.groupId)}</span> },
+    { title: tr('Cron'), key: 'cron', render: (_, row) => <span className="table-mono">{row.config.cron} · {row.config.timezone}</span> },
+    { title: tr('动作'), key: 'action', render: (_, row) => <Tag bordered={false}>{tr(SCHEDULE_ACTION_LABELS[row.config.action] ?? row.config.action)}</Tag> },
+    { title: tr('下次运行'), dataIndex: 'nextRunAt', key: 'nextRunAt', render: (value: string) => prettyDate(value, language) },
+    { title: tr('最近结果'), key: 'last', render: (_, row) => <span className="table-mono">{row.lastStatus ? `${row.lastStatus === 'success' ? tr('成功') : row.lastStatus === 'error' ? tr('失败') : tr('跳过')} · ${prettyDate(row.lastRunAt, language)}` : '—'}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space>
+      <Tooltip title={tr('立即运行')}><Button aria-label={`${tr('立即运行')} ${row.name}`} size="small" loading={running === row.id} icon={<ThunderboltOutlined />} onClick={() => void runNow(row)} /></Tooltip>
+      <Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip>
+      <Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveSchedule({ name: row.name, enabled }, row.id).then(onRefresh).catch(onError)} />
+      <Popconfirm title={`${tr('删除定时任务')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteSchedule(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm>
+    </Space> },
+  ];
+  return <div className="tab-panel">
+    <PageToolbar count={data.length} noun="SCHEDULED JOBS" action={tr('新增定时任务')} onCreate={() => drawer.edit()} extra={<Button loading={runningDue} onClick={() => void runDue()}>{tr('检查到期任务')}</Button>} />
+    <Alert className="action-alert" type="info" showIcon message={tr('Cron 使用 5 段格式：分 时 日 月 周，按所选时区计算；例如 0 9 * * * 表示每天 09:00。')} />
+    {data.length ? <Table<ScheduleRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 1100 }} className="data-table" /> : <EmptyTable title={tr('还没有定时任务')} description={tr('创建按 Cron 运行的固定消息、AI 提示词、命令或插件。')} onCreate={() => drawer.edit()} action={tr('创建定时任务')} />}
+    <Drawer title={<DrawerTitle label="SCHEDULE" title={`${editing ? tr('编辑定时任务') : tr('新增定时任务')}`} />} width={620} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存任务')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="name" label={tr('任务名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input placeholder={tr('例如：每日早报')} /></Form.Item>
+        <Form.Item name="description" label={tr('任务说明')}><Input.TextArea rows={2} placeholder={tr('说明该任务的用途')} /></Form.Item>
+        <Form.Item name={['config', 'groupId']} label={tr('目标会话')} rules={[{ required: true, message: tr('请选择目标会话') }]}><Select showSearch optionFilterProp="label" options={groups.map((group) => ({ value: group.id, label: `${group.name || group.externalId} · ${group.conversationType === 'private' ? '私聊' : '群聊'}${group.enabled ? '' : ' · 已停用'}` }))} /></Form.Item>
+        <div className="form-grid two-cols">
+          <Form.Item name={['config', 'cron']} label={tr('Cron 表达式')} rules={[{ required: true, message: tr('请输入 Cron 表达式') }]}><Input placeholder="0 9 * * *" /></Form.Item>
+          <Form.Item name={['config', 'timezone']} label={tr('时区')} rules={[{ required: true }]}><Select showSearch options={COMMON_TIMEZONES.map((zone) => ({ value: zone, label: zone }))} /></Form.Item>
+        </div>
+        <Form.Item name={['config', 'action']} label={tr('执行动作')}><Select options={(Object.keys(SCHEDULE_ACTION_LABELS) as Array<ScheduleRecord['config']['action']>).map((value) => ({ value, label: tr(SCHEDULE_ACTION_LABELS[value]) }))} /></Form.Item>
+        {(action ?? 'message') === 'extension' && <Form.Item name={['config', 'extensionId']} label={tr('扩展插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select options={extensions.map((item) => ({ value: item.id, label: `${item.name} · ${item.config.engine}` }))} /></Form.Item>}
+        <Form.Item name={['config', 'content']} label={(action ?? 'message') === 'message' ? tr('消息内容') : (action ?? 'message') === 'prompt' ? tr('AI 提示词') : (action ?? 'message') === 'command' ? tr('聊天命令') : tr('传给插件的文本')}
+          extra={(action ?? 'message') === 'message' ? tr('支持 {name} 与 {time} 占位符。') : (action ?? 'message') === 'command' ? tr('例如 /status 或 /help。') : (action ?? 'message') === 'prompt' ? tr('到点后会作为计划唤醒交给当前会话的 AI 处理，可使用已授权工具。') : tr('会作为 ctx.args / ctx.event.text 传给插件。')}>
+          <Input.TextArea rows={4} placeholder={(action ?? 'message') === 'command' ? '/status' : tr('输入内容')} />
+        </Form.Item>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
+}
+
+function CommandsPage({ data, extensions, onRefresh, onError }: {
+  data: CommandRecord[]; extensions: ExtensionRecord[]; onRefresh: () => void; onError: (error: unknown) => void;
+}) {
+  const { language, tr } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const editing = data.find((item) => item.id === drawer.editingId);
+  const action = Form.useWatch('config.action', { form, preserve: true }) as CommandRecord['config']['action'] | undefined;
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      name: editing?.name ?? '',
+      description: editing?.description ?? '',
+      enabled: editing?.enabled ?? true,
+      config: editing?.config ?? { trigger: '', aliases: [], action: 'prompt', permission: 'everyone', prompt: '', extensionId: undefined, argsHint: '' },
+    });
+  }, [drawer.open, editing, form]);
+  const save = async (values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const config = values.config as CommandRecord['config'];
+      await api.saveCommand({
+        name: String(values.name ?? ''), description: String(values.description ?? ''), enabled: Boolean(values.enabled),
+        config: { ...config, aliases: (config.aliases ?? []).filter(Boolean) },
+      }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const columns: TableColumnsType<CommandRecord> = [
+    { title: tr('命令'), key: 'trigger', render: (_, row) => <div className="table-identity"><span className="identity-icon"><CodeOutlined /></span><span><strong>/{row.config.trigger}</strong><small>{row.name} · {row.config.aliases?.length ? row.config.aliases.map((alias) => `/${alias}`).join(' ') : row.config.argsHint || '—'}</small></span></div> },
+    { title: tr('类型'), key: 'action', render: (_, row) => <Tag bordered={false}>{row.config.action === 'prompt' ? tr('提示词') : tr('插件')}</Tag> },
+    { title: tr('权限'), key: 'permission', render: (_, row) => <span className="table-mono">{row.config.permission === 'owner' ? tr('仅管理员') : tr('所有人')}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveCommand({ name: row.name, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除命令')}“/${row.config.trigger}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteCommand(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  const builtinColumns: TableColumnsType<(typeof BUILTIN_CHAT_COMMANDS)[number]> = [
+    { title: tr('命令'), key: 'usage', render: (_, row) => <span className="table-mono">{row.usage}</span> },
+    { title: tr('说明'), key: 'description', render: (_, row) => <span>{tr(row.description.zh)}</span> },
+    { title: tr('权限'), key: 'owner', render: (_, row) => <span className="table-mono">{row.ownerOnly ? tr('仅管理员') : tr('所有人')}</span> },
+    { title: tr('来源'), key: 'source', render: () => <Tag bordered={false}>{tr('内置')}</Tag> },
+  ];
+  return <div className="tab-panel">
+    <PageToolbar count={data.length} noun="CUSTOM COMMANDS" action={tr('新增命令')} onCreate={() => drawer.edit()} />
+    <h2 className="form-section-heading"><span>{tr('内置命令')}</span><small>{BUILTIN_CHAT_COMMANDS.length} BUILT-IN</small></h2>
+    <Table rowKey="name" columns={builtinColumns} dataSource={BUILTIN_CHAT_COMMANDS} pagination={false} size="small" scroll={{ x: 720 }} className="data-table" />
+    <h2 className="form-section-heading"><span>{tr('自定义命令')}</span><small>{data.length} CUSTOM</small></h2>
+    {data.length ? <Table<CommandRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 900 }} className="data-table" /> : <EmptyTable title={tr('还没有自定义命令')} description={tr('添加提示词命令让 AI 回答或执行操作，或添加插件命令运行自定义逻辑。')} onCreate={() => drawer.edit()} action={tr('创建命令')} />}
+    <Drawer title={<DrawerTitle label="COMMAND" title={`${editing ? tr('编辑命令') : tr('新增命令')}`} />} width={620} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存命令')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="name" label={tr('命令名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input placeholder={tr('例如：群规查询')} /></Form.Item>
+        <Form.Item name="description" label={tr('命令说明')}><Input.TextArea rows={2} /></Form.Item>
+        <div className="form-grid two-cols">
+          <Form.Item name={['config', 'trigger']} label={tr('触发词')} rules={[{ required: true, message: tr('请输入触发词') }]} extra={tr('不需要输入斜杠，例如 status 对应 /status。')}><Input placeholder="status" /></Form.Item>
+          <Form.Item name={['config', 'aliases']} label={tr('别名')}><Select mode="tags" tokenSeparators={[',']} placeholder={tr('可选，最多 5 个')} /></Form.Item>
+        </div>
+        <div className="form-grid two-cols">
+          <Form.Item name={['config', 'action']} label={tr('命令类型')}><Select options={[{ value: 'prompt', label: tr('提示词 / 交给 AI') }, { value: 'extension', label: tr('调用扩展插件') }]} /></Form.Item>
+          <Form.Item name={['config', 'permission']} label={tr('使用权限')}><Select options={[{ value: 'everyone', label: tr('所有人') }, { value: 'owner', label: tr('仅管理员') }]} /></Form.Item>
+        </div>
+        {(action ?? 'prompt') === 'extension' ? <Form.Item name={['config', 'extensionId']} label={tr('扩展插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select options={extensions.map((item) => ({ value: item.id, label: `${item.name} · ${item.config.engine}` }))} /></Form.Item>
+          : <Form.Item name={['config', 'prompt']} label={tr('提示词')} rules={[{ required: true, message: tr('请输入提示词') }]} extra={tr('可用占位符：{args}、{user}、{userName}、{group}、{groupName}、{time}。AI 会按提示词回答，并可调用已授权工具执行操作。')}><Input.TextArea rows={6} placeholder={tr('请根据用户输入 {args} 回答或执行操作。')} /></Form.Item>}
+        <Form.Item name={['config', 'argsHint']} label={tr('参数提示')}><Input placeholder={tr('例如：关键词')} /></Form.Item>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
+}
+
+function ExtensionsPanel({ data, onRefresh, onError }: { data: ExtensionRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
+  const { language, tr } = useI18n();
+  const drawer = useDrawer();
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const editing = data.find((item) => item.id === drawer.editingId);
+  const engine = Form.useWatch('config.engine', { form, preserve: true }) as ExtensionRecord['config']['engine'] | undefined;
+  const trigger = Form.useWatch('config.trigger', { form, preserve: true }) as ExtensionRecord['config']['trigger'] | undefined;
+  useEffect(() => {
+    if (!drawer.open) return;
+    form.resetFields();
+    form.setFieldsValue({
+      name: editing?.name ?? '', description: editing?.description ?? '', enabled: editing?.enabled ?? true,
+      config: editing?.config ?? { engine: 'webhook', webhookUrl: '', authToken: '', source: '', timeoutMs: 5000, trigger: 'manual', pattern: '', stopOnReply: false, permission: 'everyone' },
+    });
+  }, [drawer.open, editing, form]);
+  const save = async (values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const config = values.config as ExtensionRecord['config'];
+      await api.saveExtension({
+        name: String(values.name ?? ''), description: String(values.description ?? ''), enabled: Boolean(values.enabled), config,
+      }, editing?.id);
+      drawer.close(); onRefresh();
+    } catch (reason) { onError(reason); }
+    finally { setSaving(false); }
+  };
+  const columns: TableColumnsType<ExtensionRecord> = [
+    { title: tr('插件名称'), key: 'name', render: (_, row) => <div className="table-identity"><span className="identity-icon"><CodeOutlined /></span><span><strong>{row.name}</strong><small>{row.description || row.id}</small></span></div> },
+    { title: tr('引擎'), key: 'engine', render: (_, row) => <Tag bordered={false}>{row.config.engine === 'javascript' ? 'JavaScript' : 'HTTP Webhook'}</Tag> },
+    { title: tr('触发'), key: 'trigger', render: (_, row) => <span className="table-mono">{row.config.trigger === 'message' ? tr('每条消息') : row.config.trigger === 'regex' ? `/${row.config.pattern ?? ''}/` : tr('仅命令/定时')}</span> },
+    { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
+    { title: tr('更新于'), dataIndex: 'updatedAt', key: 'updatedAt', render: (value: string) => prettyDate(value, language) },
+    { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveExtension({ name: row.name, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除插件')}“${row.name}”？`} description={tr('仍被命令或定时任务引用的插件无法删除。')} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteExtension(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
+  ];
+  return <div className="tab-panel">
+    <PageToolbar count={data.length} noun="EXTENSIONS" action={tr('新增插件')} onCreate={() => drawer.edit()} />
+    <Alert className="action-alert" type="info" showIcon message={tr('HTTP Webhook 插件在所有部署可用；JavaScript 插件在 Node 运行时可用，Cloudflare 需 Workers Paid 的 Dynamic Workers 绑定。')} />
+    {data.length ? <Table<ExtensionRecord> rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 8, showSizeChanger: false }} scroll={{ x: 900 }} className="data-table" /> : <EmptyTable title={tr('还没有扩展插件')} description={tr('用 HTTP Webhook 接收群聊事件，或用 JavaScript 编写本地逻辑。')} onCreate={() => drawer.edit()} action={tr('创建插件')} />}
+    <Drawer title={<DrawerTitle label="EXTENSION" title={`${editing ? tr('编辑插件') : tr('新增插件')}`} />} width={680} open={drawer.open} onClose={drawer.close} destroyOnClose footer={<div className="drawer-footer"><Button onClick={drawer.close}>{tr('取消')}</Button><Button type="primary" loading={saving} onClick={() => form.submit()}>{tr('保存插件')}</Button></div>}>
+      <Form form={form} layout="vertical" requiredMark={false} onFinish={save}>
+        <Form.Item name="name" label={tr('插件名称')} rules={[{ required: true, message: tr('请输入名称') }]}><Input placeholder={tr('例如：签到助手')} /></Form.Item>
+        <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={2} /></Form.Item>
+        <Form.Item name={['config', 'engine']} label={tr('运行引擎')}><Select options={[{ value: 'webhook', label: tr('HTTP Webhook（推荐，全平台可用）') }, { value: 'javascript', label: tr('JavaScript（Node 或 Dynamic Workers）') }]} /></Form.Item>
+        <div className="form-grid two-cols">
+          <Form.Item name={['config', 'trigger']} label={tr('触发方式')}><Select options={[{ value: 'manual', label: tr('仅命令/定时任务') }, { value: 'message', label: tr('每条 @ 消息') }, { value: 'regex', label: tr('正则匹配') }]} /></Form.Item>
+          <Form.Item name={['config', 'permission']} label={tr('触发权限')}><Select options={[{ value: 'everyone', label: tr('所有人') }, { value: 'owner', label: tr('仅管理员') }]} /></Form.Item>
+        </div>
+        {(trigger ?? 'manual') === 'regex' && <Form.Item name={['config', 'pattern']} label={tr('正则表达式')} rules={[{ required: true, message: tr('请输入正则表达式') }]} extra={tr('对消息文本进行不区分大小写的匹配。')}><Input placeholder={tr('例如：^签到')} /></Form.Item>}
+        {(trigger ?? 'manual') !== 'manual' && <Form.Item name={['config', 'stopOnReply']} label={tr('有回复时停止后续处理')} valuePropName="checked"><Switch /></Form.Item>}
+        {(engine ?? 'webhook') === 'webhook' ? <>
+          <Form.Item name={['config', 'webhookUrl']} label={tr('Webhook 地址')} rules={[{ required: true, message: tr('请输入 HTTPS 地址') }]} extra={tr('收到命令或定时任务时，平台会 POST JSON：{ event, extension }。响应可返回 { reply }、{ replies: [] } 或纯文本。')}><Input placeholder="https://example.com/plugin" /></Form.Item>
+          <Form.Item name={['config', 'authToken']} label={tr('鉴权令牌')} extra={tr('可选，作为 Authorization: Bearer 发送；保存后不再回显。')}><Input.Password placeholder={tr('可选')} autoComplete="new-password" /></Form.Item>
+        </> : <>
+          <Alert className="action-alert" type="warning" showIcon message={tr('JavaScript 插件需要 Node 运行时，或 Cloudflare Workers Paid 的 Dynamic Workers（PLUGIN_LOADER）绑定；否则会返回明确的不可用错误。')} />
+          <Form.Item name={['config', 'source']} label="JavaScript" rules={[{ required: true, message: tr('请输入 JavaScript') }]} extra={tr('函数体可直接使用 ctx：ctx.args、ctx.event、ctx.reply(text)、ctx.fetch(url)、ctx.log()。')}><Input.TextArea rows={12} className="code-input" placeholder={"ctx.reply(`你好，${ctx.args || '世界'}`);"} /></Form.Item>
+        </>}
+        <Form.Item name={['config', 'timeoutMs']} label={tr('超时（毫秒）')}><InputNumber min={1000} max={15000} step={500} className="full-width" /></Form.Item>
+        <Form.Item name="enabled" label={tr('启用状态')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+      </Form>
+    </Drawer>
+  </div>;
 }
 
 function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter, onCleared }: {

@@ -31,6 +31,10 @@
       {
         "name": "QQ_GATEWAY_SESSIONS",
         "class_name": "QQGatewayDurableObject"
+      },
+      {
+        "name": "AUTOMATION_SCHEDULER",
+        "class_name": "AutomationDurableObject"
       }
     ]
   },
@@ -38,6 +42,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["QQGatewayDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AutomationDurableObject"]
     }
   ],
   // Scheduled cleanup is intentionally not deployed while the account Cron quota is unresolved.

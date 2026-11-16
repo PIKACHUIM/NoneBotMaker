@@ -548,7 +548,7 @@ describe('capability policies', () => {
     ]);
     expect(policyFields('memory').map((field) => field.key)).toEqual(['memory_enabled']);
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
-      'bridge_owner_ids', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
+      'bridge_owner_ids', 'bridge_commands_enabled', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
       'media_image_enabled', 'media_image_size', 'media_image_quality', 'media_video_enabled', 'media_video_resolution', 'media_video_duration',
     ]);
 

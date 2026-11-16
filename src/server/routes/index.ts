@@ -17,8 +17,9 @@ import { registerSetupRoutes } from './setup';
 import { registerChatbotRuntimeRoutes } from './chatbot-runtime';
 import { registerChatbotMemoryRoutes } from './chatbot-memories';
 import { registerCapabilitySourceRoutes } from './capability-sources';
+import { isInternalSchedulePath, registerScheduleRoutes } from './schedules';
 
-const MANAGED_PATH = /(?:^|\/)(plugins|accounts|groups|providers|prices|skills|mcps|rules|tools|memories|policies|chatbot|logs|capability-sources)(?:\/|$)/;
+const MANAGED_PATH = /(?:^|\/)(plugins|accounts|groups|providers|prices|skills|mcps|rules|tools|memories|policies|chatbot|logs|capability-sources|schedules|commands|extensions)(?:\/|$)/;
 const AUTH_PATH = /^\/(?:api\/)?auth(?:\/|$)/;
 const QQ_WEBHOOK_PATH = /(?:^|\/)webhook\/qq\/?$/;
 const LOG_CLEANUP_PATH = /(?:^|\/)internal\/logs\/purge\/?$/;
@@ -36,18 +37,24 @@ export function createApiRouter() {
     const method = context.req.method.toUpperCase();
     const path = context.req.path;
     const isCleanupEndpoint = LOG_CLEANUP_PATH.test(path);
-    const isAdminEndpoint = AUTH_PATH.test(path) || MANAGED_PATH.test(path) || isCleanupEndpoint;
+    const isInternalSchedule = isInternalSchedulePath(path);
+    const isAdminEndpoint = AUTH_PATH.test(path) || MANAGED_PATH.test(path) || isCleanupEndpoint || isInternalSchedule;
     const isQQWebhook = QQ_WEBHOOK_PATH.test(path);
     const authorization = context.req.header('Authorization');
     const cleanupToken = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
     const cleanupBearerAuthorized = isCleanupEndpoint && Boolean(context.env.SYS_SECRET) &&
       await constantTimePasswordMatches(cleanupToken, context.env.SYS_SECRET ?? '');
+    const internalScheduleAuthorized = isInternalSchedule && Boolean(context.env.SYS_SECRET) &&
+      await constantTimePasswordMatches(cleanupToken, context.env.SYS_SECRET ?? '');
 
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && isAdminEndpoint && !isQQWebhook && !cleanupBearerAuthorized && !isSameOrigin(context.req.raw)) {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && isAdminEndpoint && !isQQWebhook && !isInternalSchedule &&
+      !cleanupBearerAuthorized && !internalScheduleAuthorized && !isSameOrigin(context.req.raw)) {
       return context.json({ error: 'origin_check_failed' }, 403);
     }
 
-    if ((!isCleanupEndpoint && MANAGED_PATH.test(path)) || (isCleanupEndpoint && !cleanupBearerAuthorized)) {
+    if (isInternalSchedule) {
+      if (!internalScheduleAuthorized) return context.json({ error: 'unauthorized' }, 401);
+    } else if ((!isCleanupEndpoint && MANAGED_PATH.test(path)) || (isCleanupEndpoint && !cleanupBearerAuthorized)) {
       const authenticated = await verifySessionToken(
         context.env,
         getCookie(context.req.raw, SESSION_COOKIE),
@@ -103,6 +110,7 @@ export function createApiRouter() {
   registerChatbotRuntimeRoutes(api);
   registerChatbotMemoryRoutes(api);
   registerCapabilitySourceRoutes(api);
+  registerScheduleRoutes(api);
   registerManagementRoutes(api);
   return api;
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BotAccountRecord, ChatMessage, ConversationLog, GroupRecord, ProviderRecord } from '../../../shared/types';
+import type { BotAccountRecord, ChatMessage, CommandRecord, ConversationLog, ExtensionRecord, GroupRecord, ProviderRecord } from '../../../shared/types';
 import type { MemeMetadata, MemeStore, MemeStoreListEntry, MemeStoreValue } from './meme-library';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
 import type { ConversationMemory, ConversationMemoryRepository } from '../../storage/conversation-memory-repository';
@@ -167,8 +167,57 @@ describe('createChatbotHandler', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('reports the sender and group openids through /openid without calling the model', async () => {
-    const { deps, fetch, sentReplies } = dependencies();
+  it('turns a prompt command into an AI instruction with rendered arguments', async () => {
+    const command: CommandRecord = {
+      id: 'command-1', name: 'Report', description: '', enabled: true,
+      config: { trigger: 'report', aliases: ['r'], action: 'prompt', permission: 'everyone', prompt: '总结以下内容：{args}' },
+      createdAt: '', updatedAt: '',
+    };
+    const { deps, fetch, sentReplies } = dependencies({ listCommands: async () => [command] });
+    await createChatbotHandler(deps)(account, message({ text: '/report 今天的消息' }));
+    const body = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { messages: Array<{ role: string; content: string }> };
+    const user = body.messages.find((entry) => entry.role === 'user');
+    expect(user?.content).toContain('总结以下内容：今天的消息');
+    expect(user?.content).not.toContain('/report');
+    expect(body.messages[0].content).toContain('自定义命令 /report');
+    expect(sentReplies).toEqual(['hello back']);
+  });
+
+  it('runs extension commands without calling the model and enforces owner-only access', async () => {
+    const command: CommandRecord = {
+      id: 'command-2', name: 'Ping', description: '', enabled: true,
+      config: { trigger: 'ping', action: 'extension', permission: 'everyone', extensionId: 'ext-1' },
+      createdAt: '', updatedAt: '',
+    };
+    const runExtension = vi.fn(async () => ({ replies: ['pong'], logs: [] }));
+    const { deps, fetch, sentReplies } = dependencies({ listCommands: async () => [command], runExtension });
+    await createChatbotHandler(deps)(account, message({ text: '/ping hello' }));
+    expect(runExtension).toHaveBeenCalledWith('ext-1', expect.objectContaining({ source: 'command', command: 'ping', args: 'hello' }));
+    expect(sentReplies).toEqual(['pong']);
+    expect(fetch).not.toHaveBeenCalled();
+
+    const ownerOnly = { ...command, config: { ...command.config, permission: 'owner' as const } };
+    const ownerRun = dependencies({ listCommands: async () => [ownerOnly], runExtension });
+    await createChatbotHandler(ownerRun.deps)(account, message({ text: '/ping' }));
+    expect(ownerRun.sentReplies).toEqual(['命令 /ping 仅管理员可用。']);
+    expect(ownerRun.fetch).not.toHaveBeenCalled();
+  });
+
+  it('runs a message-triggered extension before the model and stops when configured', async () => {
+    const extension: ExtensionRecord = {
+      id: 'ext-1', name: 'Handler', description: '', enabled: true,
+      config: { engine: 'javascript', source: '', trigger: 'message', stopOnReply: true, permission: 'everyone' },
+      createdAt: '', updatedAt: '',
+    };
+    const runExtension = vi.fn(async () => ({ replies: ['handled'], logs: [] }));
+    const { deps, fetch, sentReplies } = dependencies({ listExtensions: async () => [extension], runExtension });
+    await createChatbotHandler(deps)(account, message({ text: 'hello' }));
+    expect(runExtension).toHaveBeenCalledWith('ext-1', expect.objectContaining({ source: 'message', text: 'hello' }));
+    expect(sentReplies).toEqual(['handled']);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('reports the sender and group openids through /openid without calling the model', async () => {    const { deps, fetch, sentReplies } = dependencies();
     await createChatbotHandler(deps)(account, message({ userId: 'allowed-user', text: '/openid' }));
     expect(JSON.parse(sentReplies[0])).toEqual({ conversationType: 'group', userOpenid: 'allowed-user', groupOpenid: 'group-openid', registered: true });
     expect(fetch).not.toHaveBeenCalled();

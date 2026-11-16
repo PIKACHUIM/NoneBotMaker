@@ -129,6 +129,10 @@ const chatbotDefinition: PluginDefinition = {
       '管理员即使不在白名单中也会被允许；多个 ID 用逗号分隔。',
       'Owners are allowed even when not on the allowlist; separate multiple IDs with commas.',
     ], { group: bridgeGroup, default: '', multiline: false, placement: 'basic' }),
+    boolean('bridge_commands_enabled', ['启用自定义命令', 'Enable custom commands'], [
+      '启用后在「命令管理」中配置的自定义命令会在本会话生效；内置 /help、/status 等命令不受影响。',
+      'When enabled, custom commands configured in Command management work in this conversation; built-in commands such as /help and /status are unaffected.',
+    ], { group: bridgeGroup, default: true, placement: 'basic' }),
     text('bridge_allowed_private', ['允许的私聊', 'Allowed private chats'], [
       '仅对私聊生效：允许的用户 openid，逗号分隔；留空表示不额外限制。群聊以「允许的群 ID」列表为准。',
       'Private chats only: allowed user openids, comma-separated. Empty means no extra restriction. Group chats are scoped by the allowed group ID list instead.',

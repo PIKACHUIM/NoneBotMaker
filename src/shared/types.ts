@@ -2,7 +2,7 @@ export const CHATBOT_PLUGIN_TYPE = 'elysia-best/plugin-chatbot' as const;
 export const DEFAULT_NON_MENTION_REPLY_RATE = 0.05;
 export const LOG_RETENTION_DAYS = 30;
 
-export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'tools' | 'memories' | 'policies';
+export type RecordKind = 'plugins' | 'accounts' | 'groups' | 'providers' | 'prices' | 'skills' | 'mcps' | 'rules' | 'tools' | 'memories' | 'policies' | 'schedules' | 'commands' | 'extensions';
 export type JsonObject = Record<string, unknown>;
 
 /** Reusable capability policies that conversations can reference instead of duplicating fields. */
@@ -104,7 +104,7 @@ export interface GroupRecord {
   /** Resolved at runtime from the identity policy, never stored in a conversation. */
   persona?: string;
   /** Resolved memory behavior; only confirmed entries are supplied to the model. */
-  memoryPolicy?: { memoryMode: 'manual' | 'review' | 'auto'; maxEntries: number; retentionDays: number };
+  memoryPolicy?: { memoryMode: 'manual' | 'review' | 'auto'; maxEntries: number; retentionDays: number; contextTokens?: number };
   /** Legacy values need an explicit migration instead of silently changing spend controls. */
   migrationRequired?: Array<'legacy_model_price' | 'legacy_budget'>;
   /** Read-only effective values; the raw record remains limited to its own fields. */
@@ -210,6 +210,90 @@ export interface LibraryRecord {
 export type LibraryKind = 'skills' | 'mcps' | 'rules';
 
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
+
+export type ScheduleActionType = 'message' | 'prompt' | 'command' | 'extension';
+export type ScheduleStatus = 'success' | 'error' | 'skipped';
+
+export interface ScheduleConfig {
+  cron: string;
+  timezone: string;
+  groupId: string;
+  action: ScheduleActionType;
+  /** Fixed text for message actions, prompt text for prompt actions, or `/command args`. */
+  content: string;
+  extensionId?: string;
+  /** Stop catching up after this many minutes; 0 means only the current tick. */
+  maxCatchUpMinutes?: number;
+}
+
+export interface ScheduleRecord {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: ScheduleConfig;
+  lastRunAt?: string;
+  lastStatus?: ScheduleStatus;
+  lastError?: string;
+  lastDurationMs?: number;
+  nextRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CommandActionType = 'prompt' | 'extension';
+export type CommandPermission = 'everyone' | 'owner';
+
+export interface CommandConfig {
+  /** Trigger without the leading slash. */
+  trigger: string;
+  aliases?: string[];
+  action: CommandActionType;
+  permission: CommandPermission;
+  prompt?: string;
+  extensionId?: string;
+  argsHint?: string;
+}
+
+export interface CommandRecord {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: CommandConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExtensionEngine = 'webhook' | 'javascript';
+export type ExtensionTrigger = 'manual' | 'message' | 'regex';
+
+export interface ExtensionConfig {
+  engine: ExtensionEngine;
+  /** manual: only commands/schedules trigger it; message: every addressed message; regex: matching messages. */
+  trigger?: ExtensionTrigger;
+  pattern?: string;
+  stopOnReply?: boolean;
+  permission?: 'everyone' | 'owner';
+  /** Public HTTPS endpoint for the webhook engine. */
+  webhookUrl?: string;
+  /** Optional bearer token sent to the webhook endpoint. */
+  authToken?: string;
+  /** JavaScript function body executed by the javascript engine where supported. */
+  source?: string;
+  timeoutMs?: number;
+}
+
+export interface ExtensionRecord {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: ExtensionConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
 
 export interface ProjectMemoryRecord {
   id: string;

@@ -1,7 +1,9 @@
 import type {
   BotAccountRecord,
+  CommandRecord,
   ConversationLog,
   DatabaseSetupStatus,
+  ExtensionRecord,
   GroupRecord,
   LibraryKind,
   LibraryRecord,
@@ -11,6 +13,7 @@ import type {
   PolicyRecord,
   ProjectMemoryRecord,
   ProviderRecord,
+  ScheduleRecord,
 } from '../shared/types';
 
 export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
@@ -265,6 +268,46 @@ export const api = {
   },
   async listTools() {
     return records<LibraryRecord>(await request('/api/tools'));
+  },
+  async listSchedules() {
+    return records<ScheduleRecord>(await request('/api/schedules'));
+  },
+  async saveSchedule(data: Partial<ScheduleRecord> & Pick<ScheduleRecord, 'name'>, id?: string) {
+    return record<ScheduleRecord>(await request(id ? `/api/schedules/${encodeURIComponent(id)}` : '/api/schedules', {
+      method: id ? 'PUT' : 'POST', ...jsonBody(data),
+    }));
+  },
+  async deleteSchedule(id: string) {
+    return request(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async runSchedule(id: string) {
+    return request<{ id: string; name: string; status: string; at: string; error?: string; replies?: string[] }>(
+      `/api/schedules/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  },
+  async runDueSchedules() {
+    return request<{ ran: number; results: Array<{ id: string; name: string; status: string; error?: string }> }>('/api/schedules/run-due', { method: 'POST' });
+  },
+  async listCommands() {
+    return records<CommandRecord>(await request('/api/commands'));
+  },
+  async saveCommand(data: Partial<CommandRecord> & Pick<CommandRecord, 'name'>, id?: string) {
+    return record<CommandRecord>(await request(id ? `/api/commands/${encodeURIComponent(id)}` : '/api/commands', {
+      method: id ? 'PUT' : 'POST', ...jsonBody(data),
+    }));
+  },
+  async deleteCommand(id: string) {
+    return request(`/api/commands/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  async listExtensions() {
+    return records<ExtensionRecord>(await request('/api/extensions'));
+  },
+  async saveExtension(data: Partial<ExtensionRecord> & Pick<ExtensionRecord, 'name'>, id?: string) {
+    return record<ExtensionRecord>(await request(id ? `/api/extensions/${encodeURIComponent(id)}` : '/api/extensions', {
+      method: id ? 'PUT' : 'POST', ...jsonBody(data),
+    }));
+  },
+  async deleteExtension(id: string) {
+    return request(`/api/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   async saveTool(data: Partial<LibraryRecord> & Pick<LibraryRecord, 'name'>, id?: string) {
     return record<LibraryRecord>(await request(id ? `/api/tools/${encodeURIComponent(id)}` : '/api/tools', {

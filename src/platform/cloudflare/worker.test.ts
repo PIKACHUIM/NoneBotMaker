@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RuntimeBindings } from '../../shared/types';
 
-const cleanup = vi.hoisted(() => ({ purgeExpiredLogs: vi.fn(async () => 3), purgeExpiredMemories: vi.fn(async () => 2) }));
+const cleanup = vi.hoisted(() => ({ purgeExpiredLogs: vi.fn(async () => 3), purgeExpiredMemories: vi.fn(async () => 2), runDueSchedules: vi.fn(async () => []) }));
 vi.mock('../../server/storage/log-retention', () => ({ purgeExpiredLogs: cleanup.purgeExpiredLogs }));
 vi.mock('../../server/storage/conversation-memory-repository', () => ({ createConversationMemoryRepository: () => ({ purgeExpired: cleanup.purgeExpiredMemories }) }));
+vi.mock('../../server/automation/schedules', () => ({ runDueSchedules: cleanup.runDueSchedules }));
 
 import worker from './worker';
 
@@ -48,6 +49,10 @@ describe('Cloudflare scheduled cleanup', () => {
       scheduledTime,
     );
     expect(cleanup.purgeExpiredMemories).toHaveBeenCalledWith(scheduledTime);
-    expect(waitUntil).toHaveBeenCalledTimes(2);
+    expect(cleanup.runDueSchedules).toHaveBeenCalledWith(
+      { ...bindings, PLATFORM: 'cloudflare' },
+      scheduledTime,
+    );
+    expect(waitUntil).toHaveBeenCalledTimes(3);
   });
 });
