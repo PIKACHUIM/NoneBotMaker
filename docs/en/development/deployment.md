@@ -11,7 +11,7 @@ All platforms reuse `src/server/app.ts`, but entry points, persistence, and avai
 | `API_METHOD` | `webhook` (default) or `websocket`; WebSocket Gateway is supported only on Cloudflare. |
 | `LOG_RECORD` | Whether to record conversation logs; disabled by default. |
 
-Configure QQ AppID/AppSecret and AI Provider Keys in the corresponding account/provider settings after admin sign-in. Do not put them in public environment templates or command-line arguments.
+Configure per-platform AppID/AppSecret, tokens, and AI Provider Keys in the corresponding account/provider settings after admin sign-in. Do not put them in public environment templates or command-line arguments.
 
 ## Cloudflare Workers
 
@@ -67,7 +67,7 @@ Once `wrangler.jsonc` has valid resources and local bindings, use `wrangler dev`
 
 1. Check `/api/health` and `/api/setup/status`.
 2. Confirm the schema is ready, persistence bindings can read/write, and admin sign-in works.
-3. Verify the QQ callback URL, signature headers, account status, and conversation OpenID.
+3. Verify each platform callback URL, signature headers/token, account status, and conversation external ID.
 4. Test the AI provider, usage, and reply permissions in a controlled conversation.
 5. Before enabling logs, confirm access controls, retention, and cleanup schedule; monitor billing, quotas, and error rates.
 

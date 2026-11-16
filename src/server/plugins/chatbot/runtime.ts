@@ -14,9 +14,9 @@ import type {
   RuntimeBindings,
 } from '../../../shared/types';
 import { readBoolean } from '../../env';
-import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
+import type { ChatAccountContext, ChatPlatformMessage } from '../../protocols/types';
+import { chatProtocols, matchesConversationId } from '../../../shared/plugin-catalog';
 import { findModelPrice } from '../../../shared/model-pricing';
-import { matchesConversationId } from '../../../shared/plugin-catalog';
 import { runExtension, type WorkerLoaderLike } from '../../automation/extensions';
 import { createD1MatcherSessionStore, PluginRuntime } from '../dispatcher';
 import { createConversationLogRepository, type ConversationLogRepository } from '../../storage/conversation-log-repository';
@@ -376,19 +376,21 @@ export function createStoredChatbotHandler(
   };
   const handler = createChatbotHandler(dependencies);
   const runtime = new PluginRuntime({ sessions: bindings.DB ? createD1MatcherSessionStore(bindings) : undefined, now: services.now });
-  runtime.registerAdapter({ platform: 'qq', normalizeEvent: (_bot, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-    const value = input as { account?: QQAccountContext; message?: QQGroupMessage };
-    const message = value.message;
-    if (!value.account || !message || typeof message.accountId !== 'string' || typeof message.groupId !== 'string' || typeof message.userId !== 'string') return null;
-    return { type: 'message', platform: 'qq', botId: message.accountId, sessionId: JSON.stringify([message.conversationType ?? 'group', message.groupId]), userId: message.userId, message, payload: { account: value.account } };
-  } });
+  for (const protocol of new Set(['qq', ...chatProtocols().map((entry) => entry.id)])) {
+    runtime.registerAdapter({ platform: protocol, normalizeEvent: (_bot, input) => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+      const value = input as { account?: ChatAccountContext; message?: ChatPlatformMessage };
+      const message = value.message;
+      if (!value.account || !message || typeof message.accountId !== 'string' || typeof message.groupId !== 'string' || typeof message.userId !== 'string') return null;
+      return { type: 'message', platform: value.account.protocol, botId: message.accountId, sessionId: JSON.stringify([message.conversationType ?? 'group', message.groupId]), userId: message.userId, message, payload: { account: value.account } };
+    } });
+  }
   runtime.register({ id: CHATBOT_PLUGIN_TYPE, matchers: [{ id: 'message', type: 'message', priority: 20, handlers: [async (context) => {
-    const account = (context.event.payload as { account: QQAccountContext }).account;
-    await handler(account, context.event.message as QQGroupMessage);
+    const account = (context.event.payload as { account: ChatAccountContext }).account;
+    await handler(account, context.event.message as ChatPlatformMessage);
   }] }] });
-  return async (account: QQAccountContext, message: QQGroupMessage): Promise<void> => {
-    const bot = { id: account.account.id, platform: 'qq', send: async (event: import('../dispatcher').RuntimeEvent, text: string) => services.sendReply(account, event.message!.groupId, event.message!.id, text, { seq: 1, conversationType: event.message?.conversationType ?? 'group' }) };
+  return async (account: ChatAccountContext, message: ChatPlatformMessage): Promise<void> => {
+    const bot = { id: account.account.id, platform: account.protocol, send: async (event: import('../dispatcher').RuntimeEvent, text: string) => services.sendReply(account, event.message!.groupId, event.message!.id, text, { seq: 1, conversationType: event.message?.conversationType ?? 'group', ...(event.message?.replyToken ? { replyToken: event.message.replyToken } : {}) }) };
     const result = await runtime.dispatchAdapterEvent(bot, { account, message });
     if (result.errors.length) throw result.errors[0].error;
   };

@@ -44,15 +44,20 @@ npx wrangler d1 migrations apply <database-name> --remote --config wrangler.json
 
 迁移脚本会维护 schema 版本；不要在生产环境直接手工删除或重建数据表。
 
-## 4. 配置 QQ 回调
+## 4. 配置平台回调
 
-在 QQ 开放平台配置机器人回调地址：
+在对应平台后台配置回调地址：
 
 ```text
-https://<worker-domain>/webhook/qq
+https://<worker-domain>/webhook/qq       QQ 官方机器人
+https://<worker-domain>/webhook/onebot   OneBot v11（NapCat/Koishi/Red 等）
+https://<worker-domain>/webhook/telegram Telegram
+https://<worker-domain>/webhook/feishu   飞书 / Lark
+https://<worker-domain>/webhook/dingtalk 钉钉机器人
+https://<worker-domain>/webhook/wechat   微信公众号
 ```
 
-在管理台创建群聊助手插件、QQ 账号和会话策略。QQ 账号凭据应填写在管理台受保护的账号配置中；会话策略填写群聊/私聊 OpenID 并选择供应商和模型。回调需要保留 QQ 签名请求头与原始请求体。
+在管理台创建群聊助手插件、平台账号和会话策略。账号凭据应填写在管理台受保护的账号配置中；会话策略填写群聊/私聊外部 ID 并选择供应商和模型。回调需要保留平台要求的签名请求头与原始请求体。各平台的权限、事件订阅和限制见[聊天平台接入](/guide/chat-platforms)。
 
 ## 5. 验证
 
@@ -61,7 +66,7 @@ curl -fsS https://<worker-domain>/api/health
 curl -fsS https://<worker-domain>/api/setup/status
 ```
 
-登录管理台，确认账号和会话策略保存成功，再用已授权测试群/测试账号完成真实 QQ 联调。不要把本地 mock 测试当作 QQ 平台权限、媒体能力或供应商服务的端到端验证。
+登录管理台，确认账号和会话策略保存成功，再用已授权测试群/测试账号完成真实平台联调。不要把本地 mock 测试当作平台权限、媒体能力或供应商服务的端到端验证。
 
 ## Cloudflare 部署注意事项
 

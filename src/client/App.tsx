@@ -94,6 +94,10 @@ import { BUILTIN_CHAT_COMMANDS } from '../shared/commands';
 import { MEMORY_CONTEXT_OPTIONS } from '../shared/memory-context';
 import { buildCron, CRON_BUILDER_DEFAULTS, describeCron, parseCronBuilder, type CronBuilderMode, type CronBuilderOptions } from '../shared/schedules';
 import {
+  chatProtocolCredentialFields,
+  chatProtocolDefinition,
+  chatProtocolLabel,
+  chatProtocols,
   conversationFields,
   conversationIdList,
   defaultFieldValues,
@@ -893,7 +897,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
           <div className="form-grid two-cols"><Form.Item name={['config', 'size']} label={tr('尺寸')}><Select options={['1024x1024', '1536x1024', '1024x1536'].map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name={['config', 'quality']} label={tr('质量')}><Select options={['low', 'medium', 'high', ...(supportsExtendedImageQuality ? ['xhigh', 'max'] : [])].map((value) => ({ value, label: value }))} /></Form.Item></div>
           <Form.Item name={['config', 'fallbackCostPerImage']} label={tr('每张兜底价（USD）')} extra={tr('接口不返回可计费用量时按此价计费；启用前必须大于 0。')}><InputNumber min={0} precision={4} addonBefore="$" className="full-width" /></Form.Item>
         </> : isVideoTool ? <>
-          <Alert type="info" showIcon message={tr('视频工具默认关闭，启用前必须配置真实供应商、视频模型与每秒兜底价。')} description={tr('MiniMax 使用官方异步任务接口；OpenAI 兼容接口使用 /videos 任务与内容下载。QQ 富媒体单文件上限 5 MB。')} />
+          <Alert type="info" showIcon message={tr('视频工具默认关闭，启用前必须配置真实供应商、视频模型与每秒兜底价。')} description={tr('MiniMax 使用官方异步任务接口；OpenAI 兼容接口使用 /videos 任务与内容下载。QQ 富媒体单文件上限 5 MB，其他平台受各自接口限制。')} />
           <Form.Item name={['config', 'providerId']} label={tr('AI 供应商')} rules={[{ required: true, message: tr('请选择AI供应商') }]}><Select options={providers.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['config', 'model']} label={tr('视频模型')} rules={[{ required: true, message: tr('请选择模型') }]}><Select showSearch options={(providers.find((item) => item.id === providerId)?.models ?? []).map((model) => ({ value: model, label: model }))} /></Form.Item>
           <div className="form-grid two-cols">
@@ -1145,7 +1149,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
 }
 
 function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRecord[]; data: BotAccountRecord[]; onRefresh: () => void; onError: (error: unknown) => void }) {
-  const { tr } = useI18n();
+  const { tr, language, localized } = useI18n();
   const drawer = useDrawer();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -1153,18 +1157,22 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   const selectedPluginId = (Form.useWatch('pluginId', { form, preserve: true }) as string | undefined) ?? editing?.pluginId;
   const selectedPlugin = plugins.find((item) => item.id === selectedPluginId);
   const definition = pluginDefinition(selectedPlugin?.type);
-  const credentialFields = definition?.credentialFields ?? [];
+  const protocolOptions = definition?.protocolDefinitions ?? chatProtocols(selectedPlugin?.type);
+  const selectedProtocol = (Form.useWatch('protocol', { form, preserve: true }) as string | undefined) ?? editing?.protocol ?? protocolOptions[0]?.id ?? 'qq';
+  const protocolDefinition = chatProtocolDefinition(selectedProtocol, selectedPlugin?.type);
+  const credentialFields = protocolDefinition?.credentialFields ?? definition?.credentialFields ?? [];
   const accountFields = definition?.accountFields ?? [];
   useEffect(() => {
     if (!drawer.open) return;
     const currentDefinition = pluginDefinition(plugins.find((item) => item.id === editing?.pluginId)?.type);
+    const protocol = editing?.protocol ?? currentDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
     form.resetFields();
     form.setFieldsValue({
       pluginId: editing?.pluginId,
-      protocol: editing?.protocol ?? 'qq',
+      protocol,
       name: editing?.name ?? '',
       enabled: editing?.enabled ?? true,
-      credentials: editableFieldValues(currentDefinition?.credentialFields ?? [], editing?.credentials),
+      credentials: editableFieldValues(chatProtocolCredentialFields(protocol, currentDefinition?.type), editing?.credentials),
       config: editableFieldValues(currentDefinition?.accountFields ?? [], editing?.config),
     });
   }, [drawer.open, editing, form, plugins]);
@@ -1190,7 +1198,7 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
   const columns: TableColumnsType<BotAccountRecord> = [
     { title: tr('机器人账号'), dataIndex: 'name', key: 'name', render: (name: string, row) => <div className="table-identity"><span className="identity-icon"><RobotOutlined /></span><span><strong>{name}</strong><small>{row.id}</small></span></div> },
     { title: tr('插件'), dataIndex: 'pluginId', key: 'pluginId', render: (id: string) => plugins.find((item) => item.id === id)?.name ?? id },
-    { title: tr('平台协议'), dataIndex: 'protocol', key: 'protocol', render: (value: string) => value || '—' },
+    { title: tr('平台协议'), dataIndex: 'protocol', key: 'protocol', render: (value: string, row) => chatProtocolLabel(value, language, plugins.find((item) => item.id === row.pluginId)?.type) || value || '—' },
     { title: tr('状态'), dataIndex: 'enabled', key: 'enabled', render: (enabled: boolean) => <StatusTag enabled={enabled} /> },
     { title: tr('群聊'), key: 'groups', render: (_, row) => <span className="table-mono">{row.config.groupCount as number ?? '—'}</span> },
     { title: '', key: 'actions', align: 'right', render: (_, row) => <Space><Tooltip title={tr('编辑')}><Button aria-label={`${tr('编辑')} ${row.name}`} size="small" icon={<EditOutlined />} onClick={() => drawer.edit(row.id)} /></Tooltip><Switch checked={row.enabled} aria-label={`${row.name} ${tr('启用状态')}`} onChange={(enabled) => void api.saveAccount({ ...row, enabled }, row.id).then(onRefresh).catch(onError)} /><Popconfirm title={`${tr('删除账号')}“${row.name}”？`} okText={tr('删除')} cancelText={tr('取消')} onConfirm={() => void api.deleteAccount(row.id).then(onRefresh).catch(onError)}><Button aria-label={`${tr('删除')} ${row.name}`} danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
@@ -1202,13 +1210,21 @@ function AccountsPage({ plugins, data, onRefresh, onError }: { plugins: PluginRe
         <Form.Item name="name" label={tr('实例名称')} rules={[{ required: true, message: tr('请输入实例名称') }]}><Input placeholder={tr('例如：主群机器人')} /></Form.Item>
         <Form.Item name="pluginId" label={tr('关联插件')} rules={[{ required: true, message: tr('请选择插件') }]}><Select placeholder={tr('选择插件')} options={plugins.map((item) => ({ label: item.name, value: item.id }))} onChange={(pluginId: string) => {
           const nextDefinition = pluginDefinition(plugins.find((item) => item.id === pluginId)?.type);
-          form.setFieldsValue({ credentials: editableFieldValues(nextDefinition?.credentialFields ?? [], pluginId === editing?.pluginId ? editing.credentials : {}), config: editableFieldValues(nextDefinition?.accountFields ?? [], pluginId === editing?.pluginId ? editing.config : {}) });
+          const protocol = nextDefinition?.protocolDefinitions?.[0]?.id ?? 'qq';
+          form.setFieldsValue({
+            protocol,
+            credentials: editableFieldValues(chatProtocolCredentialFields(protocol, nextDefinition?.type), pluginId === editing?.pluginId ? editing.credentials : {}),
+            config: editableFieldValues(nextDefinition?.accountFields ?? [], pluginId === editing?.pluginId ? editing.config : {}),
+          });
         }} /></Form.Item>
         {!plugins.length && <Alert type="warning" showIcon message={tr('当前没有插件记录，请先创建插件。')} />}
-        <Form.Item name="protocol" label={tr('平台协议')}><Select options={(definition?.protocols ?? ['qq']).map((protocol) => ({ label: protocol.toUpperCase(), value: protocol }))} /></Form.Item>
+        <Form.Item name="protocol" label={tr('平台协议')}><Select options={protocolOptions.map((protocol) => ({ label: localized(protocol.name), value: protocol.id }))} onChange={(protocol: string) => {
+          form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, selectedPlugin?.type), protocol === editing?.protocol ? editing.credentials : {}) });
+        }} /></Form.Item>
+        {protocolDefinition && <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>}
         {credentialFields.length ? <div className="schema-fields">
-          <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{definition?.type} / {credentialFields.length} FIELDS</small></div>
-          {credentialFields.map((field) => <PluginField key={field.key} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
+          <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{protocolDefinition?.id ?? definition?.type} / {credentialFields.length} FIELDS</small></div>
+          {credentialFields.map((field) => <PluginField key={`${selectedProtocol}:${field.key}`} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
           {editing && <p className="form-note">{tr('敏感字段留空会保留现有值。')}</p>}
         </div> : <Alert type="info" showIcon message={tr('该插件类型没有声明账号字段。')} />}
         {accountFields.length > 0 && <SchemaFields fields={accountFields} path="config" editing={Boolean(editing)} />}
@@ -1415,7 +1431,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
       {status && <div className="runtime-status-grid">
         <div><span>{tr('会话策略')}</span><strong>{status.enabled ? tr('启用') : tr('已停用')}</strong></div><div><span>{tr('运行模式')}</span><strong>{status.mode}</strong></div><div><span>{tr('模型')}</span><strong>{status.model || '—'}</strong></div>
         <div><span>{tr('对话上下文')}</span><strong>{status.contextMessages}</strong></div><div><span>{tr('静默')}</span><strong>{status.silent ? tr('启用') : tr('停用')}</strong></div>
-        <div><span>{tr('QQ 连接')}</span><strong>{status.connected ? tr('已连接') : tr('未连接')}</strong></div>
+        <div><span>{tr('平台连接')}</span><strong>{status.connected ? tr('已连接') : tr('未连接')}</strong></div>
         <div><span>{tr('待审批工具')}</span><strong>{approvals.filter((item) => item.status === 'pending').length}</strong></div><div><span>{tr('待继续等待')}</span><strong>{status.pendingAgentWait ? tr('是') : tr('否')}</strong></div>
       </div>}
     </Card>
@@ -1428,7 +1444,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
         <label className="runtime-prompt-field"><span>{tr('额外禁用工具')} · {tr('每行填写一个工具名；只会减少会话策略允许的工具，不能在此提升权限。')}</span><Input.TextArea value={disabledToolsText} rows={3} onChange={(event) => setDisabledToolsText(event.target.value)} /></label>
         <Space><Button loading={busy} onClick={() => void runControl({ action: 'tools', disabledTools: disabledToolsText.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean) })}>{tr('保存工具设置')}</Button><Popconfirm title={tr('清空当前会话上下文？')} okText={tr('清空')} cancelText={tr('返回')} onConfirm={() => void runControl({ action: 'reset' })}><Button danger loading={busy}>{tr('重置会话上下文')}</Button></Popconfirm></Space>
       </Card>}
-      {view === 'approvals' && <Card className="runtime-control-card" title={tr('待审批操作')} extra={<Text type="secondary">{tr('危险 MCP 操作仍需在目标 QQ 会话中由 owner 批准。')}</Text>}>
+      {view === 'approvals' && <Card className="runtime-control-card" title={tr('待审批操作')} extra={<Text type="secondary">{tr('危险 MCP 操作仍需在目标会话中由 owner 批准。')}</Text>}>
         <Table<ChatbotConversationStatus['pendingApprovals'][number]> rowKey="id" columns={approvalColumns} dataSource={approvals} pagination={false} locale={{ emptyText: tr('当前没有待审批操作') }} expandable={{ expandedRowRender: (row) => <div className="log-details"><h3>{tr('待执行工具参数')}</h3><DetailValue value={row.arguments ?? { unavailable: 'invalid_json' }} /></div> }} />
       </Card>}
       {view === 'status' && <>
@@ -1439,7 +1455,7 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
         {memeError ? <Alert type="info" showIcon message={memeError} description={tr('当前平台未配置持久素材存储。')} /> : <Table<ChatbotMemeSummary> rowKey="name" columns={memeColumns} dataSource={memes} pagination={false} locale={{ emptyText: tr('当前会话还没有已审核表情。') }} />}
       </Card>
       <Card className="runtime-control-card" title={tr('账号语音素材库')} extra={<Button size="small" onClick={() => void refresh()}>{tr('刷新')}</Button>}>
-        <p className="form-note">{tr('语音文件按账号共享，仅接受有效 MP3/WAV，单个文件最大 5 MiB。发送语音仍需在 QQ 会话中显式触发。')}</p>
+        <p className="form-note">{tr('语音文件按账号共享，仅接受有效 MP3/WAV，单个文件最大 5 MiB。发送语音仍需在目标会话中显式触发。')}</p>
         <label className="runtime-prompt-field"><span>{tr('上传 MP3 或 WAV')}</span><input aria-label={tr('上传 MP3 或 WAV')} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" disabled={busy} onChange={(event) => { const input = event.currentTarget; const file = input.files?.[0]; if (file) void uploadVoice(file).finally(() => { input.value = ''; }); }} /></label>
         {voiceError ? <Alert type="warning" showIcon message={voiceError} description={tr('账号语音素材存储或请求失败；请检查 KV 配置、文件格式和大小。')} /> : <Table<ChatbotVoiceSummary> rowKey="name" columns={voiceColumns} dataSource={voices} pagination={false} locale={{ emptyText: tr('此账号还没有语音素材。') }} />}
       </Card>

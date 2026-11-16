@@ -27,7 +27,7 @@ function routedCommands(initial: JsonObject, enforceSendBudget = false) {
   const saved = store(initial);
   const replies: string[] = [];
   const account: QQAccountContext = {
-    appId: 'app', appSecret: 'known-credential', pluginEnabled: true,
+    appId: 'app', appSecret: 'known-credential', protocol: 'qq', credentials: {}, pluginEnabled: true,
     pluginConfig: { memory_enabled: true, bridge_owner_ids: 'owner', bridge_max_message_chars: enforceSendBudget ? 500 : 4000 },
     account: { id: 'account', pluginId: 'plugin', protocol: 'qq', name: 'bot', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' },
   };

@@ -7,18 +7,18 @@ Admin browser ──static assets──> Platform entry / ASSETS
       │                              │
       └──management API + session──> Hono API Router
                                      ├──plugin/account/policy management
-QQ Open Platform ──Webhook────────> ├──auth/setup/log/conversation routes
-                                     └──QQ signature checks and normalization
+QQ/OneBot/Telegram/Feishu/DingTalk/WeChat ──Webhook─> ├──auth/setup/log/conversation routes
+                                      └──per-platform signature checks and normalization
                                                    │
                                             Chatbot Runtime
                                      ├──policy and permission resolution
                                      ├──AI provider / multi-round tool loop
                                      ├──MCP / search / Skills / Memory
-                                     └──QQ replies and media delivery
+                                     └──protocol-aware replies and media delivery
                                                    │
                  ┌─────────────────────────────────┴────────────────────┐
                  │ persistence adapters                                │ external services
-                 │ D1 / KV / Blob / Durable Object                     │ QQ / AI / MCP
+                 │ D1 / KV / Blob / Durable Object                     │ Platforms / AI / MCP
                  └────────────────────────────────────────────────────┘
 ```
 
@@ -29,16 +29,16 @@ This diagram shows the main path, not feature parity across platforms. `src/serv
 1. **Platform entry points:** `src/platform/cloudflare/worker.ts`, `src/platform/edgeone/entry.ts`, `src/platform/esa/entry.ts`, and `src/server/local.ts` establish platform context. The Cloudflare Worker also handles static assets, Gateway Durable Object maintenance, and scheduled log cleanup.
 2. **Shared application:** `src/server/app.ts` mounts management routes under `/api` and the `/webhook/qq` callback. Middleware validates `API_METHOD`; non-Cloudflare platforms reject WebSocket mode.
 3. **Management API:** `src/server/routes/index.ts` centralizes authentication and route registration. Separate routes manage plugins, accounts, conversation policies, providers, prices, logs, and runtime state. Session, same-origin, and scope checks run on the server.
-4. **QQ integration:** `src/server/protocols/qq/` validates signatures, resolves accounts by AppID, normalizes platform events, and calls QQ APIs for replies or media.
-5. **Chat pipeline:** `src/server/plugins/chatbot/runtime.ts` composes stores and handlers. `handler.ts` resolves conversation policies and permissions, calls providers, executes permitted tools, and sends replies within QQ constraints.
+4. **Platform integrations:** `src/server/protocols/` is split by protocol. QQ validates Ed25519 signatures and resolves accounts by AppID; OneBot verifies optional HMAC-SHA1 report signatures and resolves by self_id; Telegram resolves by secret_token; Feishu verifies signatures, decrypts events, and resolves by App ID; DingTalk matches accounts with timestamp/sign; WeChat Official Accounts use Token/SHA1 verification. Normalized messages enter one shared chat pipeline.
+5. **Chat pipeline:** `src/server/plugins/chatbot/runtime.ts` composes stores and handlers. `handler.ts` resolves conversation policies and permissions, calls providers, executes permitted tools, and sends replies through `protocols/sender.ts` according to the account protocol.
 6. **Data access:** Repository/store interfaces isolate configuration, context, cost, logs, and media assets from platform storage APIs.
 
 ## Configuration and data scopes
 
 ```text
 Plugin configuration
-  └── platform account (QQ AppID/AppSecret, linked plugin)
-       └── group/private policy (external OpenID, model, permissions, prompt, budget)
+  └── platform account (protocol-specific AppID/AppSecret or Token, linked plugin)
+       └── group/private policy (external conversation ID, model, permissions, prompt, budget)
             └── conversation runtime state / context / memory
 ```
 
@@ -59,20 +59,20 @@ Cost checks and usage accumulation are not one cross-platform transaction. D1 su
 
 ## Chat processing flow
 
-1. Receive a QQ Webhook, validate its signature, and resolve the account and event.
+1. Receive a platform Webhook, validate its protocol signature, and resolve the account and event.
 2. Find the saved policy by platform account and group/private OpenID; check enabled state, allowlists, and rate limits.
 3. Load context, prompts, Skills/Rules, role cards, memory, and model prices to build a provider request.
 4. Convert messages according to the selected API/model media capabilities. Unsupported attachments are not reported as read.
 5. Process AI text or tool calls. Built-in tools are scoped by policy and identity; external MCP calls follow admin allowlist and owner-approval rules.
 6. Record model usage and costs, save context, and write logs only when logging is enabled.
-7. Send text/media replies subject to runtime mode, QQ platform limits, and message chunking.
+7. Send text/media replies subject to runtime mode, platform limits, and message chunking.
 
 Cloudflare WebSocket Gateway connections are maintained by a Durable Object. Cloudflare Webhook mode also uses the configured object for durable queueing, deduplication, and outbound rate limiting. EdgeOne and ESA currently support Webhook only.
 
 ## Security boundaries
 
 - **Trusted configuration:** Only data authenticated with an admin session and validated by the server forms an authorization policy.
-- **Platform input:** QQ callbacks must pass signature validation; OpenIDs and message contents are external input.
+- **Platform input:** every platform callback must pass its signature or token validation; user/conversation IDs and message contents are external input.
 - **AI and external tools:** Model output, search results, MCP arguments, and tool results are untrusted. A remote `readOnlyHint` alone does not establish safety.
 - **Credentials:** Never commit `SYS_PASSWD`, `SYS_SECRET`, or provider/platform credentials. Sensitive account/provider credentials are encrypted with `SYS_SECRET`.
 - **Side effects:** Approval calls require authorization and persistent claiming. Outbound messages, media, and scheduled wakeups are limited by policy and platform permissions.

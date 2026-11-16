@@ -1,4 +1,4 @@
-import { CHATBOT_PLUGIN_TYPE, type GroupRecord, type JsonObject, type Language, type LocalizedText, type PluginDefinition, type PluginFieldDefinition, type PolicyRecord, type PolicyScope, type PolicyType, type ReasoningEffort } from './types';
+import { CHATBOT_PLUGIN_TYPE, type ChatProtocolDefinition, type GroupRecord, type JsonObject, type Language, type LocalizedText, type PluginDefinition, type PluginFieldDefinition, type PolicyRecord, type PolicyScope, type PolicyType, type ReasoningEffort } from './types';
 
 const field = (
   key: string,
@@ -75,13 +75,315 @@ export const BUILTIN_TOOL_LABELS: Record<string, LocalizedText> = {
   chat_text_stats: { zh: '文本统计', en: 'Text statistics' },
 };
 
+const qqCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'appId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人 AppID', en: 'Bot App ID' },
+    description: {
+      zh: 'QQ 开放平台机器人资料中的 AppID，用于定位账号并校验回调。',
+      en: 'The App ID from QQ Open Platform, used to identify the bot and verify callbacks.',
+    },
+    placeholder: { zh: '例如：102012345', en: 'For example: 102012345' },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '机器人 AppSecret', en: 'Bot App Secret' },
+    description: {
+      zh: 'QQ 开放平台的 AppSecret，用于签名验证与访问令牌；保存时留空保留已有密钥。',
+      en: 'QQ App Secret for signatures and access tokens. Leave empty when saving to preserve the existing secret.',
+    },
+    placeholder: { zh: '输入 AppSecret', en: 'Enter App Secret' },
+  },
+];
+
+const feishuCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'appId',
+    type: 'text',
+    required: true,
+    label: { zh: 'App ID', en: 'App ID' },
+    description: {
+      zh: '飞书开放平台「凭证与基础信息」中的 App ID（cli_ 开头），事件回调用它定位账号。',
+      en: 'The App ID (starting with cli_) from Feishu Open Platform credentials; event callbacks use it to find the account.',
+    },
+    placeholder: { zh: '例如：cli_a1b2c3d4e5f6', en: 'For example: cli_a1b2c3d4e5f6' },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'App Secret', en: 'App Secret' },
+    description: {
+      zh: '飞书应用的 App Secret，用于获取 tenant_access_token 和校验请求签名；保存时留空保留已有密钥。',
+      en: 'Feishu app secret used for tenant access tokens and request signatures. Leave empty when saving to preserve the existing secret.',
+    },
+  },
+  {
+    key: 'verificationToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Verification Token', en: 'Verification Token' },
+    description: {
+      zh: '飞书事件订阅的 Verification Token，用于校验未加密回调；保存时留空保留已有值。',
+      en: 'Verification Token from Feishu event subscriptions, used to verify unencrypted callbacks. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'encryptKey',
+    type: 'text',
+    secret: true,
+    label: { zh: 'Encrypt Key（可选）', en: 'Encrypt Key (optional)' },
+    description: {
+      zh: '配置后同时校验签名并解密加密事件；必须与飞书后台填写的一致，留空表示只接收明文事件。',
+      en: 'When set, signatures are checked and encrypted events are decrypted. It must match Feishu exactly; empty accepts plaintext events only.',
+    },
+  },
+];
+
+const dingtalkCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'appKey',
+    type: 'text',
+    required: true,
+    label: { zh: 'AppKey / Client ID', en: 'AppKey / Client ID' },
+    description: {
+      zh: '钉钉开放平台应用的 AppKey（Client ID），用于请求签名匹配与主动发送。',
+      en: 'DingTalk AppKey (Client ID), used to match callback signatures and send messages proactively.',
+    },
+    placeholder: { zh: '例如：dingabc123', en: 'For example: dingabc123' },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'AppSecret / Client Secret', en: 'AppSecret / Client Secret' },
+    description: {
+      zh: '钉钉应用的 AppSecret，用于校验机器人回调签名与获取 accessToken；保存时留空保留已有密钥。',
+      en: 'DingTalk AppSecret for callback signatures and access tokens. Leave empty when saving to preserve the existing secret.',
+    },
+  },
+  {
+    key: 'robotCode',
+    type: 'text',
+    label: { zh: 'RobotCode（可选）', en: 'RobotCode (optional)' },
+    description: {
+      zh: '机器人 RobotCode，用于定时任务等主动消息；留空时只回复收到的消息。',
+      en: 'Robot code used for proactive messages such as schedules. Empty means replies only.',
+    },
+  },
+];
+
+const wechatCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'appId',
+    type: 'text',
+    required: true,
+    label: { zh: 'AppID', en: 'AppID' },
+    description: {
+      zh: '微信公众号后台「开发 → 基本配置」中的 AppID（wx 开头）。',
+      en: 'The AppID (starting with wx) from the WeChat Official Account basic configuration.',
+    },
+    placeholder: { zh: '例如：wx1234567890abcdef', en: 'For example: wx1234567890abcdef' },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'AppSecret', en: 'AppSecret' },
+    description: {
+      zh: '公众号 AppSecret，用于获取 access_token 与发送客服消息；公众号后台需把服务出口 IP 加入 IP 白名单。保存时留空保留已有密钥。',
+      en: 'Official Account AppSecret used for access tokens and customer-service messages. Add the service egress IP to the Official Account IP allowlist. Leave empty to preserve the stored secret.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Token', en: 'Token' },
+    description: {
+      zh: '公众号后台「服务器配置」中的 Token，用于校验回调签名；保存时留空保留已有值。',
+      en: 'The Token from the Official Account server configuration, used to verify callback signatures. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const onebotCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'selfId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人 ID（self_id）', en: 'Bot ID (self_id)' },
+    description: {
+      zh: 'OneBot 上报中的 self_id，通常是机器人 QQ 号，用于定位账号与会话标识。',
+      en: 'The self_id reported by OneBot, usually the bot QQ number, used to resolve the account and conversation identity.',
+    },
+    placeholder: { zh: '例如：100012345', en: 'For example: 100012345' },
+  },
+  {
+    key: 'apiBaseUrl',
+    type: 'text',
+    required: true,
+    label: { zh: 'OneBot HTTP API 地址', en: 'OneBot HTTP API base URL' },
+    description: {
+      zh: 'OneBot 实现的 HTTP API 地址，例如 http://127.0.0.1:3000；服务会调用 send_group_msg / send_private_msg。',
+      en: 'HTTP API base URL of the OneBot implementation, for example http://127.0.0.1:3000. The service calls send_group_msg / send_private_msg.',
+    },
+    placeholder: { zh: 'http://127.0.0.1:3000', en: 'http://127.0.0.1:3000' },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    secret: true,
+    label: { zh: 'Access Token（可选）', en: 'Access Token (optional)' },
+    description: {
+      zh: '与 OneBot 实现配置的 access_token 一致，通过 Authorization 请求头发送；留空表示不鉴权。',
+      en: 'Must match the OneBot access_token and is sent in the Authorization header; empty disables API authentication.',
+    },
+  },
+  {
+    key: 'secret',
+    type: 'text',
+    secret: true,
+    label: { zh: '上报签名密钥（可选）', en: 'Report signing secret (optional)' },
+    description: {
+      zh: '配置后校验 HTTP 上报的 X-Signature（HMAC-SHA1）；留空表示不校验签名。推荐公网部署时设置。',
+      en: 'When set, verifies the X-Signature HMAC-SHA1 header on HTTP reports. Empty skips signature checks; setting one is recommended for public deployments.',
+    },
+  },
+];
+
+const telegramCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'botToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Token', en: 'Bot Token' },
+    description: {
+      zh: 'BotFather 提供的完整 Bot Token（数字:字母）；用于调用 Telegram Bot API，保存时留空保留已有值。',
+      en: 'The full Bot Token from BotFather (digits:letters), used for the Telegram Bot API. Leave empty to keep the stored value.',
+    },
+    placeholder: { zh: '123456789:AA...', en: '123456789:AA...' },
+  },
+  {
+    key: 'botId',
+    type: 'text',
+    label: { zh: 'Bot 数字 ID', en: 'Bot numeric ID' },
+    description: {
+      zh: 'Bot Token 冒号前的数字，用于账号标识；留空会自动从 Bot Token 提取。',
+      en: 'The digits before the colon in the Bot Token, used as the account identifier. Leave empty to derive it from the token.',
+    },
+    placeholder: { zh: '例如：123456789', en: 'For example: 123456789' },
+  },
+  {
+    key: 'secretToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Webhook Secret Token', en: 'Webhook Secret Token' },
+    description: {
+      zh: '调用 setWebhook 时设置的 secret_token，用于校验回调并定位账号；保存时留空保留已有值。',
+      en: 'The secret_token supplied to setWebhook, used to verify callbacks and resolve the account. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const builtinChatProtocols: ChatProtocolDefinition[] = [
+  {
+    id: 'qq',
+    name: { zh: 'QQ 官方机器人', en: 'QQ official bot' },
+    description: {
+      zh: 'QQ 开放平台 Webhook 或 Cloudflare Durable Objects WebSocket 网关。',
+      en: 'QQ Open Platform Webhooks, or the Cloudflare Durable Objects WebSocket gateway.',
+    },
+    identifierField: 'appId',
+    webhookPath: '/webhook/qq',
+    credentialFields: qqCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'feishu',
+    name: { zh: '飞书 / Lark', en: 'Feishu / Lark' },
+    description: {
+      zh: '飞书开放平台事件订阅（im.message.receive_v1），支持群聊、私聊与主动发送。',
+      en: 'Feishu Open Platform event subscriptions (im.message.receive_v1) for groups, direct messages and proactive sends.',
+    },
+    identifierField: 'appId',
+    webhookPath: '/webhook/feishu',
+    credentialFields: feishuCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'dingtalk',
+    name: { zh: '钉钉机器人', en: 'DingTalk robot' },
+    description: {
+      zh: '钉钉企业内部机器人回调，使用 sessionWebhook 回复，并可主动发送群聊或工作通知。',
+      en: 'DingTalk internal robot callbacks replied through sessionWebhook, with proactive group or direct sends.',
+    },
+    identifierField: 'appKey',
+    webhookPath: '/webhook/dingtalk',
+    credentialFields: dingtalkCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'wechat',
+    name: { zh: '微信公众号', en: 'WeChat Official Account' },
+    description: {
+      zh: '微信公众号服务器配置（明文模式），通过客服消息接口回复文本与媒体。',
+      en: 'WeChat Official Account server configuration (plaintext mode) replying through the customer-service message API.',
+    },
+    identifierField: 'appId',
+    webhookPath: '/webhook/wechat',
+    credentialFields: wechatCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'onebot',
+    name: { zh: 'OneBot v11', en: 'OneBot v11' },
+    description: {
+      zh: 'OneBot v11 HTTP 上报与 API，可接 NapCat、go-cqhttp、Koishi、Red 以及带 OneBot 插件的 Mirai。',
+      en: 'OneBot v11 HTTP reports and API for NapCat, go-cqhttp, Koishi, Red, and Mirai with an OneBot plugin.',
+    },
+    identifierField: 'selfId',
+    secretField: 'secret',
+    requiresSecret: false,
+    webhookPath: '/webhook/onebot',
+    credentialFields: onebotCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'telegram',
+    name: { zh: 'Telegram', en: 'Telegram' },
+    description: {
+      zh: 'Telegram Bot API Webhook，支持私聊、群组、文本与媒体发送。',
+      en: 'Telegram Bot API Webhook for private chats, groups, text, and media.',
+    },
+    identifierField: 'botId',
+    verificationField: 'secretToken',
+    secretField: 'botToken',
+    webhookPath: '/webhook/telegram',
+    credentialFields: telegramCredentialFields,
+    proactive: true,
+  },
+];
+
 const chatbotDefinition: PluginDefinition = {
   type: CHATBOT_PLUGIN_TYPE,
-  protocols: ['qq'],
+  protocols: builtinChatProtocols.map((protocol) => protocol.id),
   name: { zh: '群聊助手', en: 'Group Chatbot' },
   description: {
-    zh: '接收 QQ 群聊和私聊消息，按各会话的策略调用模型与工具并回复。',
-    en: 'Receives QQ group and private messages, applying each conversation’s model and tool policies.',
+    zh: '接收 QQ、OneBot、Telegram、飞书、钉钉和微信公众号消息，按各会话的策略调用模型与工具并回复。',
+    en: 'Receives QQ, OneBot, Telegram, Feishu, DingTalk and WeChat Official Account messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [
@@ -281,31 +583,8 @@ const chatbotDefinition: PluginDefinition = {
       'Requested video duration, 4–15 seconds. Some providers accept only 6 or 10 seconds and their error is surfaced.',
     ], { group: mediaGroup, default: 6, min: 4, max: 15, step: 1 }),
   ],
-  credentialFields: [
-    {
-      key: 'appId',
-      type: 'text',
-      required: true,
-      label: { zh: '机器人 AppID', en: 'Bot App ID' },
-      description: {
-        zh: 'QQ 开放平台机器人资料中的 AppID，用于定位账号并校验回调。',
-        en: 'The App ID from QQ Open Platform, used to identify the bot and verify callbacks.',
-      },
-      placeholder: { zh: '例如：102012345', en: 'For example: 102012345' },
-    },
-    {
-      key: 'appSecret',
-      type: 'text',
-      required: true,
-      secret: true,
-      label: { zh: '机器人 AppSecret', en: 'Bot App Secret' },
-      description: {
-        zh: 'QQ 开放平台的 AppSecret，用于签名验证与访问令牌；保存时留空保留已有密钥。',
-        en: 'QQ App Secret for signatures and access tokens. Leave empty when saving to preserve the existing secret.',
-      },
-      placeholder: { zh: '输入 AppSecret', en: 'Enter App Secret' },
-    },
-  ],
+  credentialFields: qqCredentialFields,
+  protocolDefinitions: builtinChatProtocols,
   logFields: [
     { key: 'status', label: { zh: '状态', en: 'Status' } },
     { key: 'eventId', label: { zh: '事件 ID', en: 'Event ID' } },
@@ -329,6 +608,26 @@ export function pluginDefinition(type: string | undefined): PluginDefinition | u
 
 export function pluginDefinitions(): PluginDefinition[] {
   return [...definitions.values()];
+}
+
+/** Chat protocols declared by a plugin type. */
+export function chatProtocols(type: string = CHATBOT_PLUGIN_TYPE): ChatProtocolDefinition[] {
+  return pluginDefinition(type)?.protocolDefinitions ?? [];
+}
+
+export function chatProtocolDefinition(protocol: string | undefined, type: string = CHATBOT_PLUGIN_TYPE): ChatProtocolDefinition | undefined {
+  return protocol ? chatProtocols(type).find((entry) => entry.id === protocol) : undefined;
+}
+
+/** Credentials are scoped per protocol so unrelated secrets never appear in an account form. */
+export function chatProtocolCredentialFields(protocol: string | undefined, type: string = CHATBOT_PLUGIN_TYPE): PluginFieldDefinition[] {
+  return chatProtocolDefinition(protocol, type)?.credentialFields ?? pluginDefinition(type)?.credentialFields ?? [];
+}
+
+export function chatProtocolLabel(protocol: string | undefined, language: Language, type: string = CHATBOT_PLUGIN_TYPE): string {
+  const definition = chatProtocolDefinition(protocol, type);
+  if (!definition) return protocol ?? '';
+  return localizedText(definition.name, language);
 }
 
 export function localizedText(text: LocalizedText, language: Language): string {

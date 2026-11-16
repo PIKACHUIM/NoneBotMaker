@@ -5,6 +5,8 @@ import { createQQWebhookRouter } from './webhook';
 
 const account: QQAccountContext = {
   appId: '11111111',
+  protocol: 'qq',
+  credentials: {},
   botSecret: 'DG5g3B4j9X2KOErG',
   clientSecret: 'client-secret',
   pluginEnabled: true,

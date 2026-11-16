@@ -2,7 +2,7 @@
 
 # NoneBotMaker
 
-A serverless management and AI chat service for official QQ bots
+A serverless management and AI chat service for QQ, OneBot, Telegram, Feishu, DingTalk, and WeChat Official Accounts
 
 [Online docs](https://cfnbot.opkg.cn/en/) · [简体中文](README.md) · [AGPL-3.0](LICENSE)
 
@@ -10,7 +10,20 @@ A serverless management and AI chat service for official QQ bots
 
 ## Overview
 
-Built with TypeScript, Hono, and React, NoneBotMaker manages QQ bot accounts, group/private conversation policies, and AI chat. It supports Cloudflare Workers, EdgeOne, and Alibaba Cloud ESA. Cloudflare can also use a Durable Objects WebSocket Gateway.
+Built with TypeScript, Hono, and React, NoneBotMaker manages chat bot accounts, group/private conversation policies, and AI chat. It supports Cloudflare Workers, EdgeOne, and Alibaba Cloud ESA. Cloudflare can also use a Durable Objects WebSocket Gateway.
+
+### Supported chat platforms
+
+| Platform | Integration | Callback path | Notes |
+| --- | --- | --- | --- |
+| QQ official bot | Webhook / Cloudflare WebSocket Gateway | `/webhook/qq` | QQ Open Platform AppID and AppSecret |
+| OneBot v11 | HTTP reports + HTTP API | `/webhook/onebot` | Works with NapCat, go-cqhttp, Koishi, Red, and the Mirai OneBot plugin; optional HMAC-SHA1 report signatures |
+| Telegram | Bot API Webhook | `/webhook/telegram` | Callback verified with the `setWebhook` `secret_token` |
+| Feishu / Lark | Event subscription v2 | `/webhook/feishu` | Plaintext or Encrypt Key events; text, image, and file replies |
+| DingTalk robot | Internal robot callback | `/webhook/dingtalk` | timestamp/sign verification and sessionWebhook replies; proactive messages need RobotCode |
+| WeChat Official Account | Server configuration (plaintext mode) | `/webhook/wechat` | SHA1 signature verification; customer-service text, image, voice, and video replies |
+
+See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, callback configuration, and limitations. DingTalk callbacks do not support proactive media, and WeChat Official Accounts do not support file customer-service messages or encrypted (safe-mode) callbacks. OneBot requires both an HTTP report URL and an API base URL; Telegram requires a `secret_token`.
 
 <div align="center">
   <img src="docs/index.png" alt="NoneBotMaker admin console overview" width="100%">
@@ -18,7 +31,7 @@ Built with TypeScript, Hono, and React, NoneBotMaker manages QQ bot accounts, gr
 
 ### Compatibility
 
-This is a TypeScript service for serverless runtimes, not a Python NoneBot runtime. It cannot load arbitrary Python plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
+This is a TypeScript service for serverless runtimes, not a Python NoneBot, Koishi, or NapCat runtime. It connects through each platform's official Webhooks/APIs and cannot load arbitrary Python/Node plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, OneBot, Telegram, Feishu, DingTalk, WeChat, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
 
 ## Quick Deployment
 
@@ -33,14 +46,14 @@ Choose a platform to start:
 
 - **Cloudflare / EdgeOne:** The buttons open the platform's repository import or deployment flow. Configure your own resources and variables as required.
 - **Alibaba Cloud ESA:** [Open the ESA console](https://esa.console.aliyun.com/) and import the GitHub repository. There is no one-click deployment button for this project on ESA.
-- One-click deployment does not configure the QQ Open Platform. Before going live, configure storage, `SYS_PASSWD`, and `SYS_SECRET`; initialize the database; and set the QQ callback to `https://<your-domain>/webhook/qq`.
+- One-click deployment does not configure QQ Open Platform, Feishu Open Platform, DingTalk Open Platform, or the WeChat Official Account console. Before going live, configure storage, `SYS_PASSWD`, and `SYS_SECRET`; initialize the database; and set the callback URL for each enabled platform (for example `https://<your-domain>/webhook/qq`).
 - For Cloudflare, review the resource IDs and domains in `wrangler.jsonc` and replace them with your own. Do not use another account's resources.
 
 See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 
 ## Features
 
-- **Admin console:** Manage plugins, QQ accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
+- **Admin console:** Manage plugins, QQ/OneBot/Telegram/Feishu/DingTalk/WeChat accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
 - **AI chat:** OpenAI-compatible APIs, multi-round tool calls, streaming, conversation context, and role cards.
 - **Persona and prompts:** Per-conversation personas layered with identity policy, system rules, role cards, memory, and Skills/Rules.
 - **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval, and pending arguments can be edited before approval.
@@ -50,7 +63,7 @@ See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 
 ## How It Works
 
-Platform entry points pass requests to the shared Hono application. The QQ Webhook validates signatures and resolves the account and conversation policy. The chat runtime loads permissions, context, and model settings, calls the AI API, executes permitted tools, and replies through the QQ API. Platform-specific storage adapters provide persistence; missing bindings are reported instead of silently replaced with process-local state.
+Platform entry points pass requests to the shared Hono application. Each platform Webhook is verified with its own signature or token and normalized into the shared message contract before the account and conversation policy are resolved. The chat runtime loads permissions, context, and model settings, calls the AI API, executes permitted tools, and replies through that platform's send API. Platform-specific storage adapters provide persistence; missing bindings are reported instead of silently replaced with process-local state.
 
 ## Development and Deployment
 
@@ -78,7 +91,7 @@ Preview locally with `npm run docs:dev`; build with `npm run docs:build`. Source
 
 ## References
 
-- [NoneBot2](https://github.com/nonebot/nonebot2): Reference for event, matcher, and session concepts; this project does not run its Python plugins.
+- [NoneBot2](https://github.com/nonebot/nonebot2), [Koishi](https://koishi.chat/), and [NapCat](https://github.com/NapNeko/NapCatQQ): Reference for events, matchers, sessions, and multi-platform adapters; this project does not run their runtimes or plugins.
 - [VitePress](https://vitepress.dev/): Documentation site generator.
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/), [EdgeOne](https://edgeone.ai/document), and [Alibaba Cloud ESA](https://help.aliyun.com/product/58613.html): Platform runtime and storage documentation.
 

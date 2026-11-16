@@ -7,6 +7,8 @@ import { createChatbotHandler, resetOutboundRateLimits, type ChatbotHandlerDepen
 
 const account: QQAccountContext = {
   appId: 'app-id',
+  protocol: 'qq',
+  credentials: {},
   botSecret: 'bot-secret',
   clientSecret: 'client-secret',
   pluginEnabled: true,

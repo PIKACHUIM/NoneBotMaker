@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE } from '../../shared/types';
 import type { BotAccountRecord, GroupRecord, JsonObject, PolicyType, RecordKind, RuntimeBindings, ScheduleActionType } from '../../shared/types';
-import { BUILTIN_CHAT_TOOL_NAMES, missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationFields, conversationIdList } from '../../shared/plugin-catalog';
+import { BUILTIN_CHAT_TOOL_NAMES, chatProtocolCredentialFields, chatProtocolDefinition, missingRequiredField, normalizeFieldValues, pluginDefinition, policyFields, conversationFields, conversationIdList } from '../../shared/plugin-catalog';
 import { BUILTIN_COMMAND_NAMES } from '../../shared/commands';
 import { MEMORY_CONTEXT_OPTIONS } from '../../shared/memory-context';
 import { isValidTimeZone, nextCronOccurrence, parseCron } from '../../shared/schedules';
@@ -428,14 +428,15 @@ async function normalizeAccountCredentials(
   const plugin = await repository.get('plugins', record.pluginId as string);
   const definition = pluginDefinition(typeof plugin?.type === 'string' ? plugin.type : undefined);
   if (!definition) return;
+  const protocol = chatProtocolDefinition(record.protocol as string, definition.type);
+  if (!protocol) throw new ApiError(400, 'unsupported_protocol');
 
   const submitted = record.credentials as JsonObject;
   const oldAccount = previous ? await decryptSecrets(previous as JsonObject, bindings) as unknown as BotAccountRecord : undefined;
   const supplied = Object.fromEntries(Object.entries(submitted).filter(([, value]) =>
     value !== '' && value !== '********' && value !== undefined && value !== null));
   const credentials: JsonObject = { ...oldAccount?.credentials, ...supplied };
-  if (definition.type === CHATBOT_PLUGIN_TYPE) {
-    if (record.protocol !== 'qq') throw new ApiError(400, 'unsupported_protocol');
+  if (definition.type === CHATBOT_PLUGIN_TYPE && protocol.id === 'qq') {
     const explicit = supplied.appSecret;
     const canonical = explicit ?? (credentials.appSecret || undefined);
     const botSecret = credentials.botSecret || undefined;
@@ -444,21 +445,49 @@ async function normalizeAccountCredentials(
       throw new ApiError(400, 'legacy_secret_conflict_reenter_appSecret');
     }
     credentials.appSecret = canonical ?? botSecret ?? clientSecret;
-    if (typeof credentials.appId === 'string') credentials.appId = credentials.appId.trim();
-    if (oldAccount && (oldAccount.pluginId !== record.pluginId || oldAccount.credentials.appId !== credentials.appId)) {
-      if ((await repository.list('groups')).some((group) => group.accountId === record.id)) {
-        throw new ApiError(409, 'account_binding_locked');
-      }
+    delete credentials.botSecret;
+    delete credentials.clientSecret;
+  }
+  if (protocol.id === 'telegram' && !credentials.botId && typeof credentials.botToken === 'string') {
+    const prefix = credentials.botToken.split(':')[0];
+    if (/^\d{3,20}$/.test(prefix)) credentials.botId = prefix;
+  }
+  const identifier = typeof credentials[protocol.identifierField] === 'string'
+    ? (credentials[protocol.identifierField] as string).trim()
+    : '';
+  if (identifier) credentials[protocol.identifierField] = identifier;
+  if (oldAccount && (oldAccount.pluginId !== record.pluginId || oldAccount.protocol !== record.protocol ||
+    oldAccount.credentials?.[protocol.identifierField] !== identifier)) {
+    if ((await repository.list('groups')).some((group) => group.accountId === record.id)) {
+      throw new ApiError(409, 'account_binding_locked');
     }
+  }
+  if (identifier) {
     for (const existing of await repository.list('accounts')) {
       if (existing.id === record.id || existing.protocol !== record.protocol) continue;
       const account = await decryptSecrets(existing, bindings) as unknown as BotAccountRecord;
-      if (account.credentials?.appId === credentials.appId) throw new ApiError(409, 'duplicate_appId');
+      if (account.credentials?.[protocol.identifierField] === identifier) {
+        throw new ApiError(409, protocol.id === 'qq' ? 'duplicate_appId' : `duplicate_${protocol.identifierField}`);
+      }
     }
   }
 
-  const normalized = normalizeFieldValues(definition.credentialFields, credentials);
-  const missing = missingRequiredField(definition.credentialFields, normalized);
+  const normalized = normalizeFieldValues(protocol.credentialFields, credentials);
+  if (protocol.id === 'onebot') {
+    try {
+      const url = new URL(String(normalized.apiBaseUrl ?? ''));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+    } catch {
+      throw new ApiError(400, 'invalid_apiBaseUrl');
+    }
+  }
+  if (protocol.id === 'telegram' && (
+    !(typeof normalized.botId === 'string' && /^\d{3,20}$/.test(normalized.botId)) ||
+    !(typeof normalized.botToken === 'string' && /^\d{3,20}:[A-Za-z0-9_-]{8,256}$/.test(normalized.botToken))
+  )) {
+    throw new ApiError(400, 'invalid_botToken');
+  }
+  const missing = missingRequiredField(protocol.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);
   record.credentials = normalized;
   record.config = {
@@ -598,8 +627,14 @@ async function redacted(record: StoredRecord, kind?: RecordKind, bindings?: Runt
   if (kind === 'accounts' && bindings) {
     const account = await decryptSecrets(record, bindings) as unknown as BotAccountRecord;
     const credentials = account.credentials ?? {};
-    visible.credentials = { appId: credentials.appId ?? '', appSecret: '********', configured: true, masked: true };
-    if (!credentials.appSecret && credentials.botSecret && credentials.clientSecret && credentials.botSecret !== credentials.clientSecret) {
+    const fields = chatProtocolCredentialFields(typeof record.protocol === 'string' ? record.protocol : undefined);
+    const visibleCredentials: JsonObject = {};
+    for (const field of fields) {
+      const value = credentials[field.key];
+      visibleCredentials[field.key] = field.secret ? (typeof value === 'string' && value ? '********' : '') : typeof value === 'string' ? value : '';
+    }
+    visible.credentials = { ...visibleCredentials, configured: true, masked: true };
+    if (record.protocol === 'qq' && !credentials.appSecret && credentials.botSecret && credentials.clientSecret && credentials.botSecret !== credentials.clientSecret) {
       visible.credentialStatus = 'legacy_secret_conflict_reenter_appSecret';
     }
   }

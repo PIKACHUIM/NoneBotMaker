@@ -4,21 +4,21 @@
 
 ## 目标与用户
 
-NoneBotMaker 为 QQ 官方机器人提供 Serverless 管理与聊天执行服务。管理员通过 Web 管理台维护插件、AI 供应商、机器人账号和群聊/私聊策略；QQ 用户在平台允许的会话内与机器人交互。代码以 TypeScript 实现，在不同运行平台复用 Hono 应用逻辑。
+NoneBotMaker 为 QQ、OneBot、Telegram、飞书、钉钉和微信公众号机器人提供 Serverless 管理与聊天执行服务。管理员通过 Web 管理台维护插件、AI 供应商、机器人账号和群聊/私聊策略；用户在各平台允许的会话内与机器人交互。代码以 TypeScript 实现，在不同运行平台复用 Hono 应用逻辑。
 
 ## 功能需求与当前状态
 
 | ID | 需求 | 当前实现与验证线索 |
 | --- | --- | --- |
 | FR-01 | 管理员登录后管理应用配置 | 密码验证与签名 session；管理 API 要求有效 session。`src/server/routes/index.ts`、`src/server/auth.ts` 与对应测试。 |
-| FR-02 | 配置字段归属唯一且按层级复用 | 插件定义技术默认；账号持有 QQ 凭据；群管理绑定 OpenID，**身份与对话策略必选且始终可见**，语音/费用/记忆可选。群不能追加身份未授权工具；继承值只读展示，不能写回群记录。`src/shared/plugin-catalog.ts`、`src/server/routes/management.ts`。 |
-| FR-03 | 接收并验证 QQ Webhook 事件 | `/webhook/qq` 按 AppID 定位账号并验证签名，然后将规范化消息交给聊天处理链。`src/server/protocols/qq/webhook.ts`、`signature.ts`。 |
+| FR-02 | 配置字段归属唯一且按层级复用 | 插件定义技术默认；账号按平台协议持有对应凭据；群管理绑定外部会话 ID，**身份与对话策略必选且始终可见**，语音/费用/记忆可选。群不能追加身份未授权工具；继承值只读展示，不能写回群记录。`src/shared/plugin-catalog.ts`、`src/server/routes/management.ts`。 |
+| FR-03 | 接收并验证多平台 Webhook 事件 | QQ 在 `/webhook/qq` 按 AppID 定位账号并验证 Ed25519 签名；OneBot 在 `/webhook/onebot` 按 self_id 定位账号并可选校验 HMAC-SHA1 签名；Telegram 在 `/webhook/telegram` 用 secret_token 定位账号；飞书在 `/webhook/feishu` 校验签名/Token 并解密事件；钉钉在 `/webhook/dingtalk` 校验 timestamp/sign；微信公众号在 `/webhook/wechat` 校验 SHA1 签名。归一化消息进入同一聊天处理链。`src/server/protocols/`。 |
 | FR-04 | 使用兼容 AI API 生成回复并支持工具调用 | 聊天运行时支持多轮工具循环、流式/非流式响应、费用统计和出站消息。`src/server/plugins/chatbot/handler.ts`、`provider.ts`。 |
 | FR-05 | 控制工具、MCP、Skills/Rules 与记忆能力 | 内置/自定义 HTTPS 工具在目录配置、身份授权，群只能禁用或设置审批；MCP 保留管理员 allowlist，危险调用默认 owner 审批；群记忆独立按账号、会话类型和真实 OpenID 存数据库，仅确认内容进入上下文。`src/server/plugins/chatbot/`、`src/server/storage/conversation-memory-repository.ts`。 |
-| FR-06 | 支持媒体、语音、唤醒与会话命令 | 具体能力受 QQ 权限、插件配置、provider/model 能力及平台存储支持约束。`handler.ts`、`media.ts`、`src/platform/cloudflare/qq-do.ts`。 |
+| FR-06 | 支持媒体、语音、唤醒与会话命令 | 具体能力受平台权限、插件配置、provider/model 能力及平台存储支持约束。`handler.ts`、`media.ts`、`src/platform/cloudflare/qq-do.ts`。 |
 | FR-07 | 持久化设置、上下文、日志与计划数据 | Cloudflare D1/KV/DO、EdgeOne Blob/KV、ESA KV adapters；存储不可用时不承诺跨请求持久状态。`src/server/storage/`。 |
 | FR-08 | 面向多个 Serverless 平台复用服务逻辑 | Cloudflare Worker、EdgeOne、ESA 与本地 Node 入口均调用共享 `src/server/app.ts`。平台能力并不完全相同。 |
-| FR-09 | 对敏感管理操作实施鉴权和信任边界 | session/同源校验、凭据加密、QQ 签名检查、工具权限与审批；日志默认关闭。 |
+| FR-09 | 对敏感管理操作实施鉴权和信任边界 | session/同源校验、凭据加密、各平台回调签名校验、工具权限与审批；日志默认关闭。 |
 | FR-10 | 提供中英文管理台和项目文档 | 管理台使用 i18n；VitePress 项目文档提供简体中文与英文。 |
 | FR-11 | 初始化可复用默认配置且不覆盖已有配置 | 默认身份/对话/关闭状态的语音/记忆/费用、内置工具及原有文本/TTS与图像价格按需幂等补齐；已部署站点由受保护接口显式补种。`src/server/storage/d1-setup.ts`、`src/server/routes/setup.ts`。 |
 | FR-12 | 将生图及聊天费用归入同一会话预算 | 生图默认禁用；启用需供应商、模型、每张兜底价及身份授权；有分项 usage 按模态计价，仅总 token 按均价估算，缺用量按兜底价；日志汇总每次调用费用并标识估算。`src/server/plugins/chatbot/image-generation.ts`、`src/server/routes/logs.ts`。 |
@@ -26,8 +26,8 @@ NoneBotMaker 为 QQ 官方机器人提供 Serverless 管理与聊天执行服务
 ## 关键场景验收
 
 1. 未认证请求访问管理 API 时返回未授权；认证后仅能在管理台暴露的配置域执行管理操作。
-2. QQ Webhook 只有通过签名验证、AppID 可定位账号且账号/策略满足条件时才进入聊天处理链。
-3. 管理员添加账号和有效会话策略后，该策略可在会话管理列表查看；历史 QQ 聊天不会自动被发现。
+2. 各平台 Webhook 只有通过签名/Token 校验、账号可定位且账号/策略满足条件时才进入聊天处理链。
+3. 管理员添加账号和有效会话策略后，该策略可在会话管理列表查看；历史聊天不会自动被发现。
 4. 文本聊天无单价时按默认价计费；生图有模态 usage 则据实分项计价，仅有总 token 按平均单价估算，无用量按启用前必填的单张兜底价计费。费用汇入选定费用策略，日志明确标注估算。
 5. MCP 的危险调用默认进入 owner 审批；群管理员可在身份授权范围内设逐工具/全部审批/全部允许，并承受全部允许的审计与外部副作用风险；无法安全原子认领时不开放待审批执行。
 6. 会话记忆需要独立 D1 表；缺失持久化 binding 时明确报不可用，不能以 DO/KV 临时 JSON 假装支持可管理记忆。
@@ -47,12 +47,17 @@ NoneBotMaker 为 QQ 官方机器人提供 Serverless 管理与聊天执行服务
 - 不支持直接导入和执行任意 Python NoneBot 插件、Python driver/adapter 或依赖 Python 运行时的生态。
 - 不提供 Worker 内任意本地 shell、通用本地文件系统或 `pyttsx3` 执行能力。
 - TypeScript dispatcher 是行为移植，不承诺与上游 Python NoneBot 完全等价。
-- 外部 QQ 消息、主动发送/媒体权限、具体 AI/Brave/TTS 供应商行为必须用真实账号和服务验证；mock 测试不能替代联调。
+- 外部平台消息、主动发送/媒体权限、具体 AI/Brave/TTS 供应商行为必须用真实账号和服务验证；mock 测试不能替代联调。
 
 ## 主要来源
 
 - 应用与路由：`src/server/app.ts`、`src/server/routes/index.ts`
 - QQ 协议：`src/server/protocols/qq/`
+- OneBot 协议：`src/server/protocols/onebot/`
+- Telegram 协议：`src/server/protocols/telegram/`
+- 飞书协议：`src/server/protocols/feishu/`
+- 钉钉协议：`src/server/protocols/dingtalk/`
+- 微信公众号协议：`src/server/protocols/wechat/`
 - 聊天链：`src/server/plugins/chatbot/`
 - 持久化：`src/server/storage/`、`src/platform/cloudflare/qq-do.ts`、`migrations/`
 - 运行平台入口：`src/platform/cloudflare/worker.ts`、`src/platform/edgeone/entry.ts`、`src/platform/esa/entry.ts`、`src/server/local.ts`

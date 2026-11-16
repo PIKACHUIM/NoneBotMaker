@@ -83,6 +83,8 @@ async function drain(stateHandle: ReturnType<typeof state>): Promise<void> {
 function account(appId: string): QQAccountContext {
   return {
     appId,
+    protocol: 'qq',
+    credentials: {},
     botSecret: 'bot-secret',
     clientSecret: 'client-secret',
     pluginEnabled: true,

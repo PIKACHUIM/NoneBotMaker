@@ -7,18 +7,18 @@
      │                       │
      └──管理 API + session──> Hono API Router
                               ├──账号/插件/策略管理
-QQ 开放平台 ──Webhook──────> ├──认证/初始化/日志/会话运行路由
-                              └──QQ Webhook 校验与消息归一化
+QQ/OneBot/Telegram/飞书/钉钉/微信 ──Webhook──> ├──认证/初始化/日志/会话运行路由
+                              └──各平台签名校验与消息归一化
                                          │
                                   Chatbot Runtime
                               ├──策略与权限解析
                               ├──AI Provider 请求 / 多轮工具循环
                               ├──MCP / 搜索 / Skills / Memory
-                              └──QQ 回复与媒体发送
+                              └──按协议回复与媒体发送
                                          │
                 ┌────────────────────────┴────────────────────┐
                 │ 持久化适配器                                 │ 外部服务
-                │ D1 / KV / Blob / Durable Object              │ QQ / AI / MCP
+                │ D1 / KV / Blob / Durable Object              │ 各平台 / AI / MCP
                 └─────────────────────────────────────────────┘
 ```
 
@@ -27,18 +27,18 @@ QQ 开放平台 ──Webhook──────> ├──认证/初始化/日�
 ## 请求与模块边界
 
 1. **平台入口**：`src/platform/cloudflare/worker.ts`、`src/platform/edgeone/entry.ts`、`src/platform/esa/entry.ts` 及 `src/server/local.ts` 建立平台环境。Cloudflare Worker 另外处理静态资源、Gateway Durable Object 维护和 scheduled 日志清理。
-2. **共享应用**：`src/server/app.ts` 挂载 `/api` 管理路由与 `/webhook/qq` 回调。应用 middleware 识别 `API_METHOD`，非 Cloudflare 平台拒绝 WebSocket 模式。
+2. **共享应用**：`src/server/app.ts` 挂载 `/api` 管理路由与 `/webhook/qq`、`/webhook/feishu`、`/webhook/dingtalk`、`/webhook/wechat` 回调。应用 middleware 识别 `API_METHOD`，非 Cloudflare 平台拒绝 WebSocket 模式。
 3. **管理 API**：`src/server/routes/index.ts` 统一认证和路由注册；插件、账号、群聊策略、供应商、价格、日志和会话状态由各 route 管理。管理 API 在服务端执行 session、同源与作用域校验。
-4. **QQ 接入**：`src/server/protocols/qq/` 校验签名、按 AppID 定位账号、解析平台事件，并调用 QQ API 回复或发送媒体。
-5. **聊天执行链**：`src/server/plugins/chatbot/runtime.ts` 组装持久化 stores 和 handler；`handler.ts` 解析会话策略与权限，调用 provider，执行允许的工具，然后按 QQ 限制发送回复。
+4. **平台接入**：`src/server/protocols/` 按协议拆分。QQ 校验 Ed25519 签名并按 AppID 定位账号；OneBot 校验可选的 HMAC-SHA1 上报签名并按 self_id 定位账号；Telegram 用 secret_token 定位账号；飞书校验签名、解密事件并按 App ID 定位账号；钉钉用 timestamp/sign 匹配账号；微信公众号用 Token/SHA1 校验。归一化后的消息进入同一聊天处理链。
+5. **聊天执行链**：`src/server/plugins/chatbot/runtime.ts` 组装持久化 stores 和 handler；`handler.ts` 解析会话策略与权限，调用 provider，执行允许的工具，然后通过 `protocols/sender.ts` 按账号协议发送回复。
 6. **数据访问**：业务逻辑通过 repository/store 接口读取配置、上下文、成本、日志和媒体素材；平台 adapter 隔离具体存储 API。
 
 ## 配置与数据作用域
 
 ```text
 插件配置
-  └── 平台账号（QQ AppID/AppSecret，关联插件）
-       └── 群聊/私聊策略（外部 OpenID、模型、权限、提示和预算）
+  └── 平台账号（按协议保存 AppID/AppSecret、Token 等，关联插件）
+       └── 群聊/私聊策略（外部会话 ID、模型、权限、提示和预算）
             └── 会话运行状态 / 上下文 / 会话记忆
 ```
 
@@ -59,20 +59,20 @@ QQ 开放平台 ──Webhook──────> ├──认证/初始化/日�
 
 ## 聊天处理流程
 
-1. 收到 QQ Webhook，验证请求签名并解析账号与事件。
-2. 根据平台账号和群聊/私聊 OpenID 查找已保存策略；校验启用状态、访问白名单和限流条件。
+1. 收到平台 Webhook，按协议验证签名并解析账号与事件。
+2. 根据平台账号和群聊/私聊外部 ID 查找已保存策略；校验启用状态、访问白名单和限流条件。
 3. 读取上下文、提示词、Skills/Rules、角色卡、记忆和模型价格，生成 provider 请求。
 4. 按所选 API 与模型声明的媒体能力转换消息；不支持的附件不会宣称已读。
 5. 处理 AI 文本或工具调用。内置工具受策略和身份控制；外部 MCP 工具由管理员 allowlist 与 owner 审批策略约束。
 6. 收集模型 usage 并累计费用，保存上下文和日志（日志仅在启用时）。
-7. 依据模式、QQ 平台限制和消息分段策略发送文本/媒体回复。
+7. 依据模式、平台限制和消息分段策略发送文本/媒体回复。
 
 Cloudflare WebSocket Gateway 由 Durable Object 保持 QQ Gateway 连接；Webhook 模式在 Cloudflare 也使用相应对象处理持久化队列、去重和出站限流。EdgeOne/ESA 当前只支持 Webhook。
 
 ## 安全信任边界
 
 - **可信配置**：只有经过管理员 session 验证并由后端校验的数据才构成授权策略。
-- **平台输入**：QQ 回调来源必须通过签名验证；OpenID 和消息内容都是外部输入。
+- **平台输入**：各平台回调必须通过对应的签名或 Token 校验；用户与会话 ID、消息内容都是外部输入。
 - **AI 与外部工具**：模型输出、搜索结果、MCP 参数和工具返回值均不可信；远端 `readOnlyHint` 不能独立证明安全。
 - **凭据**：`SYS_PASSWD`、`SYS_SECRET` 和供应商/平台凭据不得写入公开配置。敏感账号/provider 凭据由 `SYS_SECRET` 加密。
 - **副作用**：审批调用需要权限与持久化认领；外发消息、媒体和主动唤醒受会话权限及平台限制约束。

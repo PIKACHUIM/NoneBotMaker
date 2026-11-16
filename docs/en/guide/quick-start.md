@@ -44,15 +44,20 @@ npx wrangler d1 migrations apply <database-name> --remote --config wrangler.json
 
 Migration scripts maintain schema versions. Do not manually drop or recreate production tables.
 
-## 4. Configure the QQ callback
+## 4. Configure platform callbacks
 
-Set this callback URL in the QQ Open Platform:
+Set the callback URL in each platform console:
 
 ```text
-https://<worker-domain>/webhook/qq
+https://<worker-domain>/webhook/qq       QQ official bot
+https://<worker-domain>/webhook/onebot   OneBot v11 (NapCat/Koishi/Red, etc.)
+https://<worker-domain>/webhook/telegram Telegram
+https://<worker-domain>/webhook/feishu   Feishu / Lark
+https://<worker-domain>/webhook/dingtalk DingTalk robot
+https://<worker-domain>/webhook/wechat   WeChat Official Account
 ```
 
-In the admin console, create the chatbot plugin, a QQ account, and a conversation policy. Store QQ account credentials in the protected account settings. Enter the group/private OpenID in the policy and select a provider and model. Preserve QQ signature headers and the original request body at the callback endpoint.
+In the admin console, create the chatbot plugin, a platform account, and a conversation policy. Store credentials in the protected account settings. Enter the group/private external ID in the policy and select a provider and model. Preserve the signature headers and original request body each platform requires. See [Chat platform setup](/en/guide/chat-platforms) for permissions, event subscriptions, and limitations.
 
 ## 5. Verify
 
@@ -61,7 +66,7 @@ curl -fsS https://<worker-domain>/api/health
 curl -fsS https://<worker-domain>/api/setup/status
 ```
 
-Log into the admin console and confirm that the account and policy are saved. Then test with an authorized QQ group and account. Local mocks do not verify QQ permissions, media capabilities, or provider behavior end to end.
+Log into the admin console and confirm that the account and policy are saved. Then test with an authorized group and account. Local mocks do not verify platform permissions, media capabilities, or provider behavior end to end.
 
 ## Cloudflare notes
 

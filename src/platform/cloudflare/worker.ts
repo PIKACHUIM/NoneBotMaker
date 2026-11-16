@@ -50,7 +50,7 @@ export default {
       await maintenance;
       if (automation) await automation;
     }
-    const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname === '/webhook/qq';
+    const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhook/');
     if (isApplicationPath || !env.ASSETS) {
       return app.fetch(request, bindings);
     }

@@ -7,7 +7,7 @@ The path to the first reply is: initialize → Model Capabilities (interfaces, p
 1. On first deployment, initialize the database and default policies/prices with `SYS_SECRET`. Existing deployments may explicitly **Fill Missing Defaults** on the setup page. Both operations only fill missing entries, without overwriting manual prices or policies. The default identity needs a model, default voice has no TTS model, and image generation is disabled.
 2. **Model Capabilities → Interface Management → AI Providers**: enter the compatible API URL, key and actual models; review **Model Prices**. Existing price snapshots comprise 50 text models, two TTS models and four image models. Your gateway's actual bill may differ.
 3. **Policy Management → Identity**: define one reusable **default persona**, base system rules, model and authorized Skills/MCP/Rules/tools. **Dialogue** configures streaming, rounds and output. Group Management requires both an identity and a dialogue policy. **Voice** is optional; **Budget** defines reusable USD limits (`0/0/0` is unlimited); **Memory** configures how to remember, capacity and expiry.
-4. **Runtime Platform → Plugins / Platform Accounts**: enable the chatbot plugin and enter the QQ AppID and AppSecret.
+4. **Runtime Platform → Plugins / Platform Accounts**: enable the chatbot plugin, choose a platform protocol, and enter its credentials (QQ AppID/AppSecret, OneBot self_id/API URL, Telegram Bot Token/Secret Token, Feishu App ID/App Secret, DingTalk AppKey/AppSecret, or WeChat AppID/AppSecret/Token).
 5. **Runtime Platform → Group Management**: bind the account and group/private OpenID, then select identity and dialogue policies. Voice, budget and memory are optional. Enter only group-specific owner, access rules and tool approvals; groups cannot grant tools beyond the identity policy.
 6. **Runtime Platform → Conversation Management**: mention the bot in the group, then inspect connectivity, approvals, records, per-event costs and errors. Manage actual memory entries here, not the memory policy.
 
@@ -16,9 +16,9 @@ A saved policy name alone does not make a provider usable: configure the default
 ## Before you start
 
 1. Deploy and initialize persistent storage; set `SYS_PASSWD` and `SYS_SECRET`.
-2. Prepare the QQ bot AppID/AppSecret and callback configuration in the QQ Open Platform.
+2. Prepare the account credentials and callback configuration for each platform: QQ Open Platform, Feishu Open Platform, DingTalk Open Platform, or the WeChat Official Account console (see [Chat platform setup](/en/guide/chat-platforms)).
 3. Prepare an AI API endpoint and key compatible with the request format used by the project. For MCP, also prepare its endpoint, authentication, and an admin-reviewed tool allowlist.
-4. Identify the group/private OpenID to test. Conversation Management lists saved policies; it does not discover or import chat history.
+4. Identify the group/private external ID to test. Conversation Management lists saved policies; it does not discover or import chat history.
 
 ## Initial setup
 
@@ -36,7 +36,7 @@ A Budget policy supplies reusable daily/monthly/total limits (`0` means unlimite
 
 ### 3. Confirm the chatbot plugin and account
 
-Under **Runtime Platform → Plugins**, confirm the Group Chatbot plugin (`elysia-best/plugin-chatbot`) is enabled. Under **Platform Accounts**, bind the QQ AppID and AppSecret. The server encrypts secrets with `SYS_SECRET`; plan recovery before rotating it.
+Under **Runtime Platform → Plugins**, confirm the Group Chatbot plugin (`elysia-best/plugin-chatbot`) is enabled. Under **Platform Accounts**, choose a platform protocol and enter its credentials. The server encrypts secrets with `SYS_SECRET`; plan recovery before rotating it. See [Chat platform setup](/en/guide/chat-platforms) for callbacks and permissions.
 
 ### 4. Bind the group and choose policies
 
@@ -46,7 +46,7 @@ One group-management record may bind multiple OpenIDs, but conversation history 
 
 ### 5. Verify behavior and billed usage
 
-Check `API_METHOD`: `websocket` uses QQ Gateway and **does not** receive events at `/webhook/qq`; `webhook` requires its QQ callback URL, signature headers and original JSON body. Mention the bot in a bound conversation, then inspect connections, approvals, chat records, costs and errors in Conversation Management. Use `/openid` to confirm QQ identifiers. Do not post keys or private information in public chats.
+Check `API_METHOD`: `websocket` uses QQ Gateway and **does not** receive events at `/webhook/qq`; `webhook` requires its QQ callback URL, signature headers and original JSON body. OneBot, Telegram, Feishu, DingTalk, and WeChat always use their own Webhook callbacks. Mention the bot in a bound conversation (or send a direct WeChat message), then inspect connections, approvals, chat records, costs and errors in Conversation Management. Use `/openid` to confirm user and conversation identifiers. Do not post keys or private information in public chats.
 
 ## Conversation Management and commands
 

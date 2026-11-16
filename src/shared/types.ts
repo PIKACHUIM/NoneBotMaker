@@ -47,6 +47,26 @@ export interface PluginLogFieldDefinition {
   label: LocalizedText;
 }
 
+/** One chat platform a plugin can receive events from. */
+export interface ChatProtocolDefinition {
+  id: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  /** Credential key that uniquely identifies a bot account, e.g. QQ AppID or DingTalk AppKey. */
+  identifierField: string;
+  /** Optional credential key used to locate an account from a callback when the payload has no bot id. */
+  verificationField?: string;
+  /** Credential key holding the protocol's API secret; defaults to appSecret. */
+  secretField?: string;
+  /** OneBot report signing is optional, so its secret must not be required for account resolution. */
+  requiresSecret?: boolean;
+  /** Incoming Webhook path handled by the shared application. */
+  webhookPath: string;
+  credentialFields: PluginFieldDefinition[];
+  /** Whether the protocol can send messages without an inbound event to reply to. */
+  proactive: boolean;
+}
+
 export interface PluginDefinition {
   type: string;
   name: LocalizedText;
@@ -55,7 +75,9 @@ export interface PluginDefinition {
   configFields: PluginFieldDefinition[];
   accountFields: PluginFieldDefinition[];
   groupFields: PluginFieldDefinition[];
+  /** Default protocol credentials, kept for plugin records created before protocol selection existed. */
   credentialFields: PluginFieldDefinition[];
+  protocolDefinitions?: ChatProtocolDefinition[];
   logFields?: PluginLogFieldDefinition[];
 }
 
@@ -346,6 +368,8 @@ export interface NormalizedMessage {
   text: string;
   mentionsBot: boolean;
   receivedAt: number;
+  /** Short-lived platform reply handle, e.g. DingTalk sessionWebhook. */
+  replyToken?: string;
 }
 
 export interface DatabaseSetupStatus {

@@ -260,7 +260,7 @@ describe('persistent chatbot cost accounting', () => {
       return Response.json({ choices: [{ message: { content: 'done' } }] });
     });
     const handler = createStoredChatbotHandler(bindings, { ...createPersistentChatbotStores(bindings), sendReply: vi.fn(async () => undefined), fetch: fetchImpl });
-    const account = { appId: 'app', appSecret: 'app-secret', pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
+    const account = { appId: 'app', appSecret: 'app-secret', protocol: 'qq', credentials: {}, pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
     await handler(account, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'message', accountId: 'account-1', botId: 'app', groupId: 'external-group-1', userId: 'user', text: 'hello', mentionsBot: true, receivedAt: Date.now() });
     expect(requests[0].max_completion_tokens).toBe(2048);
   });
@@ -288,7 +288,7 @@ describe('persistent chatbot cost accounting', () => {
     });
     const stores = createPersistentChatbotStores(bindings);
     const handler = createStoredChatbotHandler(bindings, { ...stores, fetch: fetchImpl, sendReply: vi.fn(async () => { throw new Error('Unexpected final text send'); }), sendMedia: (account, targetId, id, media, options) => sendQQMedia(account, targetId, id, media, options, fetchImpl) });
-    const account = { appId: 'tts-runtime-app', appSecret: 'tts-runtime-secret', pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
+    const account = { appId: 'tts-runtime-app', appSecret: 'tts-runtime-secret', protocol: 'qq', credentials: {}, pluginEnabled: true, account: { id: 'account-1', pluginId: 'plugin-1', name: 'bot', protocol: 'qq', enabled: true, credentials: {}, config: {}, createdAt: '', updatedAt: '' } };
     await handler(account, { eventType: 'GROUP_AT_MESSAGE_CREATE', id: 'message', accountId: 'account-1', botId: account.appId, groupId: 'external-group-1', userId: 'user', text: '请用语音回复', mentionsBot: true, receivedAt: Date.now() });
     const upload = requests.find(({ url }) => url.endsWith('/files'))!;
     expect(upload.body).toMatchObject({ file_type: 3, srv_send_msg: false, file_data: 'SUQzAA==' });

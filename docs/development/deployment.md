@@ -11,7 +11,7 @@
 | `API_METHOD` | `webhook`（默认）或 `websocket`；WebSocket Gateway 仅 Cloudflare 支持。 |
 | `LOG_RECORD` | 是否记录对话日志，默认关闭。 |
 
-QQ AppID/AppSecret 和 AI Provider Key 在管理员登录后配置到相应账号/供应商，不应写在公开环境变量模板或部署命令参数中。
+各平台 AppID/AppSecret、Token 和 AI Provider Key 在管理员登录后配置到相应账号/供应商，不应写在公开环境变量模板或部署命令参数中。
 
 ## Cloudflare Workers
 
@@ -67,7 +67,7 @@ npm run build:esa
 
 1. 检查 `/api/health` 与 `/api/setup/status`。
 2. 确认 schema 已就绪、持久化 binding 可写读、管理员登录成功。
-3. 核对 QQ callback URL、签名 headers、账号启用状态与会话 OpenID。
+3. 核对各平台 callback URL、签名 headers/Token、账号启用状态与会话外部 ID。
 4. 使用受控测试会话验证 AI provider、用量和回复权限。
 5. 启用日志前确认访问权限、保留策略和清理调度；检查账单、配额和错误率。
 

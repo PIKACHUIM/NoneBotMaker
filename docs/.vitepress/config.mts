@@ -5,6 +5,7 @@ const zhSidebar = [
     text: '开始使用',
     items: [
       { text: '快速部署', link: '/guide/quick-start' },
+      { text: '聊天平台接入', link: '/guide/chat-platforms' },
       { text: '管理台使用教程', link: '/guide/user-guide' },
     ],
   },
@@ -30,6 +31,7 @@ const enSidebar = [
     text: 'Get Started',
     items: [
       { text: 'Quick Deployment', link: '/en/guide/quick-start' },
+      { text: 'Chat Platforms', link: '/en/guide/chat-platforms' },
       { text: 'Admin Console Guide', link: '/en/guide/user-guide' },
     ],
   },
@@ -52,7 +54,7 @@ const enSidebar = [
 
 export default defineConfig({
   title: 'NoneBotMaker',
-  description: '面向 QQ 官方机器人的 Serverless 管理与聊天服务',
+  description: '面向 QQ、OneBot、Telegram、飞书、钉钉与微信公众号的 Serverless 管理与聊天服务',
   cleanUrls: true,
   lastUpdated: true,
   locales: {
@@ -64,6 +66,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: '快速部署', link: '/guide/quick-start' },
+          { text: '聊天平台', link: '/guide/chat-platforms' },
           { text: '使用教程', link: '/guide/user-guide' },
           { text: '项目设计', link: '/design/architecture' },
           { text: 'GitHub', link: 'https://github.com/PIKACHUIM/NoneBotMaker' },
@@ -79,6 +82,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: 'Quick Deploy', link: '/en/guide/quick-start' },
+          { text: 'Chat Platforms', link: '/en/guide/chat-platforms' },
           { text: 'User Guide', link: '/en/guide/user-guide' },
           { text: 'Architecture', link: '/en/design/architecture' },
           { text: 'GitHub', link: 'https://github.com/PIKACHUIM/NoneBotMaker' },

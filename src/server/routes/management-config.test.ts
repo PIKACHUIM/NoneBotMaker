@@ -137,6 +137,15 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
+    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram']);
+    expect(definition.protocolDefinitions?.map((protocol) => [protocol.id, protocol.credentialFields.map((field) => field.key)])).toEqual([
+      ['qq', ['appId', 'appSecret']],
+      ['feishu', ['appId', 'appSecret', 'verificationToken', 'encryptKey']],
+      ['dingtalk', ['appKey', 'appSecret', 'robotCode']],
+      ['wechat', ['appId', 'appSecret', 'token']],
+      ['onebot', ['selfId', 'apiBaseUrl', 'accessToken', 'secret']],
+      ['telegram', ['botToken', 'botId', 'secretToken']],
+    ]);
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
     expect(definition.groupFields.some((field) => field.key.startsWith('bridge_voice'))).toBe(false);
@@ -604,5 +613,66 @@ describe('capability policies', () => {
     expect(resolveGroupIdentity({ ...base, providerId: 'provider-2', model: 'local-model' }, identity))
       .toMatchObject({ providerId: 'provider-2', model: 'local-model', reasoningEffort: 'high', systemPrompt: 'POLICY' });
     expect(() => resolveGroupIdentity(base, undefined)).toThrow('identity_policy_unavailable');
+  });
+});
+
+describe('chat protocol credentials', () => {
+  it('accepts Feishu credentials and redacts only that protocol’s secrets', async () => {
+    const setup = configuredApp();
+    const created = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'feishu', name: 'Feishu Bot',
+      credentials: { appId: 'cli_x', appSecret: 'secret', verificationToken: 'token', encryptKey: '' },
+    });
+    expect(created.status).toBe(201);
+    const data = (await json(created)).data as JsonObject;
+    expect(data.credentials).toMatchObject({
+      appId: 'cli_x', appSecret: '********', verificationToken: '********', encryptKey: '', configured: true, masked: true,
+    });
+    const stored = JSON.parse(setup.values.get(`nonebotmaker:records:accounts:${data.id as string}`)!) as JsonObject;
+    expect((await decryptSecrets(stored, setup.bindings)).credentials).toEqual({
+      appId: 'cli_x', appSecret: 'secret', verificationToken: 'token', encryptKey: '',
+    });
+  });
+
+  it('requires protocol-specific fields and rejects unknown protocols', async () => {
+    const setup = configuredApp();
+    const missingToken = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'feishu', name: 'Feishu', credentials: { appId: 'cli_x', appSecret: 'secret' },
+    });
+    expect(missingToken.status).toBe(400);
+    expect(await json(missingToken)).toEqual({ error: 'missing_verificationToken' });
+    const unsupported = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'slack', name: 'Slack', credentials: { appId: 'x', appSecret: 'secret' },
+    });
+    expect(unsupported.status).toBe(400);
+    expect(await json(unsupported)).toEqual({ error: 'unsupported_protocol' });
+  });
+
+  it('rejects duplicate DingTalk app keys', async () => {
+    const setup = configuredApp();
+    expect((await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'dingtalk', name: 'DingTalk 1', credentials: { appKey: 'ding-key', appSecret: 'secret' },
+    })).status).toBe(201);
+    const duplicate = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'dingtalk', name: 'DingTalk 2', credentials: { appKey: 'ding-key', appSecret: 'other' },
+    });
+    expect(duplicate.status).toBe(409);
+    expect(await json(duplicate)).toEqual({ error: 'duplicate_appKey' });
+  });
+
+  it('derives the Telegram bot ID and validates OneBot API URLs', async () => {
+    const setup = configuredApp();
+    const telegram = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'telegram', name: 'Telegram',
+      credentials: { botToken: '123456789:AA-test-token', secretToken: 'tg-secret' },
+    });
+    expect(telegram.status).toBe(201);
+    expect((await json(telegram)).data).toMatchObject({ credentials: { botId: '123456789', botToken: '********' } });
+    const invalidOneBot = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'onebot', name: 'OneBot',
+      credentials: { selfId: '10001', apiBaseUrl: 'file:///etc/passwd' },
+    });
+    expect(invalidOneBot.status).toBe(400);
+    expect(await json(invalidOneBot)).toEqual({ error: 'invalid_apiBaseUrl' });
   });
 });

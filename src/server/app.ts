@@ -1,10 +1,25 @@
 import { Hono } from 'hono';
 import type { RuntimeBindings } from '../shared/types';
-import { replyToQQMessage, sendQQMedia } from './protocols/qq/api';
 import { resolveQQAccountByAppId } from './protocols/qq/accounts';
 import { createQQWebhookRouter } from './protocols/qq/webhook';
+import { createFeishuWebhookRouter } from './protocols/feishu/webhook';
+import { createDingTalkWebhookRouter } from './protocols/dingtalk/webhook';
+import { createWeChatWebhookRouter } from './protocols/wechat/webhook';
+import { createOneBotWebhookRouter } from './protocols/onebot/webhook';
+import { createTelegramWebhookRouter } from './protocols/telegram/webhook';
+import type { ChatAccountContext, ChatPlatformMessage } from './protocols/types';
+import { sendChatMedia, sendChatText } from './protocols/sender';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from './plugins/chatbot/runtime';
 import { createApiRouter } from './routes';
+
+function handleInboundMessage(account: ChatAccountContext, message: ChatPlatformMessage, bindings: RuntimeBindings): Promise<void> {
+  const handler = createStoredChatbotHandler(bindings, {
+    ...createPersistentChatbotStores(bindings),
+    sendReply: sendChatText,
+    sendMedia: sendChatMedia,
+  });
+  return handler(account, message);
+}
 
 export function createApp() {
   const app = new Hono<{ Bindings: RuntimeBindings }>();
@@ -22,15 +37,13 @@ export function createApp() {
   app.route('/api', createApiRouter());
   app.route('/', createQQWebhookRouter({
     resolveAccount: resolveQQAccountByAppId,
-    handleMessage: async (account, message, bindings) => {
-      const handler = createStoredChatbotHandler(bindings, {
-        ...createPersistentChatbotStores(bindings),
-        sendReply: replyToQQMessage,
-        sendMedia: sendQQMedia,
-      });
-      await handler(account, message);
-    },
+    handleMessage: handleInboundMessage,
   }));
+  app.route('/', createFeishuWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createDingTalkWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createWeChatWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createOneBotWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createTelegramWebhookRouter({ handleMessage: handleInboundMessage }));
   return app;
 }
 

@@ -53,4 +53,4 @@ The dev server binds to `127.0.0.1`. Static output is written to `docs/.vitepres
 
 ## Configuration safety
 
-Do not commit `.dev.vars`, real provider/QQ credentials, platform tokens, or production database IDs. Use isolated resources and dummy credentials for tests. Before touching real production resources, migrations, or data, confirm the target environment, backup, and rollback plan.
+Do not commit `.dev.vars`, real provider/platform credentials or tokens, or production database IDs. Use isolated resources and dummy credentials for tests. Before touching real production resources, migrations, or data, confirm the target environment, backup, and rollback plan.

@@ -2,9 +2,10 @@ import type { ExtensionRecord, GroupRecord, JsonObject, RuntimeBindings, Schedul
 import { configIdSet } from '../../shared/plugin-catalog';
 import { nextCronOccurrence } from '../../shared/schedules';
 import { renderScheduleText } from '../../shared/commands';
-import { replyToQQGroup } from '../protocols/qq/api';
-import { resolveQQAccountById } from '../protocols/qq/accounts';
-import type { QQAccountContext, QQGroupMessage } from '../protocols/qq/types';
+import type { ChatAccountContext, ChatPlatformMessage } from '../protocols/types';
+import { resolveChatAccountById } from '../protocols/accounts';
+import { sendChatMedia, sendChatText, sendProactiveChatText } from '../protocols/sender';
+import { createPersistentChatbotStores, createStoredChatbotHandler } from '../plugins/chatbot/runtime';
 import { createRepository, type StoredRecord } from '../storage/repository';
 import { decryptSecrets } from '../storage/secrets';
 import { runExtension, type WorkerLoaderLike } from './extensions';
@@ -43,36 +44,46 @@ function groupConversationType(group: GroupRecord): 'group' | 'private' {
   return group.conversationType === 'private' ? 'private' : 'group';
 }
 
-async function sendProactive(account: QQAccountContext, group: GroupRecord, text: string): Promise<void> {
+async function sendProactive(account: ChatAccountContext, group: GroupRecord, text: string): Promise<void> {
   const target = group.externalId.split(',')[0]?.trim();
   if (!target) throw new Error('Schedule target conversation has no external id.');
   const conversationType = groupConversationType(group);
   for (const [index, part] of splitText(text).entries()) {
-    await replyToQQGroup(account, target, '', part, fetch, index + 1, conversationType, true);
+    await sendProactiveChatText(account, target, conversationType, part, index + 1);
   }
 }
 
-async function enqueueQQMessage(bindings: RuntimeBindings, account: QQAccountContext, group: GroupRecord, message: QQGroupMessage): Promise<void> {
-  const namespace = bindings.QQ_GATEWAY_SESSIONS as QQGatewayNamespaceLike | undefined;
-  if (!namespace) throw new Error('QQ_GATEWAY_SESSIONS 未配置，无法投递定时消息。');
-  if (typeof namespace.idFromName !== 'function' || typeof namespace.get !== 'function') throw new Error('QQ_GATEWAY_SESSIONS 绑定无效。');
-  const stub = namespace.get(namespace.idFromName(account.account.id));
-  const response = await stub.fetch(new Request('https://qq-gateway.internal/enqueue', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ accountId: account.account.id, message }),
-  }));
-  if (!response.ok) throw new Error(`QQ 消息投递失败（${response.status}）。`);
+async function enqueueMessage(bindings: RuntimeBindings, account: ChatAccountContext, group: GroupRecord, message: ChatPlatformMessage): Promise<void> {
+  const namespace = account.protocol === 'qq' ? bindings.QQ_GATEWAY_SESSIONS as QQGatewayNamespaceLike | undefined : undefined;
+  if (namespace) {
+    if (typeof namespace.idFromName !== 'function' || typeof namespace.get !== 'function') throw new Error('QQ_GATEWAY_SESSIONS 绑定无效。');
+    const stub = namespace.get(namespace.idFromName(account.account.id));
+    const response = await stub.fetch(new Request('https://qq-gateway.internal/enqueue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accountId: account.account.id, message }),
+    }));
+    if (!response.ok) throw new Error(`QQ 消息投递失败（${response.status}）。`);
+    return;
+  }
+  const handler = createStoredChatbotHandler(bindings, {
+    ...createPersistentChatbotStores(bindings),
+    sendReply: sendChatText,
+    sendMedia: sendChatMedia,
+  });
+  await handler(account, message);
 }
 
-function scheduledMessage(account: QQAccountContext, group: GroupRecord, at: number, text: string, wake: boolean, ownerId: string): QQGroupMessage {
+function scheduledMessage(account: ChatAccountContext, group: GroupRecord, at: number, text: string, wake: boolean, ownerId: string): ChatPlatformMessage {
   const conversationType = groupConversationType(group);
   const eventId = `schedule:${crypto.randomUUID()}`;
   return {
     id: eventId, eventId, accountId: account.account.id, botId: account.appId,
     groupId: group.externalId.split(',')[0]?.trim() ?? '', userId: ownerId,
     text: text.slice(0, 8000), mentionsBot: true, receivedAt: at,
-    eventType: conversationType === 'private' ? 'C2C_MESSAGE_CREATE' : 'GROUP_AT_MESSAGE_CREATE',
+    eventType: account.protocol === 'qq'
+      ? conversationType === 'private' ? 'C2C_MESSAGE_CREATE' : 'GROUP_AT_MESSAGE_CREATE'
+      : 'scheduled',
     conversationType,
     ...(wake ? { isWake: true, wakeReason: text.slice(0, 1000) } : {}),
   };
@@ -83,13 +94,13 @@ function ownerId(group: GroupRecord): string {
   return [...owners][0] ?? '';
 }
 
-async function loadScheduleTarget(bindings: RuntimeBindings, schedule: ScheduleRecord): Promise<{ account: QQAccountContext; group: GroupRecord }> {
+async function loadScheduleTarget(bindings: RuntimeBindings, schedule: ScheduleRecord): Promise<{ account: ChatAccountContext; group: GroupRecord }> {
   const repository = createRepository(bindings);
   const stored = await repository.get('groups', schedule.config.groupId);
   if (!stored) throw new Error('定时任务目标会话不存在。');
   const group = await decryptSecrets(stored as JsonObject, bindings) as unknown as GroupRecord;
   if (!group.enabled) throw new Error('定时任务目标会话已停用。');
-  const account = await resolveQQAccountById(group.accountId, bindings);
+  const account = await resolveChatAccountById(group.accountId, bindings);
   if (!account) throw new Error('定时任务目标会话的账号不可用。');
   return { account, group };
 }
@@ -107,11 +118,11 @@ export async function executeSchedule(bindings: RuntimeBindings, schedule: Sched
       await sendProactive(account, group, rendered);
     } else if (schedule.config.action === 'prompt') {
       if (!rendered) throw new Error('定时提示词为空。');
-      await enqueueQQMessage(bindings, account, group, scheduledMessage(account, group, at, rendered, true, ownerId(group)));
+      await enqueueMessage(bindings, account, group, scheduledMessage(account, group, at, rendered, true, ownerId(group)));
     } else if (schedule.config.action === 'command') {
       const command = rendered.startsWith('/') ? rendered : `/${rendered}`;
       if (command === '/') throw new Error('定时命令为空。');
-      await enqueueQQMessage(bindings, account, group, scheduledMessage(account, group, at, command, false, ownerId(group) || 'schedule'));
+      await enqueueMessage(bindings, account, group, scheduledMessage(account, group, at, command, false, ownerId(group) || 'schedule'));
     } else if (schedule.config.action === 'extension') {
       const repository = createRepository(bindings);
       const extension = schedule.config.extensionId ? await repository.get('extensions', schedule.config.extensionId) : null;

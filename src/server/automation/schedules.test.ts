@@ -8,7 +8,7 @@ const state = vi.hoisted(() => {
     group: { id: 'group-1', accountId: 'account-1', externalId: 'group-openid', name: 'Test', enabled: true,
       conversationType: 'group', config: { bridge_owner_ids: 'owner' } } as unknown as GroupRecord,
     reply: vi.fn(async () => undefined),
-    resolveAccount: vi.fn(async () => ({ account: { id: 'account-1' }, appId: 'app', pluginEnabled: true })),
+    resolveAccount: vi.fn(async () => ({ account: { id: 'account-1' }, protocol: 'qq', appId: 'app', credentials: {}, pluginEnabled: true })),
   };
 });
 
@@ -22,8 +22,12 @@ vi.mock('../storage/repository', () => ({
   }),
 }));
 vi.mock('../storage/secrets', () => ({ decryptSecrets: async (value: unknown) => value }));
-vi.mock('../protocols/qq/accounts', () => ({ resolveQQAccountById: state.resolveAccount }));
-vi.mock('../protocols/qq/api', () => ({ replyToQQGroup: state.reply }));
+vi.mock('../protocols/accounts', () => ({ resolveChatAccountById: state.resolveAccount }));
+vi.mock('../protocols/sender', () => ({
+  sendProactiveChatText: state.reply,
+  sendChatText: vi.fn(async () => undefined),
+  sendChatMedia: vi.fn(async () => undefined),
+}));
 
 import { runDueSchedules, runSchedule } from './schedules';
 
@@ -55,7 +59,7 @@ describe('schedule runner', () => {
     const results = await runDueSchedules(bindings, 1_800_000_000_000);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ id: 'schedule-1', status: 'success' });
-    expect(state.reply).toHaveBeenCalledWith(expect.anything(), 'group-openid', '', 'hello Daily', fetch, 1, 'group', true);
+    expect(state.reply).toHaveBeenCalledWith(expect.anything(), 'group-openid', 'group', 'hello Daily', 1);
     expect(state.stored.get('schedule-1')).toMatchObject({ lastStatus: 'success', lastRunAt: new Date(1_800_000_000_000).toISOString() });
   });
 

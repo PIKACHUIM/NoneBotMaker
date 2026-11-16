@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { GroupRecord, JsonObject, RuntimeBindings } from '../../shared/types';
 import { configIdSet, configString, conversationIdList, matchesConversationId, primaryConversationId } from '../../shared/plugin-catalog';
-import type { QQGroupMessage } from '../protocols/qq/types';
-import { resolveQQAccountById } from '../protocols/qq/accounts';
+import type { ChatPlatformMessage } from '../protocols/types';
+import { resolveChatAccountById } from '../protocols/accounts';
 import { createRepository } from '../storage/repository';
 import { readBoolean } from '../env';
 import { createConversationLogRepository, sanitizeLogDetails } from '../storage/conversation-log-repository';
@@ -83,7 +83,7 @@ async function executeConsoleApproval(
   stores: ReturnType<typeof createPersistentChatbotStores>,
 ): Promise<unknown> {
   if (!input.approvalId || !['approve', 'reject'].includes(input.decision ?? '')) throw new ApiError(400, 'invalid_approvalDecision');
-  const account = await resolveQQAccountById(group.accountId, bindings);
+  const account = await resolveChatAccountById(group.accountId, bindings);
   if (!account) throw new ApiError(404, 'account_unavailable');
   const repository = createRepository(bindings);
   const resolved = applyGroupPolicies(group, await loadPolicyLayers(repository, group as unknown as JsonObject), account.pluginConfig);
@@ -94,7 +94,7 @@ async function executeConsoleApproval(
     ...stores,
     sendReply: async (_bot, _target, _messageId, content) => { messages.push(content); },
   });
-  const message: QQGroupMessage = {
+  const message: ChatPlatformMessage = {
     id: `console-${crypto.randomUUID()}`, eventId: `console-${crypto.randomUUID()}`, accountId: group.accountId,
     botId: account.appId, groupId: externalId, userId: ownerId, text: `/${input.decision} ${input.approvalId}`,
     mentionsBot: true, receivedAt: Date.now(), conversationType: group.conversationType ?? 'group',
