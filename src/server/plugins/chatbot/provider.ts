@@ -16,11 +16,14 @@ interface ProviderResponse {
 }
 
 const MAX_STREAM_BYTES = 2 * 1024 * 1024;
+// 长上下文和工具定义会让模型首包明显变慢；队列已异步承接 QQ 回调，不再受 20 秒 webhook 限制。
+const DEFAULT_CHAT_TIMEOUT_MS = 60_000;
 
 export async function completeOpenAICompatible(
   provider: ProviderRecord,
   request: ProviderChatRequest,
   fetchImpl: typeof fetch = fetch,
+  timeoutMs = DEFAULT_CHAT_TIMEOUT_MS,
 ): Promise<ProviderChatResult> {
   if (!provider.enabled || !provider.apiKey) throw new Error('Chat provider is unavailable.');
   const baseUrl = publicHttpsUrl(provider.baseUrl);
@@ -37,7 +40,7 @@ export async function completeOpenAICompatible(
       ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
       ...(request.maxTokens !== undefined ? { max_completion_tokens: request.maxTokens } : {}),
     }),
-  }, fetchImpl);
+  }, fetchImpl, timeoutMs);
   if (!response.ok || response.redirected) throw new Error(`Chat provider request failed (${response.status}).`);
   const result: ProviderResponse = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/event-stream'
     ? await readCompletionStream(response) : parseResponse(await boundedText(response));

@@ -40,6 +40,30 @@ describe('conversation cost aggregation', () => {
     expect(turn.content).toBe('draw');
     expect(turn.details?.reply).toBe('sent');
   });
+  it('keeps retry diagnostics without marking a successfully replied turn as failed', () => {
+    const base = { accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1', eventId: 'retry-event', expiresAt: 9999999 };
+    const entries: ConversationLog[] = [
+      { ...base, id: 'incoming', direction: 'in', content: 'hello', createdAt: 1 },
+      { ...base, id: 'timeout-1', direction: 'out', content: '', status: 'error', createdAt: 2, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout' } },
+      { ...base, id: 'timeout-2', direction: 'out', content: '', status: 'error', createdAt: 3, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout' } },
+      { ...base, id: 'reply', direction: 'out', content: 'hello back', status: 'sent', createdAt: 4 },
+    ];
+    const [turn] = mergeConversationTurns(entries);
+    expect(turn.status).toBe('sent');
+    expect(turn.details?.error).toBeUndefined();
+    expect(turn.details?.retryErrors).toEqual(['The operation was aborted due to timeout', 'The operation was aborted due to timeout']);
+    expect(turn.details?.reply).toBe('hello back');
+  });
+
+  it('keeps failed turns failed when no reply was sent', () => {
+    const base = { accountId: 'account-1', groupId: 'group-1', groupExternalId: 'external-1', userId: 'user-1', eventId: 'failed-event', expiresAt: 9999999 };
+    const [turn] = mergeConversationTurns([
+      { ...base, id: 'incoming', direction: 'in', content: 'hello', createdAt: 1 },
+      { ...base, id: 'error', direction: 'out', content: '', status: 'error', createdAt: 2, details: { error: 'The operation was aborted due to timeout', errorCode: 'timeout' } },
+    ]);
+    expect(turn.status).toBe('error');
+    expect(turn.details?.error).toBe('The operation was aborted due to timeout');
+  });
 });
 
 describe('conversation log filtering', () => {

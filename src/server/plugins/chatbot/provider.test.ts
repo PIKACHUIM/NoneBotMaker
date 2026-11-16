@@ -33,6 +33,14 @@ describe('OpenAI compatible JSON responses', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('allows long model responses beyond the default network timeout', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      await completeOpenAICompatible(provider, request, mockFetch(json({ choices: [{ message: { content: 'ok' } }] })));
+      expect(timeout).toHaveBeenCalledWith(60_000);
+    } finally { timeout.mockRestore(); }
+  });
+
   it('appends /v1 when the provider base URL has no path', async () => {
     const fetchImpl = mockFetch(json({ choices: [{ message: { content: 'ok' } }] }));
     await completeOpenAICompatible({ ...provider, baseUrl: 'https://api.vendor.example' }, request, fetchImpl);

@@ -53,17 +53,24 @@ export function mergeConversationTurns(items: ConversationLog[]): ConversationLo
     }
   }
   return [...turns.values()]
-    .map((turn) => ({
-      ...turn.base,
-      content: turn.inputs.length ? turn.inputs.join('\n') : turn.base.content,
-      status: turn.errors.length ? 'error' : turn.replies.length ? 'sent' : turn.status ?? turn.base.status ?? 'received',
-      details: {
-        ...turn.details,
-        ...(turn.charges.length ? { cost: turn.charges.reduce((sum, charge) => sum + charge.cost, 0), charges: turn.charges } : {}),
-        ...(turn.replies.length ? { reply: turn.replies.join('\n') } : {}),
-        ...(turn.errors.length ? { error: turn.errors.join('\n') } : {}),
-      },
-    }))
+    .map((turn) => {
+      const replied = turn.replies.length > 0;
+      const retryErrors = replied && turn.errors.length ? turn.errors : undefined;
+      const details = { ...turn.details };
+      if (replied) { delete details.error; delete details.errorCode; }
+      return {
+        ...turn.base,
+        content: turn.inputs.length ? turn.inputs.join('\n') : turn.base.content,
+        status: replied ? 'sent' : turn.errors.length ? 'error' : turn.status ?? turn.base.status ?? 'received',
+        details: {
+          ...details,
+          ...(turn.charges.length ? { cost: turn.charges.reduce((sum, charge) => sum + charge.cost, 0), charges: turn.charges } : {}),
+          ...(replied ? { reply: turn.replies.join('\n') } : {}),
+          ...(turn.errors.length && !replied ? { error: turn.errors.join('\n') } : {}),
+          ...(retryErrors ? { retryErrors } : {}),
+        },
+      };
+    })
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
