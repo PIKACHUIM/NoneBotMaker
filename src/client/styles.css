@@ -261,18 +261,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .workspace-label { height: 57px; padding: 0 23px; display: flex; align-items: center; gap: 9px; color: var(--muted-strong); font: 8px var(--mono); letter-spacing: .1em; }
 .workspace-dot { width: 5px; height: 5px; background: var(--accent); }
 .admin-menu { flex: 1; border-inline-end: 0 !important; background: transparent !important; padding: 5px 10px; }
-.admin-menu .ant-menu-item { height: 43px; margin: 3px 0; padding-inline: 13px !important; display: flex; align-items: center; gap: 2px; border-radius: 2px; color: var(--text-soft); font-size: 12px; }
+.admin-menu .ant-menu-item { height: 40px; margin-block: 1px; display: flex; align-items: center; gap: 2px; border-radius: 2px; color: var(--text-soft); font-size: 13px; }
+.admin-menu > .ant-menu-item { height: 44px; margin-block: 4px; padding-inline: 13px !important; color: var(--text-body); font-size: 14px; font-weight: 500; }
 .admin-menu .ant-menu-item .anticon { font-size: 15px; }
-.admin-menu .ant-menu-item-selected { color: var(--accent-strong) !important; background: var(--accent-surface-strong) !important; }
+.admin-menu > .ant-menu-item .anticon, .admin-menu > .ant-menu-submenu > .ant-menu-submenu-title .anticon { font-size: 16px; }
+.admin-menu .ant-menu-item-selected { color: var(--accent-strong) !important; background: var(--accent-surface) !important; }
 .admin-menu .ant-menu-item-selected::after { border-inline-end: 2px solid var(--accent) !important; }
 .admin-menu .ant-menu-item:hover { color: var(--text-body) !important; background: var(--surface-hover) !important; }
 .admin-menu { min-height: 0; overflow-y: auto; }
-.admin-menu .ant-menu-submenu-title { margin-block: 2px; color: var(--text-body); font-size: 12px; }
-.admin-menu .ant-menu-submenu .ant-menu-submenu .ant-menu-submenu-title { color: var(--muted); font-size: 11px; }
+.admin-menu .ant-menu-submenu-title { margin-block: 2px; color: var(--text-body); font-size: 13px; font-weight: 500; }
+.admin-menu > .ant-menu-submenu > .ant-menu-submenu-title { height: 44px; margin-block: 4px; padding-inline: 13px !important; font-size: 14px; }
+.admin-menu > .ant-menu-submenu > .ant-menu-sub > .ant-menu-submenu > .ant-menu-submenu-title { height: 40px; margin-block: 3px; color: var(--muted); font-size: 13px; }
 .admin-menu .ant-menu-sub { background: transparent !important; }
-.admin-menu .ant-menu-sub .ant-menu-item { height: 36px; margin-block: 0; font-size: 11px; }
-.admin-menu .ant-menu-sub .ant-menu-sub .ant-menu-item { font-size: 10px; }
-.admin-menu .ant-menu-submenu-selected > .ant-menu-submenu-title { color: var(--accent-strong) !important; }
+.admin-menu .ant-menu-sub .ant-menu-item { height: 38px; margin-block: 1px; font-size: 13px; }
+.admin-menu .ant-menu-sub .ant-menu-sub .ant-menu-item { height: 36px; font-size: 13px; }
+.admin-menu > .ant-menu-submenu-selected > .ant-menu-submenu-title { color: var(--accent-strong) !important; }
 .sider-bottom { padding: 14px 16px 15px; }
 .sider-status { display: flex; align-items: center; gap: 9px; padding: 11px 8px; border: 1px solid var(--line); color: var(--text-soft); font-size: 10px; }
 .sider-status-meta { margin-left: auto; color: var(--accent); font: 8px var(--mono); }
