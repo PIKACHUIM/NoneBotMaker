@@ -906,7 +906,7 @@ function ToolsPanel({ data, providers, prices, onRefresh, onError }: { data: Lib
           <Form.Item name={['config', 'providerId']} label={tr('AI 供应商')} rules={[{ required: true, message: tr('请选择AI供应商') }]}><Select options={providers.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
           <Form.Item name={['config', 'model']} label={tr('视频模型')} rules={[{ required: true, message: tr('请选择模型') }]}><Select showSearch options={(providers.find((item) => item.id === providerId)?.models ?? []).map((model) => ({ value: model, label: model }))} /></Form.Item>
           <div className="form-grid two-cols">
-            <Form.Item name={['config', 'protocol']} label={tr('接口协议')}><Select options={[{ value: 'minimax', label: tr('MiniMax 官方异步任务') }, { value: 'openai', label: tr('OpenAI 兼容 /videos') }]} /></Form.Item>
+            <Form.Item name={['config', 'protocol']} label={tr('接口协议')}><Select options={[{ value: 'minimax', label: tr('MiniMax 官方异步任务') }, { value: 'openai', label: tr('OpenAI 兼容 /videos') }, { value: 'veo', label: tr('Google Veo 长任务') }]} /></Form.Item>
             <Form.Item name={['config', 'resolution']} label={tr('默认分辨率')}><Select options={[{ value: '768P', label: '768P' }, { value: '1080P', label: '1080P / 2K' }]} /></Form.Item>
           </div>
           <div className="form-grid two-cols">
@@ -1589,6 +1589,8 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
   const approvalMode = Form.useWatch('toolApprovalMode', { form, preserve: true }) as GroupRecord['toolApprovalMode'];
   const whitelistEnabled = Boolean(Form.useWatch('whitelistEnabled', { form, preserve: true }));
   const watchedConfig = Form.useWatch('config', { form, preserve: true }) as JsonObject | undefined;
+  const understandingProviderId = Form.useWatch(['config', 'media_understanding_provider_id'], { form, preserve: true }) as string | undefined;
+  const understandingProvider = providers.find((item) => item.id === understandingProviderId);
   const identityPolicies = policies.filter((item) => item.type === 'identity' && item.enabled);
   const defaultPolicyFor = (type: PolicyType) => policies.find((item) => item.id === `default-${type}` && item.enabled)
     ?? policies.find((item) => item.type === type && item.enabled && item.name.includes('默认'));
@@ -1617,7 +1619,13 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
       whitelistEnabled: editing?.whitelistEnabled ?? false,
       whitelistText: editing?.whitelistUserIds.join('\n') ?? '',
       skillIds: editing?.skillIds ?? [], mcpIds: editing?.mcpIds ?? [], ruleIds: editing?.ruleIds ?? [],
-      config: editableFieldValues(conversationFields(CHATBOT_PLUGIN_TYPE), editing?.config),
+      config: {
+        ...editableFieldValues(conversationFields(CHATBOT_PLUGIN_TYPE), editing?.config),
+        media_understanding_provider_id: String(editing?.config?.media_understanding_provider_id ?? ''),
+        media_understanding_model: String(editing?.config?.media_understanding_model ?? ''),
+        media_understanding_mode: String(editing?.config?.media_understanding_mode ?? 'fallback'),
+        media_understanding_protocol: String(editing?.config?.media_understanding_protocol ?? 'auto'),
+      },
     });
   }, [drawer.open, editing, form]);
   const save = async (values: Record<string, unknown>) => {
@@ -1630,7 +1638,13 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
       await api.saveGroup({
         accountId: String(values.accountId), externalId: externalIds.join(','), name: String(values.name ?? ''),
         conversationType: values.conversationType as GroupRecord['conversationType'],
-        config: normalizeFieldValues(visibleConversationFields, values.config as JsonObject),
+        config: {
+          ...normalizeFieldValues(visibleConversationFields, values.config as JsonObject),
+          media_understanding_provider_id: String((values.config as JsonObject | undefined)?.media_understanding_provider_id ?? ''),
+          media_understanding_model: String((values.config as JsonObject | undefined)?.media_understanding_model ?? ''),
+          media_understanding_mode: String((values.config as JsonObject | undefined)?.media_understanding_mode ?? 'fallback'),
+          media_understanding_protocol: String((values.config as JsonObject | undefined)?.media_understanding_protocol ?? 'auto'),
+        },
         dialogPolicyId: String(values.dialogPolicyId ?? ''), voicePolicyId: String(values.voicePolicyId ?? ''), identityPolicyId: String(values.identityPolicyId ?? ''),
         memoryPolicyId: String(values.memoryPolicyId ?? ''), costPolicyId: String(values.costPolicyId ?? ''),
         toolApprovalMode: (values.toolApprovalMode as GroupRecord['toolApprovalMode']) ?? 'per-tool',
@@ -1723,6 +1737,20 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
           <PolicySelectCard type="memory" name="memoryPolicyId" policies={policies} value={memoryPolicyId} options={policyOptions('memory')} detail={memoryPolicyId ? policies.find((item) => item.id === memoryPolicyId)?.config.memory_enabled === false ? tr('所选策略已关闭会话记忆') : tr('记忆模式来自所选策略') : tr('未选：关闭会话记忆')} href="#/admin/memory-policies" />
         </div>
         {selectedAccountId && otherConfigFields.length > 0 && <CompactSchemaFields fields={otherConfigFields} path="config" editing={Boolean(editing)} columns={3} note={tr('生图与视频需先在「调用工具」中启用，并在身份策略授权；费用仍受本群所选费用策略约束。')} />}
+        <div className="form-section-heading"><span>{tr('媒体理解')}</span><small>{tr('图片 / 音频 / 视频转写')}</small></div>
+        <div className="form-grid three-cols">
+          <Form.Item name={['config', 'media_understanding_provider_id']} label={tr('理解供应商')} extra={tr('留空则只按当前对话模型的媒体能力处理。')}>
+            <Select allowClear placeholder={tr('跟随对话模型')} options={providers.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name }))}
+              onChange={() => form.setFieldValue(['config', 'media_understanding_model'], undefined)} />
+          </Form.Item>
+          <Form.Item name={['config', 'media_understanding_model']} label={tr('理解模型')} extra={tr('Gemini 模型可直接读取音频和视频。')}>
+            <Select allowClear showSearch placeholder={tr('选择或输入模型')} options={(understandingProvider?.models ?? []).map((model) => ({ value: model, label: model }))} />
+          </Form.Item>
+          <Form.Item name={['config', 'media_understanding_mode']} label={tr('理解模式')} extra={tr('always 会把所有附件先转写成文字。')}>
+            <Select options={[{ value: 'fallback', label: tr('仅模型不支持时') }, { value: 'always', label: tr('始终先转写') }, { value: 'off', label: tr('关闭') }]} />
+          </Form.Item>
+        </div>
+        {understandingProviderId && !understandingProvider && <p className="form-note form-note-warning">{tr('所选理解供应商已停用或不存在。')}</p>}
         <div className="form-section-heading"><span>03 / {tr('群聊能力追加')}</span><small>{tr('可选，叠加在身份策略之上')}</small></div>
         <p className="form-note">{tr('身份策略已有的 Skills、MCP 与 Rules 会保留；这里只增加此群额外的能力，不会移除身份授权。')}</p>
         <div className="form-grid three-cols">
@@ -1828,7 +1856,7 @@ function policySummary(type: PolicyType, policy: PolicyRecord, providers: Provid
     return [config.agent_stream === true ? 'stream' : 'buffered', `${count('agent_max_rounds', 5)} rounds`, `${count('agent_max_output_tokens', 4096)} tok`, `T ${count('agent_temperature', 0.7)}`].join(' · ');
   }
   if (type === 'voice') {
-    return [value('voice_model', '—'), value('voice_id', 'alloy'), `${count('voice_speed', 1)}x`, `${count('voice_max_text_chars', 500)} chars`].join(' · ');
+    return [value('voice_model', '—'), value('voice_protocol', 'auto'), value('voice_id', 'default'), `${count('voice_speed', 1)}x`, `${count('voice_max_text_chars', 500)} chars`].join(' · ');
   }
   if (type === 'cost') return `USD · daily $${count('dailyCostLimit', 0)} · monthly $${count('monthlyCostLimit', 0)} · total $${count('totalCostLimit', 0)}`;
   if (type === 'memory') return [value('memoryMode', 'manual'), `${count('maxEntries', 100)} items`, `${count('retentionDays', 7)} days`, value('memoryContextLength', '32K')].join(' · ');
@@ -2335,7 +2363,8 @@ const CRON_MODE_LABELS: Record<CronBuilderMode, string> = {
 const WEEKDAY_OPTIONS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'].map((label, value) => ({ value, label }));
 
 const SEARCH_ENGINE_OPTIONS = [
-  { value: 'auto', label: '自动（免费：DuckDuckGo / 百度 / Bing）' },
+  { value: 'auto', label: '自动（新闻走 Google News，其余 DuckDuckGo / 百度 / Bing）' },
+  { value: 'google_news', label: 'Google 新闻 RSS（免费，适合今日新闻）' },
   { value: 'duckduckgo', label: 'DuckDuckGo（免费）' },
   { value: 'baidu', label: '百度（免费）' },
   { value: 'bing', label: 'Bing（有 API Key 时走官方 API）' },

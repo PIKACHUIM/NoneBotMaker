@@ -1,8 +1,8 @@
 import { boundedText, safeFetch } from './network';
 
-export type WebSearchEngine = 'auto' | 'duckduckgo' | 'baidu' | 'bing' | 'brave' | 'tavily' | 'serper' | 'google' | 'searxng';
+export type WebSearchEngine = 'auto' | 'duckduckgo' | 'baidu' | 'bing' | 'brave' | 'tavily' | 'serper' | 'google' | 'google_news' | 'searxng';
 
-export const SEARCH_ENGINES: WebSearchEngine[] = ['auto', 'duckduckgo', 'baidu', 'bing', 'brave', 'tavily', 'serper', 'google', 'searxng'];
+export const SEARCH_ENGINES: WebSearchEngine[] = ['auto', 'duckduckgo', 'baidu', 'bing', 'brave', 'tavily', 'serper', 'google', 'google_news', 'searxng'];
 export const KEYED_SEARCH_ENGINES: WebSearchEngine[] = ['brave', 'tavily', 'serper', 'google', 'bing'];
 
 export interface WebSearchResult {
@@ -208,6 +208,19 @@ async function bing(query: string, limit: number, fetchImpl: typeof fetch): Prom
   return parseBingRss(await boundedText(response, 1024 * 1024), limit);
 }
 
+/** Google News RSS 对“今日新闻”这类实时查询明显优于网页搜索，且不需要 API Key。 */
+async function googleNews(query: string, limit: number, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
+  const chinese = /[\u3400-\u9fff]/.test(query);
+  const endpoint = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${chinese ? 'zh-CN' : 'en-US'}&gl=${chinese ? 'CN' : 'US'}&ceid=${chinese ? 'CN:zh-Hans' : 'US:en'}`;
+  const response = await safeFetch(endpoint, { headers: { ...BROWSER_HEADERS, accept: 'application/rss+xml,application/xml;q=0.9,*/*;q=0.8' } }, fetchImpl);
+  return parseBingRss(await boundedText(response, 2 * 1024 * 1024), limit);
+}
+
+/** News intent is common in chat; route it to a news index instead of ad-heavy web search. */
+export function isNewsQuery(query: string): boolean {
+  return /新闻|要闻|快讯|头条|最新消息|最新进展|今天发生了什么|今日发生|news|headlines?|breaking/i.test(query);
+}
+
 async function brave(query: string, limit: number, apiKey: string, fetchImpl: typeof fetch): Promise<WebSearchResult[]> {
   const response = await safeFetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`, {
     headers: { accept: 'application/json', 'X-Subscription-Token': apiKey },
@@ -302,7 +315,9 @@ export async function webSearch(
   if (selected === 'google' && !cx) throw new Error('Google Search requires a Search Engine ID (cx) in the WebSearch tool settings.');
   if (selected === 'searxng' && !baseUrl) throw new Error('SearXNG requires a base URL in the WebSearch tool settings.');
 
-  const order: WebSearchEngine[] = selected === 'auto' ? ['duckduckgo', 'baidu', 'bing'] : [selected];
+  const order: WebSearchEngine[] = selected === 'auto'
+    ? [...(isNewsQuery(text) ? ['google_news' as const] : []), 'duckduckgo', 'baidu', 'bing']
+    : [selected];
   const failures: string[] = [];
   for (const engine of order) {
     try {
@@ -313,7 +328,8 @@ export async function webSearch(
               : engine === 'tavily' ? await tavily(text, limit, apiKey, baseUrl || undefined, fetchImpl)
                 : engine === 'serper' ? await serper(text, limit, apiKey, baseUrl || undefined, fetchImpl)
                   : engine === 'google' ? await google(text, limit, apiKey, cx, fetchImpl)
-                    : await searxng(text, limit, baseUrl || undefined, apiKey, fetchImpl);
+                    : engine === 'google_news' ? await googleNews(text, limit, fetchImpl)
+                      : await searxng(text, limit, baseUrl || undefined, apiKey, fetchImpl);
       if (results.length) return { engine, query: text, results };
       failures.push(`${engine}: no results`);
     } catch (error) {

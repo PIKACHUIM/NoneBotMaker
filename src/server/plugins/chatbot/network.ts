@@ -15,6 +15,20 @@ export function openAiEndpoint(baseUrl: string, endpoint: string): string {
   return url.toString();
 }
 
+/**
+ * Gemini 原生接口固定使用 /v1beta。OpenAI 兼容中转通常把 baseUrl 写成 /v1，
+ * 这里去掉已有版本段后统一拼接，避免出现 /v1/v1beta。
+ */
+export function geminiEndpoint(baseUrl: string, endpoint: string): string {
+  const url = new URL(baseUrl);
+  const suffix = `/${endpoint.replace(/^\/+/, '')}`;
+  let pathname = url.pathname.replace(/\/+$/, '');
+  if (pathname.toLowerCase().endsWith(suffix.toLowerCase())) pathname = pathname.slice(0, -suffix.length);
+  pathname = pathname.replace(/\/v1(?:beta)?$/i, '');
+  url.pathname = `${pathname}/v1beta${suffix}`;
+  return url.toString();
+}
+
 export function publicHttpsUrl(value: string): URL {
   const url = new URL(value);
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');

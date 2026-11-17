@@ -49,4 +49,37 @@ describe('AI API speech generation', () => {
     await expect(createSpeech(provider, { model: 'tts', input: 'hello' }, mockFetch(() => new Response('not mp3', { headers: { 'content-type': 'application/octet-stream' } })))).rejects.toThrow('invalid MP3');
     await expect(createSpeech(provider, { model: 'tts', input: 'hello' }, mockFetch(() => new Response(null, { status: 302, headers: { location: 'https://private.dev' } })))).rejects.toThrow('Redirects');
   });
+
+  it('wraps Gemini TTS PCM into WAV and calls the native v1beta endpoint', async () => {
+    const pcm = new Uint8Array([1, 0, 2, 0, 3, 0, 4, 0]);
+    const data = btoa(String.fromCharCode(...pcm));
+    const fetchImpl = mockFetch(() => Response.json({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data } }] } }],
+    }));
+    const result = await createSpeech({ ...provider, models: ['gemini-2.5-flash-preview-tts'] },
+      { model: 'gemini-2.5-flash-preview-tts', input: '你好' }, fetchImpl);
+    expect(result).toMatchObject({ contentType: 'audio/wav', filename: 'speech.wav', inputCharacters: 2 });
+    expect(new TextDecoder().decode(result.bytes.subarray(0, 4))).toBe('RIFF');
+    expect(result.bytes.byteLength).toBe(44 + pcm.byteLength);
+    const call = fetchImpl.mock.calls.find(([url]) => String(url).includes(':generateContent'))!;
+    expect(String(call[0])).toBe('https://api.vendor.dev/v1beta/models/gemini-2.5-flash-preview-tts:generateContent');
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({
+      generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } },
+    });
+  });
+
+  it('decodes MiniMax hex audio and uses its default voice', async () => {
+    const fetchImpl = mockFetch(() => Response.json({ data: { audio: '494433040000' }, base_resp: { status_code: 0 } }));
+    const result = await createSpeech({ ...provider, models: ['speech-02-hd'] }, { model: 'speech-02-hd', input: '你好' }, fetchImpl);
+    expect(result).toMatchObject({ contentType: 'audio/mpeg', filename: 'speech.mp3', inputCharacters: 2 });
+    const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/t2a_v2'))!;
+    expect(String(call[0])).toBe('https://api.vendor.dev/v1/t2a_v2');
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({ model: 'speech-02-hd', text: '你好', voice_setting: { voice_id: 'male-qn-qingse' } });
+  });
+
+  it('honors an explicit speech protocol even when the model name looks like another vendor', async () => {
+    const fetchImpl = mockFetch(() => Response.json({ data: { audio: '494433040000' }, base_resp: { status_code: 0 } }));
+    const result = await createSpeech(provider, { model: 'custom-tts', input: 'hi', protocol: 'minimax' }, fetchImpl);
+    expect(result.contentType).toBe('audio/mpeg');
+  });
 });

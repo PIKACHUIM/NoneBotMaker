@@ -1,5 +1,5 @@
 import type { ProviderRecord } from '../../../shared/types';
-import { boundedBytes, publicHttpsUrl, safeFetch, boundedText } from './network';
+import { boundedBytes, boundedText, geminiEndpoint, publicHttpsUrl, safeFetch } from './network';
 
 /** QQ rich-media upload rejects anything above 5 MiB, so larger videos fail before sending. */
 export const MAX_VIDEO_BYTES = 5 * 1024 * 1024;
@@ -7,7 +7,7 @@ const MAX_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_MAX_POLLS = 30;
 
-export type VideoProtocol = 'minimax' | 'openai';
+export type VideoProtocol = 'minimax' | 'openai' | 'veo';
 export type VideoResolution = '768P' | '1080P';
 
 export interface VideoGenerationRequest {
@@ -59,7 +59,8 @@ function validMoney(value: unknown): value is number {
 function deepString(value: unknown, ...path: string[]): string | undefined {
   let current: unknown = value;
   for (const key of path) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    if (!current || typeof current !== 'object') return undefined;
+    if (Array.isArray(current) && !/^\d+$/.test(key)) return undefined;
     current = (current as Record<string, unknown>)[key];
   }
   return typeof current === 'string' && current ? current : undefined;
@@ -68,7 +69,8 @@ function deepString(value: unknown, ...path: string[]): string | undefined {
 function deepNumber(value: unknown, ...path: string[]): number | undefined {
   let current: unknown = value;
   for (const key of path) {
-    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+    if (!current || typeof current !== 'object') return undefined;
+    if (Array.isArray(current) && !/^\d+$/.test(key)) return undefined;
     current = (current as Record<string, unknown>)[key];
   }
   return typeof current === 'number' && Number.isFinite(current) ? current : undefined;
@@ -111,8 +113,8 @@ function assertMp4(bytes: Uint8Array): void {
   }
 }
 
-async function downloadVideo(url: string, fetchImpl: typeof fetch): Promise<Uint8Array> {
-  const response = await safeFetch(url, { headers: { accept: 'video/mp4,video/*;q=0.9,application/octet-stream;q=0.5' } }, fetchImpl, 120_000);
+async function downloadVideo(url: string, fetchImpl: typeof fetch, headers: Record<string, string> = {}): Promise<Uint8Array> {
+  const response = await safeFetch(url, { headers: { accept: 'video/mp4,video/*;q=0.9,application/octet-stream;q=0.5', ...headers } }, fetchImpl, 120_000);
   const mime = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
   if (mime && !mime.startsWith('video/') && mime !== 'application/octet-stream') {
     await response.body?.cancel();
@@ -223,6 +225,52 @@ async function generateOpenAiStyle(
   throw new Error('Video generation timed out before the provider returned a file.');
 }
 
+/** Google Veo long-running operation: create, poll the operation, then fetch the signed video URI. */
+async function generateVeo(
+  provider: ProviderRecord,
+  request: VideoGenerationRequest,
+  fetchImpl: typeof fetch,
+  pollIntervalMs: number,
+  maxPolls: number,
+): Promise<Uint8Array> {
+  const headers = {
+    authorization: `Bearer ${provider.apiKey}`,
+    'x-goog-api-key': provider.apiKey,
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
+  // Veo only accepts 4/6/8-second clips; snap the configured duration instead of failing.
+  const seconds = request.duration <= 4 ? 4 : request.duration <= 6 ? 6 : 8;
+  const created = await requestJson(await safeFetch(geminiEndpoint(provider.baseUrl, `models/${request.model.replace(/^models\//i, '')}:predictLongRunning`), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      instances: [{ prompt: request.prompt }],
+      parameters: { aspectRatio: '16:9', resolution: request.resolution === '1080P' ? '1080p' : '720p', durationSeconds: seconds },
+    }),
+  }, fetchImpl, 60_000), 'Video provider');
+  const operation = deepString(created, 'name');
+  if (!operation || !/^[\w./:-]{1,512}$/.test(operation)) throw new Error('Video provider did not return an operation name.');
+
+  let downloadUrl: string | undefined;
+  for (let poll = 0; poll < maxPolls; poll += 1) {
+    if (poll > 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    const status = await requestJson(await safeFetch(geminiEndpoint(provider.baseUrl, operation), { headers }, fetchImpl, 30_000), 'Video status');
+    if (status.error && typeof status.error === 'object') {
+      throw new Error(deepString(status, 'error', 'message') ?? 'Video generation failed.');
+    }
+    if (status.done === true) {
+      downloadUrl = deepString(status, 'response', 'generateVideoResponse', 'generatedVideos', '0', 'video', 'uri')
+        ?? deepString(status, 'response', 'generatedVideos', '0', 'video', 'uri')
+        ?? deepString(status, 'response', 'predictions', '0', 'video', 'uri')
+        ?? deepString(status, 'response', 'videos', '0', 'uri');
+      break;
+    }
+  }
+  if (!downloadUrl) throw new Error('Video generation timed out before the provider returned a file.');
+  return downloadVideo(downloadUrl, fetchImpl, { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey });
+}
+
 /** Performs one video generation. Caller must gate tool enablement, approval, budget and media sending. */
 export async function generateVideo(
   provider: ProviderRecord,
@@ -238,7 +286,7 @@ export async function generateVideo(
   if (!prompt || Array.from(prompt).length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(prompt)) throw new Error('Invalid video prompt.');
   if (!Number.isSafeInteger(request.duration) || request.duration < 1 || request.duration > 30) throw new Error('Video duration must be 1–30 seconds.');
   if (!['768P', '1080P'].includes(request.resolution)) throw new Error('Invalid video resolution.');
-  if (!['minimax', 'openai'].includes(request.protocol)) throw new Error('Invalid video protocol.');
+  if (!['minimax', 'openai', 'veo'].includes(request.protocol)) throw new Error('Invalid video protocol.');
   if (!validMoney(request.fallbackCostPerSecond) || request.fallbackCostPerSecond <= 0) throw new Error('A positive per-second fallback price is required.');
   const multiplier = provider.priceMultiplier ?? 1;
   if (!Number.isFinite(multiplier) || multiplier <= 0 || multiplier > 1_000) throw new Error('Invalid provider price multiplier.');
@@ -255,7 +303,9 @@ export async function generateVideo(
   try {
     const bytes = request.protocol === 'minimax'
       ? await generateMiniMax(provider, request, fetchImpl, pollIntervalMs, maxPolls)
-      : await generateOpenAiStyle(provider, request, fetchImpl, pollIntervalMs, maxPolls);
+      : request.protocol === 'veo'
+        ? await generateVeo(provider, request, fetchImpl, pollIntervalMs, maxPolls)
+        : await generateOpenAiStyle(provider, request, fetchImpl, pollIntervalMs, maxPolls);
     return {
       bytes,
       contentType: 'video/mp4',

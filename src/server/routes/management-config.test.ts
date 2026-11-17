@@ -149,7 +149,7 @@ describe('configuration scopes and defaults', () => {
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
     expect(definition.groupFields.some((field) => field.key.startsWith('bridge_voice'))).toBe(false);
-    expect(defaultFieldValues(definition.groupFields)).toMatchObject({ voice_model: '', voice_id: 'alloy', voice_speed: 1, voice_max_text_chars: 500, voice_max_bytes: 5 * 1024 * 1024, voice_sends_per_hour: 20 });
+    expect(defaultFieldValues(definition.groupFields)).toMatchObject({ voice_model: '', voice_protocol: 'auto', voice_id: '', voice_speed: 1, voice_max_text_chars: 500, voice_max_bytes: 5 * 1024 * 1024, voice_sends_per_hour: 20 });
     for (const field of [...definition.groupFields, ...definition.logFields!]) {
       expect(field.label.zh).toBeTruthy();
       expect(field.label.en).toBeTruthy();
@@ -549,7 +549,7 @@ describe('capability policies', () => {
   it('scopes policy fields by type and rejects unknown policy types', async () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(policyFields('dialog').map((field) => field.key)).toEqual(['agent_stream', 'agent_max_rounds', 'agent_max_output_tokens', 'agent_temperature']);
-    expect(policyFields('voice').map((field) => field.key)).toEqual(['voice_model', 'voice_id', 'voice_speed', 'voice_max_text_chars', 'voice_max_bytes', 'voice_sends_per_hour']);
+    expect(policyFields('voice').map((field) => field.key)).toEqual(['voice_model', 'voice_protocol', 'voice_id', 'voice_speed', 'voice_max_text_chars', 'voice_max_bytes', 'voice_sends_per_hour']);
     expect(policyFields('identity').map((field) => field.key)).toEqual([
       'bridge_max_message_chars', 'bridge_max_messages_per_minute', 'bridge_group_batch_seconds',
       'bridge_slang_enabled', 'bridge_slang_min_messages', 'bridge_slang_cooldown_seconds',

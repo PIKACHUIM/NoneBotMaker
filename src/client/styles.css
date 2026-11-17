@@ -506,6 +506,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .policy-overrides .ant-collapse-content { border-top-color: var(--line); background: transparent; }
 .policy-overrides-summary { display: inline-block; max-width: 290px; overflow: hidden; color: var(--muted); font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .form-note { padding: 9px 11px; margin: -3px 0 15px; border-left: 2px solid var(--accent-dim); color: var(--text-soft); background: var(--surface-raised); font-size: 10px; }
+.form-note-warning { border-left-color: var(--danger); color: var(--danger); }
 .model-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .model-tags .ant-tag { margin: 0; color: var(--accent-text); border-color: var(--accent-border); background: var(--accent-surface); font: 8px var(--mono); }
 .model-tags > span:last-child { color: var(--muted-strong); font: 9px var(--mono); }

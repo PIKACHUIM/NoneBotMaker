@@ -50,6 +50,30 @@ describe('video generation', () => {
     expect(result).toMatchObject({ cost: 0.05 * 6, pricingSource: 'price', resolution: '1080P' });
   });
 
+  it('runs a Google Veo long-running operation and downloads the signed video', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('cloudflare-dns.com')) return dns();
+      if (url === 'https://veo.example/v1beta/models/veo-3.1:predictLongRunning') return json({ name: 'models/veo-3.1/operations/op-1' });
+      if (url === 'https://veo.example/v1beta/models/veo-3.1/operations/op-1') return json({
+        done: true,
+        response: { generateVideoResponse: { generatedVideos: [{ video: { uri: 'https://cdn.example.com/veo.mp4' } }] } },
+      });
+      if (url === 'https://cdn.example.com/veo.mp4') return new Response(mp4, { headers: { 'content-type': 'video/mp4' } });
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const result = await generateVideo({ ...provider, baseUrl: 'https://veo.example/v1', models: ['veo-3.1'] },
+      { ...request, model: 'veo-3.1', protocol: 'veo', resolution: '1080P', duration: 5 }, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 2 });
+    expect(result.bytes).toEqual(mp4);
+    const create = fetchImpl.mock.calls.find(([url]) => String(url).includes(':predictLongRunning'));
+    expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({
+      instances: [{ prompt: request.prompt }],
+      parameters: { resolution: '1080p', durationSeconds: 6 },
+    });
+    const download = fetchImpl.mock.calls.find(([url]) => String(url) === 'https://cdn.example.com/veo.mp4');
+    expect((download?.[1]?.headers as Record<string, string>)['x-goog-api-key']).toBe('private-key');
+  });
+
   it('charges the configured fallback and reports failures', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

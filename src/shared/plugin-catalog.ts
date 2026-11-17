@@ -519,13 +519,25 @@ const chatbotDefinition: PluginDefinition = {
       'Stores optional long-term memory for this conversation without sharing across conversations.',
     ], { group: contextGroup, default: false, scope: 'memory' }),
     text('voice_model', ['语音合成模型', 'Speech model'], [
-      '使用本会话供应商的语音合成接口；留空不开放 chat_tts。须配置对应供应商的语音能力与价格。',
-      'Uses this conversation’s provider speech endpoint. Empty disables chat_tts; configure provider speech capability and pricing.',
+      '使用本会话供应商的语音合成接口；留空不开放 chat_tts。支持 OpenAI /audio/speech、Gemini TTS 与 MiniMax t2a_v2。',
+      'Uses this conversation’s provider speech endpoint. Empty disables chat_tts. Supports OpenAI /audio/speech, Gemini TTS and MiniMax t2a_v2.',
     ], { group: voiceGroup, default: '', scope: 'voice' }),
+    text('voice_protocol', ['语音接口协议', 'Speech protocol'], [
+      'auto 根据模型名识别；也可强制指定 openai、gemini 或 minimax。',
+      'auto detects from the model name; you can also force openai, gemini or minimax.',
+    ], {
+      group: voiceGroup, default: 'auto', scope: 'voice',
+      options: [
+        { value: 'auto', label: { zh: '自动识别', en: 'Auto detect' } },
+        { value: 'openai', label: { zh: 'OpenAI /audio/speech', en: 'OpenAI /audio/speech' } },
+        { value: 'gemini', label: { zh: 'Gemini TTS', en: 'Gemini TTS' } },
+        { value: 'minimax', label: { zh: 'MiniMax t2a_v2', en: 'MiniMax t2a_v2' } },
+      ],
+    }),
     text('voice_id', ['语音音色', 'Voice'], [
-      '供应商支持的音色 ID，默认 alloy；请确认所选模型支持该音色。',
-      'Provider-supported voice ID, default alloy. Verify support for the selected model.',
-    ], { group: voiceGroup, default: 'alloy', scope: 'voice' }),
+      '供应商支持的音色 ID；留空使用协议默认音色（OpenAI alloy、Gemini Kore、MiniMax male-qn-qingse）。',
+      'Provider-supported voice ID. Empty uses the protocol default (OpenAI alloy, Gemini Kore, MiniMax male-qn-qingse).',
+    ], { group: voiceGroup, default: '', scope: 'voice' }),
     number('voice_speed', ['语音语速', 'Speech speed'], [
       '语音合成速度，0.25–4；实际支持范围以供应商接口为准。',
       'Speech speed from 0.25 to 4; actual support depends on the provider.',

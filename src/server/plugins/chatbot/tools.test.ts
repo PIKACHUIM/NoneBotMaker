@@ -175,6 +175,39 @@ describe('actual media content blocks', () => {
     expect(JSON.stringify(parts)).toContain('data:video/mp4;base64,');
   });
 
+  it('transcribes an unsupported attachment with the configured understanding model', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : new Response('image-bytes', { headers: { 'content-type': 'image/png' } }));
+    const describe = vi.fn(async () => '一只橘猫坐在窗台上。');
+    const parts = await incomingContent({ ...incoming, attachments: [{ type: 'image', url: 'https://media.example/cat' }] }, 'text-model', 1024, fetchImpl, [],
+      { describe });
+    expect(describe).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(parts)).toContain('一只橘猫坐在窗台上。');
+    expect(JSON.stringify(parts)).not.toContain('image_url');
+  });
+
+  it('can force transcription for every attachment while keeping failures visible', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : new Response('video-bytes', { headers: { 'content-type': 'video/mp4' } }));
+    const describe = vi.fn(async () => '画面里是一段海浪。');
+    const parts = await incomingContent({ ...incoming, attachments: [{ type: 'video', url: 'https://media.example/sea' }] }, 'vision-model', 1024, fetchImpl, ['video'],
+      { mode: 'always', describe });
+    expect(JSON.stringify(parts)).toContain('画面里是一段海浪。');
+    expect(JSON.stringify(parts)).not.toContain('video_url');
+  });
+
+  it('keeps inline media as a fallback when transcription fails', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : new Response('image-bytes', { headers: { 'content-type': 'image/png' } }));
+    const describe = vi.fn(async () => { throw new Error('upstream failed'); });
+    const parts = await incomingContent({ ...incoming, attachments: [{ type: 'image', url: 'https://media.example/cat' }] }, 'vision-model', 1024, fetchImpl, ['image'],
+      { describe });
+    expect(Array.isArray(parts) && parts[1].type).toBe('image_url');
+  });
+
+  it('rejects audio formats the inline chat API cannot carry', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : new Response('audio-bytes', { headers: { 'content-type': 'audio/ogg' } }));
+    await expect(incomingContent({ ...incoming, attachments: [{ type: 'audio', url: 'https://media.example/voice' }] }, 'gpt-4o-audio-preview', 1024, fetchImpl, ['audio']))
+      .rejects.toThrow('media understanding');
+  });
+
   it('rejects private media URLs and oversized attachments', async () => {
     await expect(incomingContent({ ...incoming, attachments: [{ type: 'image', url: 'https://127.0.0.1/pic' }] }, 'gpt-4o', 1024, vi.fn())).rejects.toThrow();
     await expect(incomingContent({ ...incoming, attachments: [{ type: 'image', url: 'https://media.example/pic', size: 2048 }] }, 'gpt-4o', 1024, vi.fn())).rejects.toThrow('size');

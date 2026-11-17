@@ -19,7 +19,8 @@ import { createCustomApiToolsFromRecords } from './custom-tools';
 import { generateImage, ImageGenerationAttemptError, type ImageGenerationRequest, type ImageSizeTier } from './image-generation';
 import { generateVideo, VideoGenerationAttemptError, type VideoGenerationRequest, type VideoProtocol, type VideoResolution } from './video-generation';
 import { ToolApprovalManager, type ApprovedToolResult } from './approval';
-import { incomingContent, storedMessages } from './media';
+import { incomingContent, mediaUnderstandingMode, storedMessages } from './media';
+import { describeMedia } from './media-understanding';
 import { connectMcp, executeTool, tool, validateToolArguments, webTools, type AgentTool } from './tools';
 import { createUtilityTools } from './utility-tools';
 
@@ -430,7 +431,6 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const imageModel = configString(record.config, 'model');
       const imageProvider = providerId ? await dependencies.findProvider(providerId) : null;
       if (!imageProvider?.enabled || !imageModel || !imageProvider.models.includes(imageModel)) return null;
-      if (Array.isArray(imageProvider.mediaCapabilities) && !imageProvider.mediaCapabilities.includes('image')) return null;
       const fallbackCostPerImage = configNumber(record.config, 'fallbackCostPerImage', 0, 0);
       if (fallbackCostPerImage <= 0) return null;
       secrets.push(imageProvider.apiKey);
@@ -482,11 +482,10 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const videoModel = configString(record.config, 'model');
       const videoProvider = providerId ? await dependencies.findProvider(providerId) : null;
       if (!videoProvider?.enabled || !videoModel || !videoProvider.models.includes(videoModel)) return null;
-      if (Array.isArray(videoProvider.mediaCapabilities) && !videoProvider.mediaCapabilities.includes('video')) return null;
       const fallbackCostPerSecond = configNumber(record.config, 'fallbackCostPerSecond', 0, 0);
       if (fallbackCostPerSecond <= 0) return null;
       const protocol = configString(record.config, 'protocol', 'minimax');
-      if (!['minimax', 'openai'].includes(protocol)) return null;
+      if (!['minimax', 'openai', 'veo'].includes(protocol)) return null;
       secrets.push(videoProvider.apiKey);
       const videoPrice = await dependencies.findPrice?.(videoModel);
       const configuredResolution = configString(mediaConfig, 'media_video_resolution', configString(record.config, 'resolution', '768P'));
@@ -966,7 +965,35 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     try {
       const incoming: ChatMessage[] = [];
       const incomingContents: Array<string | ChatContentPart[]> = [];
-      for (const entry of approvalIntent || resumeWait || slangOnlyTurn ? [] : permitted) incomingContents.push(await incomingContent(message.isWake ? { ...entry, text: `[计划唤醒，非新用户消息]\n${message.wakeReason ?? entry.text}` } : entry, model, configNumber(config, 'bridge_max_media_bytes', 8 * 1024 * 1024, 1024, 32 * 1024 * 1024), fetchImpl, provider.mediaCapabilities ?? ['image']));
+      const understandingProviderId = configString(config, 'media_understanding_provider_id').trim();
+      const understandingModel = configString(config, 'media_understanding_model').trim();
+      const understandingMode = mediaUnderstandingMode(configString(config, 'media_understanding_mode', 'fallback'));
+      const understandingProtocol = configString(config, 'media_understanding_protocol', 'auto');
+      let understandingProvider: ProviderRecord | null | undefined;
+      async function understandingTarget(): Promise<{ provider: ProviderRecord; model: string } | null> {
+        if (!understandingProviderId || !understandingModel) return null;
+        if (understandingProvider === undefined) understandingProvider = await dependencies.findProvider(understandingProviderId);
+        if (!understandingProvider?.enabled || !understandingProvider.models.includes(understandingModel)) return null;
+        secrets.push(understandingProvider.apiKey);
+        return { provider: understandingProvider, model: understandingModel };
+      }
+      for (const entry of approvalIntent || resumeWait || slangOnlyTurn ? [] : permitted) incomingContents.push(await incomingContent(
+        message.isWake ? { ...entry, text: `[计划唤醒，非新用户消息]\n${message.wakeReason ?? entry.text}` } : entry,
+        model,
+        configNumber(config, 'bridge_max_media_bytes', 8 * 1024 * 1024, 1024, 32 * 1024 * 1024),
+        fetchImpl,
+        provider.mediaCapabilities ?? ['image'],
+        {
+          mode: understandingMode,
+          ...(understandingProviderId && understandingModel ? {
+            describe: async (attachment, media) => {
+              const target = await understandingTarget();
+              if (!target) throw new Error('Configured media understanding model is unavailable.');
+              return describeMedia(target.provider, target.model, media, attachment.type, fetchImpl, understandingProtocol as 'auto' | 'openai' | 'gemini');
+            },
+          } : {}),
+        },
+      ));
       for (const content of incomingContents) {
         const previous = incoming.at(-1);
         if (!previous) { incoming.push({ role: 'user', content }); continue; }
@@ -1180,16 +1207,16 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         return 'media sent';
       }));
       const voiceModel = configString(config, 'voice_model').trim();
-      if (voiceModel && provider.mediaCapabilities?.includes('speech') && dependencies.sendMedia && dependencies.setState && explicitSpeechRequest) {
+      if (voiceModel && dependencies.sendMedia && dependencies.setState && explicitSpeechRequest) {
         const speechPrice = await dependencies.findPrice?.(voiceModel, 'characters');
         if (speechPrice?.enabled && speechPrice.unit === 'characters' && Number.isFinite(speechPrice.inputCostPerMillion) && speechPrice.inputCostPerMillion >= 0) {
           tools.push(tool('chat_tts', '用户已明确要求语音，仅合成并发送当前会话的语音回复。', { text: { type: 'string', minLength: 1, maxLength: Math.trunc(configNumber(config, 'voice_max_text_chars', 500, 1, 4096)) } }, ['text'], async (args) => {
             if (!explicitSpeechRequest || !(await dependencies.isWithinCostLimits(group, now()))) throw new Error('Speech request is not authorized or budget was reached.');
             assertVoiceSendCapacity();
-            const speech = await createSpeech(provider, { model: voiceModel, input: String(args.text), voice: configString(config, 'voice_id', 'alloy'), speed: configNumber(config, 'voice_speed', 1, 0.25, 4), maxBytes: Math.trunc(configNumber(config, 'voice_max_bytes', 5 * 1024 * 1024, 1024, 5 * 1024 * 1024)), maxTextChars: Math.trunc(configNumber(config, 'voice_max_text_chars', 500, 1, 4096)) }, fetchImpl);
+            const speech = await createSpeech(provider, { model: voiceModel, input: String(args.text), voice: configString(config, 'voice_id', ''), speed: configNumber(config, 'voice_speed', 1, 0.25, 4), protocol: configString(config, 'voice_protocol', 'auto') as 'auto' | 'openai' | 'gemini' | 'minimax', maxBytes: Math.trunc(configNumber(config, 'voice_max_bytes', 5 * 1024 * 1024, 1024, 5 * 1024 * 1024)), maxTextChars: Math.trunc(configNumber(config, 'voice_max_text_chars', 500, 1, 4096)) }, fetchImpl);
             const amount = speech.inputCharacters * speechPrice.inputCostPerMillion * multiplier / 1_000_000;
             await dependencies.recordGroupCost(group, amount, now());
-            await log('out', '', 'speech_completed', { model: voiceModel, providerId: provider.id, priceId: speechPrice.id, usage: { unit: 'characters', inputCharacters: speech.inputCharacters }, cost: amount, media: { type: 'audio', contentType: speech.contentType, size: speech.bytes.byteLength } });
+            await log('out', '', 'speech_completed', { model: voiceModel, providerId: provider.id, protocol: configString(config, 'voice_protocol', 'auto'), priceId: speechPrice.id, usage: { unit: 'characters', inputCharacters: speech.inputCharacters }, cost: amount, media: { type: 'audio', contentType: speech.contentType, size: speech.bytes.byteLength } });
             if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, 1, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached.');
             seq += 1;
             await dependencies.sendMedia!(account, message.groupId, message.id, { type: 'audio', ...speech }, { seq, conversationType: kind, ...(message.replyToken ? { replyToken: message.replyToken } : {}) });

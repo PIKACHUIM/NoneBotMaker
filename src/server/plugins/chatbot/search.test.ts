@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseBaiduMobile, parseBingRss, parseDuckDuckGoHtml, parseDuckDuckGoLite, webSearch } from './search';
+import { isNewsQuery, parseBaiduMobile, parseBingRss, parseDuckDuckGoHtml, parseDuckDuckGoLite, webSearch } from './search';
 
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 const dns = () => json({ Status: 0, Answer: [{ type: 1, data: '8.8.8.8' }] });
@@ -96,5 +96,19 @@ describe('free web search parsers', () => {
     });
     await expect(webSearch('test', { engine: 'searxng', baseUrl: 'https://searx.example' }, searxFetch as typeof fetch)).resolves.toMatchObject({ engine: 'searxng' });
     await expect(webSearch('x'.repeat(501), {}, vi.fn() as unknown as typeof fetch)).rejects.toThrow('500');
+  });
+
+  it('routes news intent to Google News RSS before the ad-heavy web engines', async () => {
+    expect(isNewsQuery('今天的新闻')).toBe(true);
+    expect(isNewsQuery('latest breaking headlines')).toBe(true);
+    expect(isNewsQuery('vue tutorial')).toBe(false);
+    const fetchImpl = routed((url) => {
+      expect(url).toContain('https://news.google.com/rss/search?');
+      expect(url).toContain('hl=zh-CN');
+      return new Response('<rss><channel><item><title>今日要闻 - 新闻社</title><link>https://news.example/a</link><description>摘要</description></item></channel></rss>', { headers: { 'content-type': 'application/rss+xml' } });
+    });
+    await expect(webSearch('今日新闻', { engine: 'auto' }, fetchImpl as typeof fetch)).resolves.toMatchObject({
+      engine: 'google_news', results: [{ title: '今日要闻 - 新闻社', url: 'https://news.example/a', snippet: '摘要' }],
+    });
   });
 });
