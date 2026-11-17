@@ -54,6 +54,16 @@ export function toChatAccountContext(account: BotAccountRecord, plugin: JsonObje
       return null;
     }
   }
+  if (protocol.id === 'satori') {
+    if (!stringValue(normalized.endpoint)) return null;
+    try {
+      const url = new URL(stringValue(normalized.endpoint));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    } catch {
+      return null;
+    }
+  }
+  if (protocol.id === 'discord' && !/^\d{15,25}$/.test(stringValue(normalized.botId))) return null;
   const appId = stringValue(normalized[protocol.identifierField]).trim();
   const secretField = protocol.secretField ?? 'appSecret';
   const appSecret = stringValue(normalized[secretField]) || undefined;

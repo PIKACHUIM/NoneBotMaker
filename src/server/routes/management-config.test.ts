@@ -137,7 +137,7 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
-    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost']);
+    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori']);
     expect(definition.protocolDefinitions?.map((protocol) => [protocol.id, protocol.credentialFields.map((field) => field.key)])).toEqual([
       ['qq', ['appId', 'appSecret']],
       ['feishu', ['appId', 'appSecret', 'verificationToken', 'encryptKey']],
@@ -149,6 +149,8 @@ describe('configuration scopes and defaults', () => {
       ['line', ['channelId', 'channelSecret', 'channelAccessToken', 'botUserId']],
       ['whatsapp', ['phoneNumberId', 'accessToken', 'appSecret', 'verifyToken']],
       ['mattermost', ['baseUrl', 'token', 'accessToken']],
+      ['discord', ['botId', 'botToken']],
+      ['satori', ['endpoint', 'platform', 'selfId', 'token']],
     ]);
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
@@ -696,7 +698,7 @@ describe('chat protocol credentials', () => {
     expect(missingToken.status).toBe(400);
     expect(await json(missingToken)).toEqual({ error: 'missing_verificationToken' });
     const unsupported = await writeRequest(setup, '/accounts', {
-      pluginId: 'plugin-1', protocol: 'discord', name: 'Discord', credentials: { appId: 'x', appSecret: 'secret' },
+      pluginId: 'plugin-1', protocol: 'matrix', name: 'Matrix', credentials: { appId: 'x', appSecret: 'secret' },
     });
     expect(unsupported.status).toBe(400);
     expect(await json(unsupported)).toEqual({ error: 'unsupported_protocol' });
@@ -767,6 +769,34 @@ describe('chat protocol credentials', () => {
     });
     expect(invalidServer.status).toBe(400);
     expect(await json(invalidServer)).toEqual({ error: 'invalid_baseUrl' });
+  });
+
+  it('validates Discord and Satori gateway credentials', async () => {
+    const setup = configuredApp();
+    const discord = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'discord', name: 'Discord',
+      credentials: { botId: '123456789012345678', botToken: 'discord-token' },
+    });
+    expect(discord.status).toBe(201);
+    expect((await json(discord)).data).toMatchObject({ protocol: 'discord', credentials: { botId: '123456789012345678', botToken: '********' } });
+    const invalidDiscord = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'discord', name: 'Discord bad',
+      credentials: { botId: 'not-a-snowflake', botToken: 'discord-token' },
+    });
+    expect(invalidDiscord.status).toBe(400);
+    expect(await json(invalidDiscord)).toEqual({ error: 'invalid_botId' });
+
+    const satori = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'satori', name: 'Satori',
+      credentials: { endpoint: 'http://127.0.0.1:5140', platform: 'onebot', selfId: 'bot-1', token: '' },
+    });
+    expect(satori.status).toBe(201);
+    const invalidSatori = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'satori', name: 'Satori bad',
+      credentials: { endpoint: 'file:///etc/passwd', platform: 'onebot', selfId: 'bot-2' },
+    });
+    expect(invalidSatori.status).toBe(400);
+    expect(await json(invalidSatori)).toEqual({ error: 'invalid_endpoint' });
   });
 
   it('creates the generic runtime automatically when an account omits the plugin', async () => {

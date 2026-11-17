@@ -6,7 +6,7 @@ NoneBotMaker receives and sends messages through each platform's official Webhoo
 
 1. Create an account under **Runtime → Platform accounts**, choose the platform protocol, and enter its credentials.
 2. Set the callback URL shown in the admin console in the platform's own console.
-3. Bind the account and conversation external IDs under **Groups**, then choose the identity and dialog policies.
+3. Bind the account and conversation external IDs under **Groups**, then choose the identity and dialog policies. WebSocket protocols such as Discord and Satori need no callback URL; the Cloudflare Durable Object connects automatically once the account is enabled.
 4. Send `/openid` in a test conversation to obtain the real user and conversation IDs, then verify the binding in the admin console.
 
 Credentials are encrypted with `SYS_SECRET` and never echoed in plaintext. Replace `<domain>` below with the deployed domain.
@@ -106,6 +106,37 @@ Notes:
 - Replies use `POST /api/v4/posts`; files are uploaded to `/api/v4/files` and attached to the post.
 - Direct messages are outside the outgoing webhook trigger scope and are currently treated as channel messages.
 
+## Discord
+
+Discord delivers ordinary messages only through its Gateway, so this project uses a Cloudflare Durable Object WebSocket instead of a Webhook.
+
+1. Create an application and bot in the [Discord Developer Portal](https://discord.com/developers/applications) and note the Application ID and Bot Token.
+2. Enable **Message Content Intent** on the Bot page; enable Server Members Intent only if member data is needed.
+3. In the admin console, add an account, choose Discord, and enter the Application ID (the same value as the Bot User ID) and Bot Token.
+4. Invite the bot to the server; channel conversations use the channel ID, and direct messages use the DM channel ID.
+
+Notes:
+
+- Uses Gateway v10 with `GUILD_MESSAGES`, `DIRECT_MESSAGES`, and `MESSAGE_CONTENT`, including session resume.
+- Channel messages must @mention the bot; direct messages are always answered.
+- Text is capped at 2000 characters; media uses multipart uploads; model output cannot trigger `@everyone`.
+- Requires Cloudflare Durable Objects. EdgeOne and Alibaba Cloud ESA have no matching binding and will not connect.
+
+## Satori
+
+Satori unifies QQ, Discord, Telegram, and other platforms behind one protocol through Koishi and other SDKs. Satori also uses a Cloudflare Durable Object WebSocket here.
+
+1. Deploy a Satori SDK (for example the Koishi satori plugin) and note the HTTP URL and access token.
+2. In the admin console, add an account, choose Satori, and enter the server URL, platform name (such as `onebot`), bot ID (`self_id`), and token.
+3. The service connects to `/v1/events`, sends IDENTIFY, receives `message-created`, and replies through `/v1/message.create`.
+4. Conversation external IDs use the Satori `channel.id`.
+
+Notes:
+
+- Requires Cloudflare Durable Objects; EdgeOne and Alibaba Cloud ESA are not supported.
+- Text only; media tools report an unsupported error.
+- Groups require an @mention; reconnects resume with the last `sn`.
+
 ## Feishu / Lark
 
 1. Create an enterprise self-built app on [Feishu Open Platform](https://open.feishu.cn/) and note the App ID and App Secret.
@@ -168,8 +199,8 @@ The table maps the chat protocol adapters documented by NoneBot2. It does not co
 | Mirai | ⚠️ | Through the Mirai OneBot plugin; native `mirai-api-http` is not implemented |
 | GitHub | ❌ | Event-driven source-hosting adapter, not a general chat protocol; issue/PR conversation semantics need a separate design |
 | Console | ❌ | The project has an admin console and conversation management, but no simulated chat channel |
-| Satori | ❌ | WebSocket protocol, unsuitable for stateless Webhooks; Cloudflare could use a Durable Object for a long connection |
-| Discord | ❌ | Normal messages require the Gateway; interactions alone do not cover everyday chat |
+| Satori | ✅ | `/v1/events` WebSocket plus `/v1/message.create`, using a Cloudflare Durable Object |
+| Discord | ✅ | Gateway v10 WebSocket, using a Cloudflare Durable Object |
 | DoDo | ❌ | Long-lived bot connection protocol, not implemented |
 | Kritor | ❌ | Separate WebSocket/TCP standard, not implemented |
 | Milky | ❌ | Separate WebSocket standard, not implemented |

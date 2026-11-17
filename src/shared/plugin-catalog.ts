@@ -466,6 +466,78 @@ const mattermostCredentialFields: PluginFieldDefinition[] = [
   },
 ];
 
+const discordCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'botId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Application ID / Bot User ID', en: 'Application ID / Bot user ID' },
+    description: {
+      zh: 'Discord Developer Portal 的 Application ID，也是机器人用户 ID，用于账号标识与 @ 检测。',
+      en: 'The Application ID from the Discord Developer Portal, which is also the bot user ID, used for account identity and mention checks.',
+    },
+    placeholder: { zh: '例如：123456789012345678', en: 'For example: 123456789012345678' },
+  },
+  {
+    key: 'botToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Token', en: 'Bot Token' },
+    description: {
+      zh: 'Developer Portal → Bot 中的 Token；需要在 Bot 页面开启 Message Content Intent。保存时留空保留已有值。',
+      en: 'The bot token from Developer Portal → Bot. Enable the Message Content Intent on the Bot page. Leave empty to keep the stored value.',
+    },
+    placeholder: { zh: 'MTIz...', en: 'MTIz...' },
+  },
+];
+
+const satoriCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'endpoint',
+    type: 'text',
+    required: true,
+    label: { zh: 'Satori 服务地址', en: 'Satori server URL' },
+    description: {
+      zh: 'Satori SDK 的 HTTP 地址，例如 http://127.0.0.1:5140；服务会连接 /v1/events 并调用 /v1/message.create。',
+      en: 'The Satori SDK HTTP base URL, for example http://127.0.0.1:5140. The service connects to /v1/events and calls /v1/message.create.',
+    },
+    placeholder: { zh: 'http://127.0.0.1:5140', en: 'http://127.0.0.1:5140' },
+  },
+  {
+    key: 'platform',
+    type: 'text',
+    required: true,
+    label: { zh: '平台标识（platform）', en: 'Platform name' },
+    description: {
+      zh: 'Satori READY 中的 platform，例如 onebot、discord、telegram，用于发送时选择登录实例。',
+      en: 'The platform name from Satori READY, such as onebot, discord, or telegram, used to select the login when sending.',
+    },
+    placeholder: { zh: '例如：onebot', en: 'For example: onebot' },
+  },
+  {
+    key: 'selfId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人 ID（self_id）', en: 'Bot ID (self_id)' },
+    description: {
+      zh: '机器人在该平台上的 ID，用于账号标识与 @ 检测。',
+      en: 'The bot ID on that platform, used for account identity and mention checks.',
+    },
+    placeholder: { zh: '例如：100012345', en: 'For example: 100012345' },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    secret: true,
+    label: { zh: '访问令牌（可选）', en: 'Access token (optional)' },
+    description: {
+      zh: 'Satori SDK 配置的鉴权令牌；SDK 未启用鉴权时留空。保存时留空保留已有值。',
+      en: 'The token configured in the Satori SDK; leave empty when the SDK has no auth. Leave empty to keep the stored value.',
+    },
+  },
+];
+
 const builtinChatProtocols: ChatProtocolDefinition[] = [
   {
     id: 'qq',
@@ -598,6 +670,35 @@ const builtinChatProtocols: ChatProtocolDefinition[] = [
     credentialFields: mattermostCredentialFields,
     proactive: true,
   },
+  {
+    id: 'discord',
+    name: { zh: 'Discord', en: 'Discord' },
+    description: {
+      zh: 'Discord Bot Gateway（Cloudflare Durable Object WebSocket），支持频道与私聊文本、媒体。',
+      en: 'Discord Bot Gateway over a Cloudflare Durable Object WebSocket, supporting channel and direct text and media messages.',
+    },
+    identifierField: 'botId',
+    secretField: 'botToken',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: discordCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'satori',
+    name: { zh: 'Satori', en: 'Satori' },
+    description: {
+      zh: 'Satori 协议 WebSocket（Cloudflare Durable Object），可通过 Koishi 等 Satori SDK 接入多个平台。',
+      en: 'Satori protocol WebSocket through a Cloudflare Durable Object, connecting to multiple platforms via Koishi and other Satori SDKs.',
+    },
+    identifierField: 'selfId',
+    secretField: 'token',
+    requiresSecret: false,
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: satoriCredentialFields,
+    proactive: true,
+  },
 ];
 
 const chatbotDefinition: PluginDefinition = {
@@ -605,8 +706,8 @@ const chatbotDefinition: PluginDefinition = {
   protocols: builtinChatProtocols.map((protocol) => protocol.id),
   name: { zh: '群聊助手', en: 'Group Chatbot' },
   description: {
-    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
-    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
+    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
+    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [

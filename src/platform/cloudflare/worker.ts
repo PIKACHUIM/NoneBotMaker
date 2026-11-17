@@ -4,7 +4,9 @@ import { purgeExpiredLogs } from '../../server/storage/log-retention';
 import { createConversationMemoryRepository } from '../../server/storage/conversation-memory-repository';
 import { runDueSchedules } from '../../server/automation/schedules';
 import { ensureQQGatewaySessions } from './qq-do';
+import { ensureChatGatewaySessions } from './chat-gateway-do';
 export { QQGatewayDurableObject } from './qq-do';
+export { ChatGatewayDurableObject } from './chat-gateway-do';
 export { AutomationDurableObject } from './automation-do';
 
 interface ScheduledControllerLike {
@@ -42,12 +44,17 @@ export default {
     const maintenance = ensureQQGatewaySessions(bindings).catch((error) => {
       console.error('QQ gateway maintenance failed; management remains available.', error instanceof Error ? error.message : error);
     });
+    const chatGateways = ensureChatGatewaySessions(bindings).catch((error) => {
+      console.error('Chat gateway maintenance failed; other protocols remain available.', error instanceof Error ? error.message : error);
+    });
     const automation = ensureAutomationScheduler(bindings);
     if (context) {
       context.waitUntil(maintenance);
+      context.waitUntil(chatGateways);
       if (automation) context.waitUntil(automation);
     } else {
       await maintenance;
+      await chatGateways;
       if (automation) await automation;
     }
     const isApplicationPath = url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhook/');

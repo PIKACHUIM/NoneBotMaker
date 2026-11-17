@@ -29,6 +29,12 @@ const mocks = vi.hoisted(() => ({
   mmText: vi.fn(async () => undefined),
   mmMedia: vi.fn(async () => undefined),
   mmProactive: vi.fn(async () => undefined),
+  discordText: vi.fn(async () => undefined),
+  discordMedia: vi.fn(async () => undefined),
+  discordProactive: vi.fn(async () => undefined),
+  satoriText: vi.fn(async () => undefined),
+  satoriMedia: vi.fn(async () => undefined),
+  satoriProactive: vi.fn(async () => undefined),
 }));
 
 vi.mock('./qq/api', () => ({ replyToQQMessage: mocks.qqText, sendQQMedia: mocks.qqMedia, replyToQQGroup: mocks.qqProactive }));
@@ -41,11 +47,13 @@ vi.mock('./slack/api', () => ({ sendSlackText: mocks.slackText, sendSlackMedia: 
 vi.mock('./line/api', () => ({ sendLineText: mocks.lineText, sendLineMedia: mocks.lineMedia, sendLineProactiveText: mocks.lineProactive }));
 vi.mock('./whatsapp/api', () => ({ sendWhatsAppText: mocks.waText, sendWhatsAppMedia: mocks.waMedia, sendWhatsAppProactiveText: mocks.waProactive }));
 vi.mock('./mattermost/api', () => ({ sendMattermostText: mocks.mmText, sendMattermostMedia: mocks.mmMedia, sendMattermostProactiveText: mocks.mmProactive }));
+vi.mock('./discord/api', () => ({ sendDiscordText: mocks.discordText, sendDiscordMedia: mocks.discordMedia, sendDiscordProactiveText: mocks.discordProactive }));
+vi.mock('./satori/api', () => ({ sendSatoriText: mocks.satoriText, sendSatoriMedia: mocks.satoriMedia, sendSatoriProactiveText: mocks.satoriProactive }));
 
 import { sendChatMedia, sendChatText, sendProactiveChatText } from './sender';
 
-const protocols = ['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost'];
-const mediaProtocols = ['qq', 'feishu', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost'];
+const protocols = ['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori'];
+const mediaProtocols = ['qq', 'feishu', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori'];
 
 function account(protocol: string): ChatAccountContext {
   return {
@@ -71,6 +79,8 @@ describe('chat protocol sender', () => {
     expect(mocks.lineText).toHaveBeenCalledTimes(1);
     expect(mocks.waText).toHaveBeenCalledTimes(1);
     expect(mocks.mmText).toHaveBeenCalledTimes(1);
+    expect(mocks.discordText).toHaveBeenCalledTimes(1);
+    expect(mocks.satoriText).toHaveBeenCalledTimes(1);
     expect(mocks.qqMedia).toHaveBeenCalledTimes(1);
     expect(mocks.feishuMedia).toHaveBeenCalledTimes(1);
     expect(mocks.wechatMedia).toHaveBeenCalledTimes(1);
@@ -80,6 +90,8 @@ describe('chat protocol sender', () => {
     expect(mocks.lineMedia).toHaveBeenCalledTimes(1);
     expect(mocks.waMedia).toHaveBeenCalledTimes(1);
     expect(mocks.mmMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.discordMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.satoriMedia).toHaveBeenCalledTimes(1);
   });
 
   it('uses proactive sends for schedules', async () => {
@@ -94,9 +106,11 @@ describe('chat protocol sender', () => {
     expect(mocks.lineProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
     expect(mocks.waProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
     expect(mocks.mmProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.discordProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.satoriProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
   });
 
   it('rejects unknown protocols instead of silently dropping messages', async () => {
-    await expect(sendChatText(account('discord'), 'target', 'message', 'hi', options)).rejects.toThrow('Unsupported chat protocol');
+    await expect(sendChatText(account('matrix'), 'target', 'message', 'hi', options)).rejects.toThrow('Unsupported chat protocol');
   });
 });

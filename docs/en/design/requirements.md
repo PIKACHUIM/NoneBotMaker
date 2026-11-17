@@ -4,7 +4,7 @@
 
 ## Goal and users
 
-NoneBotMaker provides a serverless management and chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost, and WeChat Official Account bots. Administrators use a web console to configure plugins, AI providers, bot accounts, and group/private conversation policies. Users interact with the bot in platform-authorized conversations. The implementation is in TypeScript and shares Hono application logic across runtimes.
+NoneBotMaker provides a serverless management and chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, Feishu, DingTalk, Mattermost, and WeChat Official Account bots. Administrators use a web console to configure plugins, AI providers, bot accounts, and group/private conversation policies. Users interact with the bot in platform-authorized conversations. The implementation is in TypeScript and shares Hono application logic across runtimes.
 
 ## Functional requirements and status
 
@@ -12,7 +12,7 @@ NoneBotMaker provides a serverless management and chat service for QQ, OneBot, T
 | --- | --- | --- |
 | FR-01 | Let administrators manage application configuration after sign-in | Password verification and signed sessions; management APIs require a valid session. `src/server/routes/index.ts`, `src/server/auth.ts`, and their tests. |
 | FR-02 | Give each configuration field one owner and reuse policies | Plugins declare technical defaults, accounts hold protocol-specific credentials, and Group Management binds external conversation IDs to **required visible Identity and Dialogue** policies plus optional Voice/Budget/Memory. Groups cannot grant tools outside Identity; inherited values are read-only, not written back to the group record. `src/shared/plugin-catalog.ts`, `src/server/routes/management.ts`. |
-| FR-03 | Receive and validate multi-platform Webhook events | QQ resolves accounts by AppID and verifies Ed25519 signatures at `/webhook/qq`; OneBot resolves by self_id and optionally verifies HMAC-SHA1 signatures at `/webhook/onebot`; Telegram resolves by secret_token at `/webhook/telegram`; Slack verifies X-Slack-Signature at `/webhook/slack`; LINE verifies Channel Secret signatures at `/webhook/line`; WhatsApp verifies X-Hub-Signature-256 at `/webhook/whatsapp`; Mattermost verifies the outgoing webhook token at `/webhook/mattermost`; Feishu verifies its signature/token and decrypts events at `/webhook/feishu`; DingTalk verifies timestamp/sign at `/webhook/dingtalk`; WeChat Official Accounts verify SHA1 signatures at `/webhook/wechat`. Normalized messages enter one chat pipeline. `src/server/protocols/`. |
+| FR-03 | Receive and validate multi-platform Webhook events | QQ resolves accounts by AppID and verifies Ed25519 signatures at `/webhook/qq`; OneBot resolves by self_id and optionally verifies HMAC-SHA1 signatures at `/webhook/onebot`; Telegram resolves by secret_token at `/webhook/telegram`; Slack verifies X-Slack-Signature at `/webhook/slack`; LINE verifies Channel Secret signatures at `/webhook/line`; WhatsApp verifies X-Hub-Signature-256 at `/webhook/whatsapp`; Mattermost verifies the outgoing webhook token at `/webhook/mattermost`; Discord receives MESSAGE_CREATE through a Cloudflare Durable Object Gateway WebSocket; Satori receives message-created through `/v1/events`; Feishu verifies its signature/token and decrypts events at `/webhook/feishu`; DingTalk verifies timestamp/sign at `/webhook/dingtalk`; WeChat Official Accounts verify SHA1 signatures at `/webhook/wechat`. Normalized messages enter one chat pipeline. `src/server/protocols/`. |
 | FR-04 | Generate replies through compatible AI APIs and support tool calls | Chat runtime supports multi-round tool loops, streaming/non-streaming responses, cost accounting, and outbound messages. `src/server/plugins/chatbot/handler.ts`, `provider.ts`. |
 | FR-05 | Control tools, MCP, Skills/Rules, and memory | Built-in/custom HTTPS tools are configured centrally and granted by Identity; groups may only disable or adjust approval. MCP keeps the admin allowlist and side-effect approval by default. Conversation memory is stored separately by account, conversation type and actual OpenID; only confirmed entries enter context. `src/server/plugins/chatbot/`, `src/server/storage/conversation-memory-repository.ts`. |
 | FR-06 | Support media, voice, wakeups, and conversation commands | Individual capabilities depend on platform permissions, plugin settings, provider/model capabilities, and platform storage. `handler.ts`, `media.ts`, `src/platform/cloudflare/qq-do.ts`. |
@@ -59,6 +59,9 @@ NoneBotMaker provides a serverless management and chat service for QQ, OneBot, T
 - LINE protocol: `src/server/protocols/line/`
 - WhatsApp protocol: `src/server/protocols/whatsapp/`
 - Mattermost protocol: `src/server/protocols/mattermost/`
+- Discord protocol: `src/server/protocols/discord/`
+- Satori protocol: `src/server/protocols/satori/`
+- WebSocket gateway: `src/platform/cloudflare/chat-gateway-do.ts`
 - Feishu protocol: `src/server/protocols/feishu/`
 - DingTalk protocol: `src/server/protocols/dingtalk/`
 - WeChat Official Account protocol: `src/server/protocols/wechat/`

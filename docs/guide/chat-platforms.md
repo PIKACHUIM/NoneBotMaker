@@ -6,7 +6,7 @@ NoneBotMaker 通过各平台官方 Webhook/API 接收和发送消息，不运行
 
 1. 在「运行平台 → 平台账号」新增账号，选择平台协议并填写该协议凭据。
 2. 在对应平台后台把回调地址设置为管理台显示的 URL。
-3. 在「群聊管理」绑定账号与会话外部 ID，并选择身份策略和对话策略。
+3. 在「群聊管理」绑定账号与会话外部 ID，并选择身份策略和对话策略。Discord、Satori 等 WebSocket 协议不需要回调地址，账号启用后由 Cloudflare Durable Object 自动连接。
 4. 在测试会话中发送 `/openid` 获取真实的用户与会话 ID，再回到管理台核对绑定。
 
 账号凭据由服务端使用 `SYS_SECRET` 加密，管理台不回显明文。下方回调地址中的 `<domain>` 替换为实际部署域名。
@@ -106,6 +106,37 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 - 回复通过 `POST /api/v4/posts` 发送；文件先上传到 `/api/v4/files`，再附加到帖子。
 - 私聊不在传出 Webhook 的触发范围内，目前按频道消息处理。
 
+## Discord
+
+Discord 的普通消息只能通过 Gateway 接收，因此本项目使用 Cloudflare Durable Object WebSocket，而不是 Webhook。
+
+1. 在 [Discord Developer Portal](https://discord.com/developers/applications) 创建应用与 Bot，记录 Application ID 和 Bot Token。
+2. 在 Bot 页面开启 **Message Content Intent**；需要读取成员信息时再开启 Server Members Intent。
+3. 在管理台新增账号，协议选择 Discord，填写 Application ID（与 Bot User ID 相同）和 Bot Token。
+4. 把机器人邀请进服务器；频道会话外部 ID 使用频道 ID，私聊使用 DM 频道 ID。
+
+说明：
+
+- 使用 Gateway v10，订阅 `GUILD_MESSAGES`、`DIRECT_MESSAGES` 与 `MESSAGE_CONTENT`，并支持断线续传。
+- 频道内必须 @ 机器人才会触发；私聊直接回复。
+- 单条文本上限 2000 字符；媒体走 multipart 上传；模型输出不会触发 `@everyone`。
+- 需要 Cloudflare（Durable Objects）；EdgeOne、阿里云 ESA 没有对应绑定，账号不会连接。
+
+## Satori
+
+Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一套协议。本项目的 Satori 协议同样使用 Cloudflare Durable Object WebSocket。
+
+1. 部署 Satori SDK（例如 Koishi 的 satori 插件），记录 HTTP 地址与访问令牌。
+2. 在管理台新增账号，协议选择 Satori，填写服务地址、平台标识（如 `onebot`）、机器人 ID（`self_id`）和令牌。
+3. 服务会连接 `/v1/events`，发送 IDENTIFY 并接收 `message-created`，回复通过 `/v1/message.create`。
+4. 会话外部 ID 使用 Satori 的 `channel.id`。
+
+说明：
+
+- 需要 Cloudflare（Durable Objects）；EdgeOne、阿里云 ESA 没有对应绑定。
+- 只发送文本；媒体工具会返回不支持。
+- 群聊中仅在 @ 机器人时触发；断线后会携带 `sn` 恢复会话。
+
 ## 飞书 / Lark
 
 1. 在[飞书开放平台](https://open.feishu.cn/)创建企业自建应用，记录「凭证与基础信息」中的 App ID 和 App Secret。
@@ -168,8 +199,8 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 | Mirai | ⚠️ | 通过 Mirai 的 OneBot 插件接入；原生 `mirai-api-http` 未实现 |
 | GitHub | ❌ | 事件驱动的代码托管适配器，不是通用聊天协议；需要单独设计 issue/PR 会话语义 |
 | Console | ❌ | 本项目有管理台和会话管理，但不提供模拟聊天入口 |
-| Satori | ❌ | 基于 WebSocket 的协议，不适合无状态 Webhook；Cloudflare 可另用 Durable Object 做长连接 |
-| Discord | ❌ | 普通消息需要 Gateway；仅实现 interactions 无法覆盖日常聊天 |
+| Satori | ✅ | `/v1/events` WebSocket + `/v1/message.create`，需要 Cloudflare Durable Object |
+| Discord | ✅ | Gateway v10 WebSocket，需要 Cloudflare Durable Object |
 | DoDo | ❌ | Bot 长连接协议，未实现 |
 | Kritor | ❌ | 独立 WebSocket/TCP 标准，未实现 |
 | Milky | ❌ | 独立 WebSocket 标准，未实现 |

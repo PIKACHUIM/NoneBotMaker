@@ -532,6 +532,17 @@ async function normalizeAccountCredentials(
       throw new ApiError(400, 'invalid_baseUrl');
     }
   }
+  if (protocol.id === 'discord' && !(typeof normalized.botId === 'string' && /^\d{15,25}$/.test(normalized.botId))) {
+    throw new ApiError(400, 'invalid_botId');
+  }
+  if (protocol.id === 'satori') {
+    try {
+      const url = new URL(String(normalized.endpoint ?? ''));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+    } catch {
+      throw new ApiError(400, 'invalid_endpoint');
+    }
+  }
   const missing = missingRequiredField(protocol.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);
   record.credentials = normalized;

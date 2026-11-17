@@ -35,6 +35,10 @@
       {
         "name": "AUTOMATION_SCHEDULER",
         "class_name": "AutomationDurableObject"
+      },
+      {
+        "name": "CHAT_GATEWAY_SESSIONS",
+        "class_name": "ChatGatewayDurableObject"
       }
     ]
   },
@@ -46,6 +50,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["AutomationDurableObject"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["ChatGatewayDurableObject"]
     }
   ],
   // Scheduled cleanup is intentionally not deployed while the account Cron quota is unresolved.

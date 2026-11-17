@@ -3,7 +3,7 @@ layout: home
 hero:
   name: NoneBotMaker
   text: 多平台聊天机器人 Serverless 服务
-  tagline: 管理 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost 与微信公众号机器人账号、会话策略与 AI 聊天能力，部署到 Cloudflare Workers、EdgeOne 或阿里云 ESA。
+  tagline: 管理 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、飞书、钉钉、Mattermost 与微信公众号机器人账号、会话策略与 AI 聊天能力，部署到 Cloudflare Workers、EdgeOne 或阿里云 ESA。
   actions:
     - theme: brand
       text: 快速部署
@@ -16,7 +16,7 @@ hero:
       link: https://github.com/PIKACHUIM/NoneBotMaker
 features:
   - title: 多账号与会话策略
-    details: 从 QQ/OneBot/Telegram/Slack/LINE/WhatsApp/飞书/钉钉/Mattermost/微信平台账号到群聊/私聊策略分层管理，按会话选择模型、工具和权限。
+    details: 从 QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/飞书/钉钉/Mattermost/微信平台账号到群聊/私聊策略分层管理，按会话选择模型、工具和权限。
   - title: AI 工具执行
     details: 支持 OpenAI-compatible API、多轮工具调用、MCP、联网搜索、Skills/Rules 与会话记忆。
   - title: Serverless 存储
@@ -42,4 +42,4 @@ features:
 - [系统设计](/design/architecture)：模块边界、消息数据流、持久化和信任边界。
 - [本地开发与测试](/development/setup) 与 [多平台部署](/development/deployment)。
 
-> 需求与架构文档依据当前代码、配置和测试整理；尚无独立产品签字确认的正式规格。真实 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost、微信、AI、Brave 与 TTS 外部服务仍需使用真实账号和凭据联调。
+> 需求与架构文档依据当前代码、配置和测试整理；尚无独立产品签字确认的正式规格。真实 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、飞书、钉钉、Mattermost、微信、AI、Brave 与 TTS 外部服务仍需使用真实账号和凭据联调。

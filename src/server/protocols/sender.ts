@@ -10,6 +10,8 @@ import { sendSlackMedia, sendSlackProactiveText, sendSlackText } from './slack/a
 import { sendLineMedia, sendLineProactiveText, sendLineText } from './line/api';
 import { sendWhatsAppMedia, sendWhatsAppProactiveText, sendWhatsAppText } from './whatsapp/api';
 import { sendMattermostMedia, sendMattermostProactiveText, sendMattermostText } from './mattermost/api';
+import { sendDiscordMedia, sendDiscordProactiveText, sendDiscordText } from './discord/api';
+import { sendSatoriMedia, sendSatoriProactiveText, sendSatoriText } from './satori/api';
 
 export function unsupportedProtocol(protocol: string): Error {
   return new Error(`Unsupported chat protocol: ${protocol}`);
@@ -44,6 +46,10 @@ export async function sendChatText(
       return sendWhatsAppText(account, targetId, messageId, content, options);
     case 'mattermost':
       return sendMattermostText(account, targetId, messageId, content, options);
+    case 'discord':
+      return sendDiscordText(account, targetId, messageId, content, options);
+    case 'satori':
+      return sendSatoriText(account, targetId, messageId, content, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -77,6 +83,10 @@ export async function sendChatMedia(
       return sendWhatsAppMedia(account, targetId, messageId, media, options);
     case 'mattermost':
       return sendMattermostMedia(account, targetId, messageId, media, options);
+    case 'discord':
+      return sendDiscordMedia(account, targetId, messageId, media, options);
+    case 'satori':
+      return sendSatoriMedia(account, targetId, messageId, media, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -111,6 +121,10 @@ export async function sendProactiveChatText(
       return sendWhatsAppProactiveText(account, targetId, content);
     case 'mattermost':
       return sendMattermostProactiveText(account, targetId, content);
+    case 'discord':
+      return sendDiscordProactiveText(account, targetId, content);
+    case 'satori':
+      return sendSatoriProactiveText(account, targetId, content);
     default:
       throw unsupportedProtocol(account.protocol);
   }

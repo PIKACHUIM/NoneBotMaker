@@ -58,11 +58,13 @@ export interface ChatProtocolDefinition {
   identifierField: string;
   /** Optional credential key used to locate an account from a callback when the payload has no bot id. */
   verificationField?: string;
-  /** Credential key holding the protocol's API secret; defaults to appSecret. */
+  /** Credit key holding the protocol's API secret; defaults to appSecret. */
   secretField?: string;
   /** OneBot report signing is optional, so its secret must not be required for account resolution. */
   requiresSecret?: boolean;
-  /** Incoming Webhook path handled by the shared application. */
+  /** How events reach the service. Gateway protocols need a Cloudflare Durable Object. */
+  transport?: 'webhook' | 'websocket';
+  /** Incoming Webhook path handled by the shared application; empty for gateway protocols. */
   webhookPath: string;
   credentialFields: PluginFieldDefinition[];
   /** Whether the protocol can send messages without an inbound event to reply to. */

@@ -59,6 +59,8 @@ https://<worker-domain>/webhook/slack    Slack
 https://<worker-domain>/webhook/line     LINE
 https://<worker-domain>/webhook/whatsapp WhatsApp Cloud API
 https://<worker-domain>/webhook/mattermost Mattermost
+
+Discord、Satori 使用 Cloudflare Durable Object WebSocket，不需要回调地址；部署到 EdgeOne 或阿里云 ESA 时不可用。
 ```
 
 在管理台创建平台账号和会话策略。账号凭据应填写在管理台受保护的账号配置中；会话策略填写群聊/私聊外部 ID 并选择供应商和模型。回调需要保留平台要求的签名请求头与原始请求体。各平台的权限、事件订阅和限制见[聊天平台接入](/guide/chat-platforms)。

@@ -2,7 +2,7 @@
 
 # NoneBotMaker
 
-A serverless management and AI chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost, and WeChat Official Accounts
+A serverless management and AI chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, Feishu, DingTalk, Mattermost, and WeChat Official Accounts
 
 [Online docs](https://cfnbot.opkg.cn/en/) · [简体中文](README.md) · [AGPL-3.0](LICENSE)
 
@@ -26,8 +26,10 @@ Built with TypeScript, Hono, and React, NoneBotMaker manages chat bot accounts, 
 | LINE | Messaging API Webhook | `/webhook/line` | Channel Secret verification and push API text replies; groups require an @mention |
 | WhatsApp Cloud API | Meta Webhook | `/webhook/whatsapp` | X-Hub-Signature-256 verification for one-to-one chats; subject to the 24-hour window |
 | Mattermost | Outgoing webhook + REST API | `/webhook/mattermost` | Token verification, trigger-word messages, and file uploads |
+| Discord | Gateway WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Requires the Message Content Intent; channels need an @mention; media supported |
+| Satori | Satori WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Connects to multiple platforms through Koishi and other SDKs; text only |
 
-See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, callback configuration, and limitations. DingTalk callbacks do not support proactive media, and WeChat Official Accounts do not support file customer-service messages or encrypted (safe-mode) callbacks. OneBot requires both an HTTP report URL and an API base URL; Telegram requires a `secret_token`; Slack requires `chat:write` (plus `files:write` for uploads); WhatsApp is limited by the 24-hour customer-service window.
+See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, callback configuration, and limitations. DingTalk callbacks do not support proactive media, and WeChat Official Accounts do not support file customer-service messages or encrypted (safe-mode) callbacks. OneBot requires both an HTTP report URL and an API base URL; Telegram requires a `secret_token`; Slack requires `chat:write` (plus `files:write` for uploads); WhatsApp is limited by the 24-hour customer-service window; Discord and Satori use Durable Object WebSockets and are only available on Cloudflare, not EdgeOne or ESA.
 
 <div align="center">
   <img src="docs/index.png" alt="NoneBotMaker admin console overview" width="100%">
@@ -35,7 +37,7 @@ See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, call
 
 ### Compatibility
 
-This is a TypeScript service for serverless runtimes, not a Python NoneBot, Koishi, or NapCat runtime. It connects through each platform's official Webhooks/APIs and cannot load arbitrary Python/Node plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost, WeChat, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
+This is a TypeScript service for serverless runtimes, not a Python NoneBot, Koishi, or NapCat runtime. It connects through each platform's official Webhooks/APIs and cannot load arbitrary Python/Node plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, Feishu, DingTalk, Mattermost, WeChat, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
 
 ## Quick Deployment
 
@@ -57,7 +59,7 @@ See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 
 ## Features
 
-- **Admin console:** Manage plugins, QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Feishu/DingTalk/Mattermost/WeChat accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
+- **Admin console:** Manage plugins, QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/Feishu/DingTalk/Mattermost/WeChat accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
 - **AI chat:** OpenAI-compatible APIs, multi-round tool calls, streaming, conversation context, and role cards.
 - **Persona and prompts:** Per-conversation personas layered with identity policy, system rules, role cards, memory, and Skills/Rules.
 - **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval, and pending arguments can be edited before approval.
