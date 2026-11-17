@@ -1231,7 +1231,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
             await log('out', '', 'speech_completed', { model: speech.model, requestedModel: voiceModel, providerId: provider.id, protocol: configString(config, 'voice_protocol', 'auto'), priceId: speechPrice.id, usage: { unit: 'characters', inputCharacters: speech.inputCharacters }, cost: amount, media: { type: 'audio', contentType: speech.contentType, size: speech.bytes.byteLength } });
             if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, 1, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached.');
             seq += 1;
-            await dependencies.sendMedia!(account, message.groupId, message.id, { type: 'audio', ...speech }, { seq, conversationType: kind, ...(message.replyToken ? { replyToken: message.replyToken } : {}) });
+            await dependencies.sendMedia!(account, message.groupId, message.id, { type: 'audio', bytes: speech.bytes, contentType: speech.contentType, filename: speech.filename }, { seq, conversationType: kind, ...(message.replyToken ? { replyToken: message.replyToken } : {}) });
             sentCount += 1;
             toolSendSucceeded = true;
             await markVoiceSent();
