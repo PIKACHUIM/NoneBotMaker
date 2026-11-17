@@ -300,6 +300,172 @@ const telegramCredentialFields: PluginFieldDefinition[] = [
   },
 ];
 
+const slackCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'appId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Slack App ID', en: 'Slack App ID' },
+    description: {
+      zh: 'Slack App 基本信息里的 App ID（A 开头），用于账号标识与回调校验。',
+      en: 'The Slack App ID (starting with A) from the app credentials, used as the account identifier and for callback checks.',
+    },
+    placeholder: { zh: '例如：A0123456789', en: 'For example: A0123456789' },
+  },
+  {
+    key: 'botToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot User OAuth Token', en: 'Bot User OAuth Token' },
+    description: {
+      zh: '应用 OAuth & Permissions 中的 Bot Token（xoxb- 开头），需要 chat:write 权限；保存时留空保留已有值。',
+      en: 'The Bot Token (xoxb-) from OAuth & Permissions with chat:write scope. Leave empty to keep the stored value.',
+    },
+    placeholder: { zh: 'xoxb-...', en: 'xoxb-...' },
+  },
+  {
+    key: 'signingSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Signing Secret', en: 'Signing Secret' },
+    description: {
+      zh: 'Slack App 基本信息里的 Signing Secret，用于校验 X-Slack-Signature；保存时留空保留已有值。',
+      en: 'The Signing Secret from the Slack app credentials, used to verify X-Slack-Signature. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const lineCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'channelId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Channel ID', en: 'Channel ID' },
+    description: {
+      zh: 'LINE Developers 控制台的 Channel ID（数字），用于账号标识与重复检测。',
+      en: 'The numeric Channel ID from the LINE Developers console, used as the account identifier.',
+    },
+    placeholder: { zh: '例如：2000123456', en: 'For example: 2000123456' },
+  },
+  {
+    key: 'channelSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Channel Secret', en: 'Channel Secret' },
+    description: {
+      zh: 'Messaging API 频道的 Channel Secret，用于校验 X-Line-Signature；保存时留空保留已有值。',
+      en: 'The Channel Secret of the Messaging API channel, used to verify X-Line-Signature. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'channelAccessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Channel Access Token', en: 'Channel Access Token' },
+    description: {
+      zh: '长期 Channel Access Token，用于调用 push API；保存时留空保留已有值。',
+      en: 'The long-lived Channel Access Token used for the push API. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'botUserId',
+    type: 'text',
+    label: { zh: 'Bot User ID（可选）', en: 'Bot user ID (optional)' },
+    description: {
+      zh: 'Bot 的 User ID（U 开头），可选，用于群聊 @ 检测与回调归属校验。',
+      en: 'The bot user ID (starting with U), optional, used for group mention detection and callback checks.',
+    },
+    placeholder: { zh: '例如：U4af...', en: 'For example: U4af...' },
+  },
+];
+
+const whatsappCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'phoneNumberId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Phone Number ID', en: 'Phone Number ID' },
+    description: {
+      zh: 'WhatsApp Business 后台号码的 Phone Number ID（数字），用于账号标识与回调归属校验。',
+      en: 'The numeric Phone Number ID from WhatsApp Manager, used as the account identifier and for callback checks.',
+    },
+    placeholder: { zh: '例如：1029384756', en: 'For example: 1029384756' },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Graph API Access Token', en: 'Graph API access token' },
+    description: {
+      zh: 'Meta 系统用户或临时 Graph API Token，需要 whatsapp_business_messaging 权限；保存时留空保留已有值。',
+      en: 'A Meta system-user or temporary Graph API token with whatsapp_business_messaging. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'App Secret', en: 'App Secret' },
+    description: {
+      zh: 'Meta 应用的 App Secret，用于校验 X-Hub-Signature-256；保存时留空保留已有值。',
+      en: 'The Meta app secret used to verify X-Hub-Signature-256. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'verifyToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Webhook Verify Token', en: 'Webhook verify token' },
+    description: {
+      zh: '后台订阅 Webhook 时填写的验证令牌，服务用 GET 校验回调；保存时留空保留已有值。',
+      en: 'The verify token configured in the webhook subscription, checked by GET callbacks. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const mattermostCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'baseUrl',
+    type: 'text',
+    required: true,
+    label: { zh: 'Mattermost 服务器地址', en: 'Mattermost server URL' },
+    description: {
+      zh: '服务器根地址，例如 https://mattermost.example.com，不需要结尾斜杠。',
+      en: 'Server root URL such as https://mattermost.example.com, without a trailing slash.',
+    },
+    placeholder: { zh: 'https://mattermost.example.com', en: 'https://mattermost.example.com' },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Outgoing Webhook Token', en: 'Outgoing webhook token' },
+    description: {
+      zh: '集成 → 传出 Webhook 里生成的 Token，用于校验回调并定位账号；保存时留空保留已有值。',
+      en: 'The token generated for the outgoing webhook, used to verify callbacks and resolve the account. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Access Token', en: 'Bot access token' },
+    description: {
+      zh: '机器人账号或个人访问令牌，需要创建帖子的权限；保存时留空保留已有值。',
+      en: 'A bot or personal access token allowed to create posts. Leave empty to keep the stored value.',
+    },
+  },
+];
+
 const builtinChatProtocols: ChatProtocolDefinition[] = [
   {
     id: 'qq',
@@ -377,6 +543,61 @@ const builtinChatProtocols: ChatProtocolDefinition[] = [
     credentialFields: telegramCredentialFields,
     proactive: true,
   },
+  {
+    id: 'slack',
+    name: { zh: 'Slack', en: 'Slack' },
+    description: {
+      zh: 'Slack Events API 回调，支持频道/私聊消息、文本与文件发送。',
+      en: 'Slack Events API callbacks for channel and direct messages, text and file uploads.',
+    },
+    identifierField: 'appId',
+    verificationField: 'signingSecret',
+    secretField: 'signingSecret',
+    webhookPath: '/webhook/slack',
+    credentialFields: slackCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'line',
+    name: { zh: 'LINE', en: 'LINE' },
+    description: {
+      zh: 'LINE Messaging API Webhook，支持私聊与群聊文本回复；媒体需要公网 HTTPS 地址。',
+      en: 'LINE Messaging API Webhook for direct and group text replies; media requires public HTTPS URLs.',
+    },
+    identifierField: 'channelId',
+    verificationField: 'channelSecret',
+    secretField: 'channelSecret',
+    webhookPath: '/webhook/line',
+    credentialFields: lineCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'whatsapp',
+    name: { zh: 'WhatsApp Cloud API', en: 'WhatsApp Cloud API' },
+    description: {
+      zh: 'Meta WhatsApp Cloud API Webhook，支持一对一文本、图片、音频、视频与文件。',
+      en: 'Meta WhatsApp Cloud API Webhook for one-to-one text, image, audio, video and document messages.',
+    },
+    identifierField: 'phoneNumberId',
+    verificationField: 'verifyToken',
+    webhookPath: '/webhook/whatsapp',
+    credentialFields: whatsappCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'mattermost',
+    name: { zh: 'Mattermost', en: 'Mattermost' },
+    description: {
+      zh: 'Mattermost 传出 Webhook 回调，通过 REST API 回复频道消息，支持文件上传。',
+      en: 'Mattermost outgoing webhook callbacks replying through the REST API, with file uploads.',
+    },
+    identifierField: 'baseUrl',
+    verificationField: 'token',
+    secretField: 'token',
+    webhookPath: '/webhook/mattermost',
+    credentialFields: mattermostCredentialFields,
+    proactive: true,
+  },
 ];
 
 const chatbotDefinition: PluginDefinition = {
@@ -384,8 +605,8 @@ const chatbotDefinition: PluginDefinition = {
   protocols: builtinChatProtocols.map((protocol) => protocol.id),
   name: { zh: '群聊助手', en: 'Group Chatbot' },
   description: {
-    zh: '接收 QQ、OneBot、Telegram、飞书、钉钉和微信公众号消息，按各会话的策略调用模型与工具并回复。',
-    en: 'Receives QQ, OneBot, Telegram, Feishu, DingTalk and WeChat Official Account messages, applying each conversation’s model and tool policies.',
+    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
+    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [

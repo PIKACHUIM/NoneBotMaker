@@ -477,6 +477,9 @@ async function normalizeAccountCredentials(
     const prefix = credentials.botToken.split(':')[0];
     if (/^\d{3,20}$/.test(prefix)) credentials.botId = prefix;
   }
+  if (protocol.id === 'mattermost' && typeof credentials.baseUrl === 'string') {
+    credentials.baseUrl = credentials.baseUrl.trim().replace(/\/+$/, '');
+  }
   const identifier = typeof credentials[protocol.identifierField] === 'string'
     ? (credentials[protocol.identifierField] as string).trim()
     : '';
@@ -511,6 +514,23 @@ async function normalizeAccountCredentials(
     !(typeof normalized.botToken === 'string' && /^\d{3,20}:[A-Za-z0-9_-]{8,256}$/.test(normalized.botToken))
   )) {
     throw new ApiError(400, 'invalid_botToken');
+  }
+  if (protocol.id === 'slack' && !(typeof normalized.appId === 'string' && /^A[A-Z0-9]{5,24}$/i.test(normalized.appId))) {
+    throw new ApiError(400, 'invalid_appId');
+  }
+  if (protocol.id === 'line' && !(typeof normalized.channelId === 'string' && /^\d{5,25}$/.test(normalized.channelId))) {
+    throw new ApiError(400, 'invalid_channelId');
+  }
+  if (protocol.id === 'whatsapp' && !(typeof normalized.phoneNumberId === 'string' && /^\d{5,25}$/.test(normalized.phoneNumberId))) {
+    throw new ApiError(400, 'invalid_phoneNumberId');
+  }
+  if (protocol.id === 'mattermost') {
+    try {
+      const url = new URL(String(normalized.baseUrl ?? ''));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error();
+    } catch {
+      throw new ApiError(400, 'invalid_baseUrl');
+    }
   }
   const missing = missingRequiredField(protocol.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);

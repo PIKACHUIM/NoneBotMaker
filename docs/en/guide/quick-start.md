@@ -55,9 +55,13 @@ https://<worker-domain>/webhook/telegram Telegram
 https://<worker-domain>/webhook/feishu   Feishu / Lark
 https://<worker-domain>/webhook/dingtalk DingTalk robot
 https://<worker-domain>/webhook/wechat   WeChat Official Account
+https://<worker-domain>/webhook/slack    Slack
+https://<worker-domain>/webhook/line     LINE
+https://<worker-domain>/webhook/whatsapp WhatsApp Cloud API
+https://<worker-domain>/webhook/mattermost Mattermost
 ```
 
-In the admin console, create the chatbot plugin, a platform account, and a conversation policy. Store credentials in the protected account settings. Enter the group/private external ID in the policy and select a provider and model. Preserve the signature headers and original request body each platform requires. See [Chat platform setup](/en/guide/chat-platforms) for permissions, event subscriptions, and limitations.
+In the admin console, create a platform account and a conversation policy. Store credentials in the protected account settings. Enter the group/private external ID in the policy and select a provider and model. Preserve the signature headers and original request body each platform requires. See [Chat platform setup](/en/guide/chat-platforms) for permissions, event subscriptions, and limitations.
 
 ## 5. Verify
 

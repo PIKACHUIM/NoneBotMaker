@@ -32,6 +32,19 @@ describe('app runtime routing', () => {
     expect(telegram.status).toBe(401);
   });
 
+  it('mounts the Slack, LINE, WhatsApp and Mattermost webhooks', async () => {
+    const slack = await createApp().request('/webhook/slack', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(slack.status).toBe(401);
+    const line = await createApp().request('/webhook/line', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(line.status).toBe(401);
+    const whatsapp = await createApp().request('/webhook/whatsapp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(whatsapp.status).toBe(401);
+    const whatsappVerify = await createApp().request('/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=x&hub.challenge=y');
+    expect(whatsappVerify.status).toBe(503);
+    const mattermost = await createApp().request('/webhook/mattermost', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(mattermost.status).toBe(401);
+  });
+
   it('rejects websocket mode outside Cloudflare before routing', async () => {
     const response = await createApp().request('/api/health', {}, {
       API_METHOD: 'websocket',

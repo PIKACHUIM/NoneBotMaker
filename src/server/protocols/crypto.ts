@@ -35,6 +35,12 @@ export async function hmacSha256Base64(secret: string, data: string): Promise<st
   return base64Encode(new Uint8Array(signature));
 }
 
+/** Slack and Meta sign webhooks with hex-encoded HMAC-SHA256. */
+export async function hmacSha256Hex(secret: string, data: string): Promise<string> {
+  const signature = await crypto.subtle.sign('HMAC', await importHmacKey(secret), new TextEncoder().encode(data));
+  return hexEncode(new Uint8Array(signature));
+}
+
 /** OneBot v11 signs HTTP reports with HMAC-SHA1, usually prefixed with `sha1=`. */
 export async function hmacSha1Hex(secret: string, data: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);

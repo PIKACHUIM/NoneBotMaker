@@ -45,6 +45,15 @@ export function toChatAccountContext(account: BotAccountRecord, plugin: JsonObje
       return null;
     }
   }
+  if (protocol.id === 'mattermost') {
+    if (!stringValue(normalized.baseUrl)) return null;
+    try {
+      const url = new URL(stringValue(normalized.baseUrl));
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    } catch {
+      return null;
+    }
+  }
   const appId = stringValue(normalized[protocol.identifierField]).trim();
   const secretField = protocol.secretField ?? 'appSecret';
   const appSecret = stringValue(normalized[secretField]) || undefined;

@@ -4,11 +4,10 @@ NoneBotMaker receives and sends messages through each platform's official Webhoo
 
 ## Common steps
 
-1. Confirm the chatbot plugin is enabled under **Runtime → Plugins**.
-2. Create an account under **Runtime → Platform accounts**, choose the platform protocol, and enter its credentials.
-3. Set the callback URL shown in the admin console in the platform's own console.
-4. Bind the account and conversation external IDs under **Groups**, then choose the identity and dialog policies.
-5. Send `/openid` in a test conversation to obtain the real user and conversation IDs, then verify the binding in the admin console.
+1. Create an account under **Runtime → Platform accounts**, choose the platform protocol, and enter its credentials.
+2. Set the callback URL shown in the admin console in the platform's own console.
+3. Bind the account and conversation external IDs under **Groups**, then choose the identity and dialog policies.
+4. Send `/openid` in a test conversation to obtain the real user and conversation IDs, then verify the binding in the admin console.
 
 Credentials are encrypted with `SYS_SECRET` and never echoed in plaintext. Replace `<domain>` below with the deployed domain.
 
@@ -50,6 +49,62 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 4. Conversation external IDs use Telegram `chat_id`: private chats match the user ID, while groups are usually negative.
 5. In groups, bots normally receive only commands and @mentions. Disable privacy mode in BotFather to receive ordinary group messages.
 6. Inbound images/files currently enter model context as placeholders; outbound supports photos, audio, video, and documents.
+
+## Slack
+
+1. Create an app on [Slack API](https://api.slack.com/apps) and note the App ID and Signing Secret from Basic Information.
+2. Add the `chat:write` scope under OAuth & Permissions (plus `files:write` for uploads), install the app, and note the Bot User OAuth Token (`xoxb-`).
+3. Under Event Subscriptions, set the Request URL to `https://<domain>/webhook/slack` and subscribe to `message.channels`, `message.groups`, and `message.im`; add `app_mention` if you want explicit mention events.
+4. Enter the App ID, Bot Token, and Signing Secret in the admin console.
+5. Conversation external IDs use channel IDs (`C...`, or `D...` for direct messages). Invite the bot to the channel before chatting.
+
+Notes:
+
+- Callbacks are verified with `X-Slack-Signature` (HMAC-SHA256) and a five-minute timestamp window; retried events are deduplicated by `event_id`.
+- Channel messages must @mention the bot; direct messages are always answered.
+- Text uses `chat.postMessage`; files use the external upload flow (`files.getUploadURLExternal` → upload → `files.completeUploadExternal`) and require `files:write`.
+
+## LINE
+
+1. Create a Messaging API channel on [LINE Developers](https://developers.line.biz/) and note the Channel ID, Channel Secret, and long-lived Channel Access Token.
+2. Set the Webhook URL to `https://<domain>/webhook/line` and enable **Use webhook**.
+3. Enter the Channel ID, Channel Secret, and Channel Access Token in the admin console; optionally add the Bot User ID (`U...`) for callback checks.
+4. Direct chats use the user ID, groups use `groupId`, and multi-user rooms use `roomId`.
+5. Disable the channel's auto-reply messages so they do not conflict with the bot.
+
+Notes:
+
+- Callbacks are verified with `X-Line-Signature` (base64 HMAC-SHA256).
+- Replies use the push API with a 5000-character text limit; group chats require the bot to be invited and @mentioned.
+- LINE image/video messages require public HTTPS URLs, so this service sends text only.
+
+## WhatsApp Cloud API
+
+1. Create an app on the [Meta developer console](https://developers.facebook.com/), add the WhatsApp product, and note the Phone Number ID, App Secret, and access token.
+2. Under WhatsApp → Configuration, set the Callback URL to `https://<domain>/webhook/whatsapp`, enter a custom verify token, and subscribe to the `messages` field.
+3. Enter the Phone Number ID, Graph API access token, App Secret, and webhook verify token in the admin console.
+4. Conversation external IDs use the user's WhatsApp number (`wa_id`).
+
+Notes:
+
+- GET verification echoes `hub.challenge`; POST callbacks are verified with `X-Hub-Signature-256` (HMAC-SHA256).
+- One-to-one chats only; groups are not supported.
+- Replies are limited to the 24-hour customer-service window; outside it you need template messages.
+- Outbound supports text, images, audio, video, and documents. Media is uploaded to Meta first and sent by media id.
+
+## Mattermost
+
+1. Create an outgoing webhook under **Integrations → Outgoing Webhooks** in the Mattermost system console, select a channel, and note the token.
+2. Create a bot account under **Integrations → Bot Accounts**, or prepare a personal access token that can create posts.
+3. Set the callback URL to `https://<domain>/webhook/mattermost` and configure trigger words as needed.
+4. Enter the server URL, outgoing webhook token, and bot access token in the admin console.
+5. Conversation external IDs use channel IDs.
+
+Notes:
+
+- Outgoing webhooks only deliver messages that match a trigger word; the service strips the trigger word before passing the text to the model.
+- Replies use `POST /api/v4/posts`; files are uploaded to `/api/v4/files` and attached to the post.
+- Direct messages are outside the outgoing webhook trigger scope and are currently treated as channel messages.
 
 ## Feishu / Lark
 
@@ -97,11 +152,11 @@ Notes:
 
 - Obtain platform external IDs with `/openid` and enter them under **Groups**. A group record may contain several external IDs, while context remains isolated per real conversation.
 - Schedule `message` actions send text proactively through the account protocol; `prompt` and `command` actions pass a synthetic message to the chat runtime. QQ uses `QQ_GATEWAY_SESSIONS` when configured, while other platforms execute in the current process.
-- Proactive messages require the matching platform capability: RobotCode for DingTalk, a valid `access_token` and open interaction window for WeChat, app permissions for Feishu, a reachable HTTP API for OneBot, and a valid Bot Token for Telegram.
+- Proactive messages require the matching platform capability: RobotCode for DingTalk, a valid `access_token` and open interaction window for WeChat, app permissions for Feishu, a reachable HTTP API for OneBot, a valid Bot Token for Telegram, `chat:write` for Slack, a Channel Access Token for LINE, the 24-hour window for WhatsApp, and a post-capable access token for Mattermost.
 
 ## NoneBot2 adapter coverage
 
-The table maps the protocol adapters listed in the NoneBot2 documentation to native support in this project:
+The table maps the chat protocol adapters documented by NoneBot2. It does not cover community plugins (GitHub, Bilibili, Minecraft, and similar), which target specific services or need long-running processes rather than a general chat protocol.
 
 | NoneBot2 adapter | Supported | Notes |
 | --- | --- | --- |
@@ -118,11 +173,11 @@ The table maps the protocol adapters listed in the NoneBot2 documentation to nat
 | DoDo | ❌ | Long-lived bot connection protocol, not implemented |
 | Kritor | ❌ | Separate WebSocket/TCP standard, not implemented |
 | Milky | ❌ | Separate WebSocket standard, not implemented |
-| DingTalk / WeChat Official Account | ✅ | Additional support in this project, see above |
+| DingTalk / WeChat Official Account / Slack / LINE / WhatsApp / Mattermost | ✅ | Additional native Webhook protocols in this project, see above |
 
 ## Troubleshooting
 
 - **Callback verification fails:** Compare the Token, Verification Token, or AppSecret with the admin console and confirm the callback uses the deployed domain.
 - **Messages arrive but no reply is sent:** Check that the account and plugin are enabled, the conversation is bound and enabled, allowlists and owners are correct, and the platform send permission is granted.
 - **Signature passes but events are ignored:** Check the subscribed event type, whether the bot is in the group, and whether the message type is supported.
-- **Media send fails:** Limits differ per platform. DingTalk callbacks do not support media, WeChat Official Accounts do not support customer-service files, QQ rich media is capped at 5 MB, OneBot is subject to the implementation and QQ limits, and Telegram supports photos/audio/video/documents.
+- **Media send fails:** Limits differ per platform. DingTalk callbacks do not support media, WeChat Official Accounts do not support customer-service files, QQ rich media is capped at 5 MB, OneBot is subject to the implementation and QQ limits, Telegram supports photos/audio/video/documents, Slack needs `files:write`, LINE sends text only, WhatsApp uploads media first, and Mattermost uses its file API.

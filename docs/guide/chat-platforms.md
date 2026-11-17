@@ -4,11 +4,10 @@ NoneBotMaker 通过各平台官方 Webhook/API 接收和发送消息，不运行
 
 ## 通用步骤
 
-1. 在「运行平台 → 插件管理」确认群聊助手插件已启用。
-2. 在「运行平台 → 平台账号」新增账号，选择平台协议并填写该协议凭据。
-3. 在对应平台后台把回调地址设置为管理台显示的 URL。
-4. 在「群聊管理」绑定账号与会话外部 ID，并选择身份策略和对话策略。
-5. 在测试会话中发送 `/openid` 获取真实的用户与会话 ID，再回到管理台核对绑定。
+1. 在「运行平台 → 平台账号」新增账号，选择平台协议并填写该协议凭据。
+2. 在对应平台后台把回调地址设置为管理台显示的 URL。
+3. 在「群聊管理」绑定账号与会话外部 ID，并选择身份策略和对话策略。
+4. 在测试会话中发送 `/openid` 获取真实的用户与会话 ID，再回到管理台核对绑定。
 
 账号凭据由服务端使用 `SYS_SECRET` 加密，管理台不回显明文。下方回调地址中的 `<domain>` 替换为实际部署域名。
 
@@ -50,6 +49,62 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 4. 会话外部 ID 使用 Telegram `chat_id`：私聊与用户 ID 相同，群组通常是负数。
 5. 群聊中机器人默认只能收到命令和 @ 消息；需要在 BotFather 关闭 privacy mode 才能接收普通群消息。
 6. 入站图片/文件目前只以占位符进入模型上下文；出站支持图片、音频、视频和文件。
+
+## Slack
+
+1. 在 [Slack API](https://api.slack.com/apps) 创建应用，记录 Basic Information 中的 App ID 与 Signing Secret。
+2. 在 OAuth & Permissions 添加 `chat:write` 权限（需要发文件时再加 `files:write`），安装到工作区并记录 Bot User OAuth Token（`xoxb-` 开头）。
+3. 在 Event Subscriptions 把 Request URL 设为 `https://<domain>/webhook/slack`，订阅 `message.channels`、`message.groups`、`message.im`；需要单独响应 @ 时再加 `app_mention`。
+4. 在管理台填写 App ID、Bot Token 和 Signing Secret。
+5. 会话外部 ID 使用频道 ID（`C...`，私聊为 `D...`）。把机器人邀请进频道后才能收发消息。
+
+说明：
+
+- 回调使用 `X-Slack-Signature`（HMAC-SHA256）和 5 分钟时间戳窗口校验，重试事件按 `event_id` 去重。
+- 频道内必须 @ 机器人才会触发；私聊直接回复。
+- 文本通过 `chat.postMessage` 发送；文件走外部上传流程（`files.getUploadURLExternal` → 上传 → `files.completeUploadExternal`），需要 `files:write` 权限。
+
+## LINE
+
+1. 在 [LINE Developers](https://developers.line.biz/) 创建 Messaging API 频道，记录 Channel ID、Channel Secret 和长期 Channel Access Token。
+2. 在 Messaging API 设置中把 Webhook URL 设为 `https://<domain>/webhook/line`，并启用 Use webhook。
+3. 在管理台填写 Channel ID、Channel Secret、Channel Access Token；可选填写 Bot User ID（`U...`）用于校验回调归属。
+4. 私聊外部 ID 是用户 ID，群聊使用 `groupId`，多人会话使用 `roomId`。
+5. 关闭频道的自动回复消息，避免和机器人回复冲突。
+
+说明：
+
+- 回调使用 `X-Line-Signature`（base64 HMAC-SHA256）校验。
+- 回复通过 push API 发送，单条文本上限 5000 字符；群聊需要把机器人加入群，并在消息中 @ 机器人。
+- LINE 的图片/视频消息要求公网 HTTPS 地址，本服务目前只发送文本。
+
+## WhatsApp Cloud API
+
+1. 在 [Meta 开发者后台](https://developers.facebook.com/) 创建应用并添加 WhatsApp 产品，记录 Phone Number ID、App Secret 和访问令牌。
+2. 在 WhatsApp → Configuration 把 Callback URL 设为 `https://<domain>/webhook/whatsapp`，填写自定义 Verify token，并订阅 `messages` 字段。
+3. 在管理台填写 Phone Number ID、Graph API Access Token、App Secret 和 Webhook Verify Token。
+4. 会话外部 ID 是用户的 WhatsApp 号码（`wa_id`）。
+
+说明：
+
+- GET 校验回显 `hub.challenge`；POST 使用 `X-Hub-Signature-256`（HMAC-SHA256）校验。
+- 只支持一对一聊天，不支持群聊。
+- 服务只能在 24 小时客服窗口内回复；窗口外需要改用模板消息。
+- 出站支持文本、图片、音频、视频和文件；媒体先上传到 Meta，再按 media id 发送。
+
+## Mattermost
+
+1. 在 Mattermost 系统控制台「集成 → 传出 Webhook」新建 Webhook，选择频道并记录 Token。
+2. 在「集成 → 机器人账号」创建机器人，或准备一个可创建帖子的个人访问令牌。
+3. 把回调地址设为 `https://<domain>/webhook/mattermost`，按需配置触发词。
+4. 在管理台填写服务器地址、Outgoing Webhook Token 和 Bot Access Token。
+5. 会话外部 ID 使用频道 ID。
+
+说明：
+
+- 传出 Webhook 只发送命中触发词的消息；服务会先去掉触发词前缀再交给模型。
+- 回复通过 `POST /api/v4/posts` 发送；文件先上传到 `/api/v4/files`，再附加到帖子。
+- 私聊不在传出 Webhook 的触发范围内，目前按频道消息处理。
 
 ## 飞书 / Lark
 
@@ -97,11 +152,11 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 
 - 群聊和私聊的外部 ID 由各平台提供，先用 `/openid` 命令获取，再写入「群聊管理」。群聊记录可绑定多个外部 ID，但上下文按真实会话隔离。
 - 定时任务的 `message` 动作会按账号协议主动发送文本；`prompt` 和 `command` 动作会把合成消息交给聊天运行时。QQ 在配置 `QQ_GATEWAY_SESSIONS` 时优先投递到 Gateway，其他平台直接在本进程执行。
-- 需要主动消息的平台必须在账号凭据中提供对应能力：钉钉需要 RobotCode，微信公众号需要可用的 `access_token` 与交互窗口，飞书需要有效的应用权限，OneBot 需要可用的 HTTP API，Telegram 需要有效的 Bot Token。
+- 需要主动消息的平台必须在账号凭据中提供对应能力：钉钉需要 RobotCode，微信公众号需要可用的 `access_token` 与交互窗口，飞书需要有效的应用权限，OneBot 需要可用的 HTTP API，Telegram 需要有效的 Bot Token，Slack 需要 `chat:write`，LINE 需要 Channel Access Token，WhatsApp 受 24 小时窗口限制，Mattermost 需要可创建帖子的访问令牌。
 
 ## 与 NoneBot2 适配器的对应关系
 
-下表对照 NoneBot2 文档中的协议适配器，说明本项目当前的原生支持情况：
+下表只对照 NoneBot2 的聊天协议适配器，不包含社区插件（如 GitHub、B 站、Minecraft 等）。社区插件通常面向具体业务或需要常驻进程，不是通用聊天协议，本项目不逐一适配。
 
 | NoneBot2 适配器 | 本项目支持 | 说明 |
 | --- | --- | --- |
@@ -118,11 +173,11 @@ curl "https://api.telegram.org/bot<bot-token>/setWebhook" \
 | DoDo | ❌ | Bot 长连接协议，未实现 |
 | Kritor | ❌ | 独立 WebSocket/TCP 标准，未实现 |
 | Milky | ❌ | 独立 WebSocket 标准，未实现 |
-| 钉钉 / 微信公众号 | ✅ | 本项目额外支持，见上文 |
+| 钉钉 / 微信公众号 / Slack / LINE / WhatsApp / Mattermost | ✅ | 本项目额外支持的原生 Webhook 协议，见上文 |
 
 ## 排查
 
 - **回调校验失败**：核对 Token/Verification Token/AppSecret 是否与管理台一致，以及回调地址是否使用了部署域名。
 - **收到消息但没有回复**：检查账号是否启用、插件是否启用、会话是否绑定并启用、白名单与 owner 设置，以及平台发送权限。
 - **签名通过但事件被忽略**：检查事件订阅类型、机器人是否在群内、消息类型是否受支持。
-- **媒体发送失败**：不同平台限制不同；钉钉回调不支持媒体，微信公众号不支持客服文件，QQ 富媒体上限 5 MB；OneBot 受实现和 QQ 限制，Telegram 支持图片/音频/视频/文件。
+- **媒体发送失败**：不同平台限制不同；钉钉回调不支持媒体，微信公众号不支持客服文件，QQ 富媒体上限 5 MB；OneBot 受实现和 QQ 限制，Telegram 支持图片/音频/视频/文件，Slack 需要 `files:write`，LINE 只发送文本，WhatsApp 先上传媒体，Mattermost 走文件接口。

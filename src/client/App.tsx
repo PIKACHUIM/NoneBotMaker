@@ -1175,7 +1175,7 @@ function PluginsPage({ data, onRefresh, onError }: { data: PluginRecord[]; onRef
       >
         <Form.Item name="name" label={tr('插件名称')} rules={[{ required: true, message: tr('请输入插件名称') }]}><Input placeholder={tr('例如：群聊助手')} /></Form.Item>
         <Form.Item name="type" label={tr('插件类型')} rules={[{ required: true, message: tr('请输入插件类型') }]}><Select options={typeOptions} placeholder={CHATBOT_PLUGIN_TYPE} onChange={(type: string) => form.setFieldValue('config', editableFieldValues(pluginDefinition(type)?.configFields ?? [], type === editing?.type ? editing.config : {}))} /></Form.Item>
-        <Alert type="info" showIcon message={tr('插件是通用聊天运行时；QQ、OneBot、Telegram、飞书、钉钉、微信在「平台账号」中通过协议选择，不需要为每个平台新建插件。')} />
+        <Alert type="info" showIcon message={tr('插件是通用聊天运行时；QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost、微信在「平台账号」中通过协议选择，不需要为每个平台新建插件。')} />
         <Form.Item name="description" label={tr('插件说明')}><Input.TextArea rows={3} placeholder={tr('描述插件用途')} /></Form.Item>
         {configFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('通用插件设置')}</span><small>{definition?.type} / {configFields.length} FIELDS</small></div>

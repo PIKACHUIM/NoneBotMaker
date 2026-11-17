@@ -137,7 +137,7 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
-    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram']);
+    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost']);
     expect(definition.protocolDefinitions?.map((protocol) => [protocol.id, protocol.credentialFields.map((field) => field.key)])).toEqual([
       ['qq', ['appId', 'appSecret']],
       ['feishu', ['appId', 'appSecret', 'verificationToken', 'encryptKey']],
@@ -145,6 +145,10 @@ describe('configuration scopes and defaults', () => {
       ['wechat', ['appId', 'appSecret', 'token']],
       ['onebot', ['selfId', 'apiBaseUrl', 'accessToken', 'secret']],
       ['telegram', ['botToken', 'botId', 'secretToken']],
+      ['slack', ['appId', 'botToken', 'signingSecret']],
+      ['line', ['channelId', 'channelSecret', 'channelAccessToken', 'botUserId']],
+      ['whatsapp', ['phoneNumberId', 'accessToken', 'appSecret', 'verifyToken']],
+      ['mattermost', ['baseUrl', 'token', 'accessToken']],
     ]);
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
@@ -692,7 +696,7 @@ describe('chat protocol credentials', () => {
     expect(missingToken.status).toBe(400);
     expect(await json(missingToken)).toEqual({ error: 'missing_verificationToken' });
     const unsupported = await writeRequest(setup, '/accounts', {
-      pluginId: 'plugin-1', protocol: 'slack', name: 'Slack', credentials: { appId: 'x', appSecret: 'secret' },
+      pluginId: 'plugin-1', protocol: 'discord', name: 'Discord', credentials: { appId: 'x', appSecret: 'secret' },
     });
     expect(unsupported.status).toBe(400);
     expect(await json(unsupported)).toEqual({ error: 'unsupported_protocol' });
@@ -724,6 +728,45 @@ describe('chat protocol credentials', () => {
     });
     expect(invalidOneBot.status).toBe(400);
     expect(await json(invalidOneBot)).toEqual({ error: 'invalid_apiBaseUrl' });
+  });
+
+  it('validates Slack, LINE, WhatsApp and Mattermost credentials', async () => {
+    const setup = configuredApp();
+    const slack = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'slack', name: 'Slack',
+      credentials: { appId: 'A0123456789', botToken: 'xoxb-test', signingSecret: 'signing' },
+    });
+    expect(slack.status).toBe(201);
+    expect((await json(slack)).data).toMatchObject({ protocol: 'slack', credentials: { appId: 'A0123456789', botToken: '********', signingSecret: '********' } });
+    const badSlack = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'slack', name: 'Slack bad',
+      credentials: { appId: 'not-an-app', botToken: 'xoxb-test', signingSecret: 'signing' },
+    });
+    expect(badSlack.status).toBe(400);
+    expect(await json(badSlack)).toEqual({ error: 'invalid_appId' });
+
+    expect((await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'line', name: 'LINE',
+      credentials: { channelId: '2000123456', channelSecret: 'secret', channelAccessToken: 'token' },
+    })).status).toBe(201);
+
+    expect((await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'whatsapp', name: 'WhatsApp',
+      credentials: { phoneNumberId: '1029384756', accessToken: 'token', appSecret: 'secret', verifyToken: 'verify' },
+    })).status).toBe(201);
+
+    const mattermost = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'mattermost', name: 'Mattermost',
+      credentials: { baseUrl: 'https://mm.example.com/', token: 'hook-token', accessToken: 'bot-token' },
+    });
+    expect(mattermost.status).toBe(201);
+    expect((await json(mattermost)).data).toMatchObject({ credentials: { baseUrl: 'https://mm.example.com' } });
+    const invalidServer = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'mattermost', name: 'Mattermost bad',
+      credentials: { baseUrl: 'file:///etc/passwd', token: 'hook-token', accessToken: 'bot-token' },
+    });
+    expect(invalidServer.status).toBe(400);
+    expect(await json(invalidServer)).toEqual({ error: 'invalid_baseUrl' });
   });
 
   it('creates the generic runtime automatically when an account omits the plugin', async () => {

@@ -71,7 +71,7 @@ const EN: Record<string, string> = {
   '启用状态': 'Enabled',
   '插件设置': 'Plugin settings',
   '通用插件设置': 'Common plugin settings',
-  '插件是通用聊天运行时；QQ、OneBot、Telegram、飞书、钉钉、微信在「平台账号」中通过协议选择，不需要为每个平台新建插件。': 'Plugins are generic chat runtimes. Choose QQ, OneBot, Telegram, Feishu, DingTalk, or WeChat as the protocol in Platform Accounts; do not create a plugin per platform.',
+  '插件是通用聊天运行时；QQ、OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉、Mattermost、微信在「平台账号」中通过协议选择，不需要为每个平台新建插件。': 'Plugins are generic chat runtimes. Choose QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, Mattermost, or WeChat as the protocol in Platform Accounts; do not create a plugin per platform.',
   '账号字段': 'Account fields',
   '当前配置': 'Current configuration',
   '其他': 'Other',

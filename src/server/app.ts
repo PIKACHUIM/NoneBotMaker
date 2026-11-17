@@ -7,6 +7,10 @@ import { createDingTalkWebhookRouter } from './protocols/dingtalk/webhook';
 import { createWeChatWebhookRouter } from './protocols/wechat/webhook';
 import { createOneBotWebhookRouter } from './protocols/onebot/webhook';
 import { createTelegramWebhookRouter } from './protocols/telegram/webhook';
+import { createSlackWebhookRouter } from './protocols/slack/webhook';
+import { createLineWebhookRouter } from './protocols/line/webhook';
+import { createWhatsAppWebhookRouter } from './protocols/whatsapp/webhook';
+import { createMattermostWebhookRouter } from './protocols/mattermost/webhook';
 import type { ChatAccountContext, ChatPlatformMessage } from './protocols/types';
 import { sendChatMedia, sendChatText } from './protocols/sender';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from './plugins/chatbot/runtime';
@@ -44,6 +48,10 @@ export function createApp() {
   app.route('/', createWeChatWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createOneBotWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createTelegramWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createSlackWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createLineWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createWhatsAppWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createMattermostWebhookRouter({ handleMessage: handleInboundMessage }));
   return app;
 }
 
