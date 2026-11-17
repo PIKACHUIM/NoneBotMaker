@@ -1,4 +1,4 @@
-import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE, LOG_RETENTION_DAYS, type ChatContentPart, type ChatMessage, type CommandRecord, type ConversationLog, type ConversationType, type ExtensionRecord, type GroupRecord, type JsonObject, type LibraryKind, type LibraryRecord, type ModelPriceRecord, type NormalizedMessage, type ProjectMemoryRecord, type ProviderRecord } from '../../../shared/types';
+import { CHATBOT_PLUGIN_TYPE, DEFAULT_NON_MENTION_REPLY_RATE, LOG_RETENTION_DAYS, type ChatbotActivityTool, type ChatbotRuntimeActivity, type ChatContentPart, type ChatMessage, type CommandRecord, type ConversationLog, type ConversationType, type ExtensionRecord, type GroupRecord, type JsonObject, type LibraryKind, type LibraryRecord, type ModelPriceRecord, type NormalizedMessage, type ProjectMemoryRecord, type ProviderRecord } from '../../../shared/types';
 import { BUILTIN_CHAT_TOOL_NAMES, configBoolean, configIdSet, configNumber, configString } from '../../../shared/plugin-catalog';
 import { parseChatCommand, renderCommandPrompt } from '../../../shared/commands';
 import { memoryContextTokens } from '../../../shared/memory-context';
@@ -361,6 +361,30 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     let sentCount = 0;
     let toolSendSucceeded = false;
     let postSendLogFailed = false;
+    let lastOutboundText = '';
+    const ACTIVITY_TEXT_LIMIT = 8_000;
+    let activity: ChatbotRuntimeActivity | undefined;
+    function activityText(value: unknown, limit = ACTIVITY_TEXT_LIMIT): string {
+      return String(sanitize(value, secrets)).slice(0, limit);
+    }
+    async function publishActivity(patch: Partial<ChatbotRuntimeActivity> = {}): Promise<void> {
+      if (!activity || !dependencies.setState) return;
+      activity = { ...activity, ...patch, updatedAt: now() };
+      state.runtimeActivity = activity as unknown as JsonObject;
+      try { await dependencies.setState(key, state); }
+      catch { /* Live status is best-effort and must never fail the conversation. */ }
+    }
+    function updateToolActivity(callId: string, name: string, patch: Partial<ChatbotActivityTool>): ChatbotActivityTool[] {
+      const tools = [...(activity?.tools ?? [])];
+      const index = tools.findIndex((entry) => entry.id === callId);
+      const entry: ChatbotActivityTool = {
+        id: callId, name, status: 'running', startedAt: now(),
+        ...(index >= 0 ? tools[index] : {}), ...patch,
+      };
+      if (index >= 0) tools[index] = entry;
+      else tools.push(entry);
+      return tools;
+    }
     function toolApprovalRule(entry: AgentTool, policyGroup: GroupRecord = group!, currentState: JsonObject = state): 'disabled' | 'approve' | 'allow' {
       const name = entry.definition.function.name;
       const id = entry.custom?.id ?? entry.mcp?.serviceId ?? `builtin-${name.replaceAll('_', '-')}`;
@@ -388,6 +412,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         throw new Error('Reply target must be a message in the current conversation batch.');
       }
       const targetMessageId = replyToMessageId ?? message.id;
+      lastOutboundText = text;
       const parts = splitMessage(text, Math.trunc(configNumber(config, 'bridge_max_message_chars', 500, 100, 4000)));
       if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, parts.length, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached.');
       for (const part of parts) {
@@ -816,6 +841,12 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     if (!Number.isFinite(multiplier) || multiplier < 0) throw new Error('Provider price multiplier is invalid.');
     const reasoning = group.reasoningEffort || configString(config, 'agent_reasoning_effort');
     const reasoningEffort = ['low', 'medium', 'high'].includes(reasoning) ? reasoning as 'low' | 'medium' | 'high' : undefined;
+    activity = message.isWake ? undefined : {
+      phase: 'thinking', startedAt: now(), updatedAt: now(), messageId: message.id,
+      ...(permitted[0]?.userName ? { userName: permitted[0].userName } : {}),
+      input: activityText(permitted.map((entry) => entry.text).filter(Boolean).join('\n'), 2000), tools: [],
+    };
+    await publishActivity();
     let history = resumeWait ? [] : historyLimit > 0 ? await dependencies.getRecentContext(key, historyLimit) : approvedContext;
     if (approvedContext.length && !history.some((entry) => entry.tool_call_id === approvedContext.at(-1)?.tool_call_id)) history.push(...approvedContext);
     const additions: ChatMessage[] = [];
@@ -828,6 +859,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
     let currentToolCallCount = 0;
     async function complete(messages: ChatMessage[], tools?: AgentTool[], status = 'model_completed'): Promise<ProviderChatResult> {
       if (!(await dependencies.isWithinCostLimits(group!, now()))) throw new Error('Model budget has been reached.');
+      await publishActivity({ phase: 'thinking' });
       const completion = await completeOpenAICompatible(provider!, { model, messages, reasoningEffort,
         stream: configBoolean(config, 'agent_stream', false),
         maxTokens: Math.trunc(configNumber(config, 'agent_max_output_tokens', 4096, 1, 131072)),
@@ -836,7 +868,12 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const cached = Math.min(completion.promptTokens, completion.cachedPromptTokens);
       const amount = ((completion.promptTokens - cached) * inputPrice + cached * (price?.cacheInputCostPerMillion ?? inputPrice) + completion.completionTokens * outputPrice) * multiplier / 1_000_000;
       await dependencies.recordGroupCost(group!, amount, now());
-      await log('out', '', status, { model, providerId: provider!.id, usage: { promptTokens: completion.promptTokens, completionTokens: completion.completionTokens, cachedPromptTokens: cached }, cost: amount, priceId: price?.id, pricingSource: price?.enabled ? 'price' : 'default', toolCalls: completion.toolCalls });
+      if (completion.reasoning) {
+        const reasoningSoFar = [activity?.reasoning, activityText(completion.reasoning, 6000)].filter(Boolean).join('\n\n');
+        await publishActivity({ reasoning: reasoningSoFar.slice(-ACTIVITY_TEXT_LIMIT) });
+      }
+      await log('out', '', status, { model, providerId: provider!.id, usage: { promptTokens: completion.promptTokens, completionTokens: completion.completionTokens, cachedPromptTokens: cached }, cost: amount, priceId: price?.id, pricingSource: price?.enabled ? 'price' : 'default', toolCalls: completion.toolCalls,
+        ...(completion.reasoning ? { reasoning: activityText(completion.reasoning, 4000) } : {}) });
       return completion;
     }
     async function extractConversationMemory(context: ChatMessage[] = []): Promise<void> {
@@ -1217,8 +1254,15 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         additions.push({ role: 'assistant', content: completion.content, ...(completion.toolCalls.length ? { tool_calls: completion.toolCalls } : {}) });
         if (!completion.toolCalls.length) {
           await log('out', '', 'completed', { turns: turn + 1 });
-          if (!toolSendSucceeded && mode !== 'reserved2' && completion.content.trim() && !(mode === 'reserved' && completion.content.trim() === '[SILENT]')) await send(completion.content);
+          if (!toolSendSucceeded && mode !== 'reserved2' && completion.content.trim() && !(mode === 'reserved' && completion.content.trim() === '[SILENT]')) {
+            const showReasoning = configBoolean(config, 'agent_show_reasoning', false);
+            const reasoningReply = (activity?.reasoning ?? '').trim();
+            await publishActivity({ phase: 'replying' });
+            if (showReasoning && reasoningReply) await send(`思考过程：\n${reasoningReply.slice(0, 1200)}`);
+            await send(completion.content);
+          }
           await extractConversationMemory([...history, ...additions]);
+          await publishActivity({ phase: 'completed', ...(lastOutboundText ? { reply: activityText(lastOutboundText, 2000) } : {}) });
           waitResumedSuccessfully = Boolean(resumeWait);
           return;
         }
@@ -1226,12 +1270,18 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
         let waitingApproval = false;
         for (const call of completion.toolCalls) {
           const selected = registry.get(call.function.name);
+          await publishActivity({ phase: 'tool', tools: updateToolActivity(call.id, call.function.name, {
+            status: 'running', startedAt: now(), arguments: activityText(call.function.arguments, 2000),
+          }) });
           if (selected && toolApprovalRule(selected) === 'approve') {
             if (!approvals || !dependencies.claimApproval) throw new Error('Tool approval requires a persistent authority.');
             validateToolArguments(JSON.parse(call.function.arguments), selected.definition.function.parameters);
             const pending = await approvals.request(call, permitted[0].userId, secrets);
             additions.push({ role: 'tool', tool_call_id: call.id, content: `Awaiting owner approval: ${pending.id}. The tool has not executed.` });
             await log('out', '', 'tool_approval_pending', { approvalId: pending.id, name: call.function.name, requestedBy: pending.requestedBy });
+            await publishActivity({ phase: 'tool', tools: updateToolActivity(call.id, call.function.name, {
+              status: 'pending', result: `Awaiting approval ${pending.id}`,
+            }) });
             const preview = pending.call.function.arguments.slice(0, Math.max(100, Math.min(1000, configNumber(config, 'bridge_max_message_chars', 500, 100, 4000) * 2 - 250)));
             await send(`工具 ${call.function.name} 可能产生外部副作用，尚未执行。\n参数：${preview}\n完整参数使用 /approval ${pending.id} [offset] 分页查看（${pending.call.function.arguments.length} 字符）。\nowner 使用 /approve ${pending.id} 批准或 /reject ${pending.id} 拒绝。`);
             waitingApproval = true;
@@ -1240,6 +1290,9 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
           const result = await executeTool(call.function.name, call.function.arguments, registry, secrets);
           additions.push({ role: 'tool', tool_call_id: call.id, content: result.content });
           await log('out', '', result.isError ? 'tool_error' : 'tool_completed', { toolCallId: call.id, name: call.function.name, arguments: call.function.arguments, ...result });
+          await publishActivity({ phase: 'tool', tools: updateToolActivity(call.id, call.function.name, {
+            status: result.isError ? 'error' : 'completed', finishedAt: now(), result: activityText(result.content, 2000),
+          }) });
           if (call.function.name === 'chat_wait' && waitRequested) {
             const messages = storedMessages([...history, ...additions.slice(0, -1)], secrets);
             if (new TextEncoder().encode(JSON.stringify(messages)).byteLength > 80_000) throw new Error('chat_wait continuation exceeds the persistent size limit.');
@@ -1249,14 +1302,17 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
             await dependencies.setState(key, state);
             await log('out', '', 'waiting_for_message', { expiresAt: waitContinuation.expiresAt });
             if (waitRequested.prompt) await send(waitRequested.prompt);
+            await publishActivity({ phase: 'completed', ...(lastOutboundText ? { reply: activityText(lastOutboundText, 2000) } : {}) });
             return;
           }
         }
         if (waitingApproval) return;
       }
       await log('out', '', 'max_turns', { turns: maxRounds });
+      await publishActivity({ phase: 'error', error: 'Maximum tool rounds reached.' });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Chatbot execution failed.';
+      await publishActivity({ phase: 'error', error: activityText(errorMessage, 1000) });
       const errorCode = /timed?\s*out|aborted due to timeout|timeout/i.test(errorMessage) ? 'timeout' : undefined;
       try { await log('out', '', 'error', { error: errorMessage, ...(errorCode ? { errorCode } : {}), sentCount }); }
       catch { /* The user-facing notice below is still useful when logging is unavailable. */ }

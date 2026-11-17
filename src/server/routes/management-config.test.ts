@@ -557,7 +557,7 @@ describe('capability policies', () => {
     ]);
     expect(policyFields('memory').map((field) => field.key)).toEqual(['memory_enabled']);
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
-      'bridge_owner_ids', 'bridge_commands_enabled', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
+      'agent_show_reasoning', 'bridge_owner_ids', 'bridge_commands_enabled', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
       'media_image_enabled', 'media_image_size', 'media_image_quality', 'media_video_enabled', 'media_video_resolution', 'media_video_duration',
     ]);
 
@@ -578,12 +578,12 @@ describe('capability policies', () => {
 
     const created = await writeRequest(setup, '/groups', {
       ...baseGroup, identityPolicyId: identity.id, dialogPolicyId: dialog.id,
-      config: { bridge_max_message_chars: 300, bridge_mode: 'reserved' },
+      config: { bridge_max_message_chars: 300, bridge_mode: 'reserved', agent_show_reasoning: true },
     });
     expect(created.status).toBe(201);
     const group = (await json(created)).data as JsonObject;
     expect(group).toMatchObject({ identityPolicyId: identity.id, dialogPolicyId: dialog.id });
-    expect(group).toMatchObject({ config: { bridge_mode: 'reserved' }, effective: { config: { bridge_max_message_chars: 900, max_context: 32768, bridge_mode: 'reserved', agent_temperature: 0.7 } } });
+    expect(group).toMatchObject({ config: { bridge_mode: 'reserved', agent_show_reasoning: true }, effective: { config: { bridge_max_message_chars: 900, max_context: 32768, bridge_mode: 'reserved', agent_temperature: 0.7, agent_show_reasoning: true } } });
 
     expect((await setup.app.request(`/policies/${identity.id}`, { method: 'DELETE' }, setup.bindings)).status).toBe(409);
     expect((await writeRequest(setup, '/groups', { ...baseGroup, id: 'group-2', externalId: 'external-2', identityPolicyId: dialog.id })).status).toBe(400);

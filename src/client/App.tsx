@@ -481,6 +481,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
   const [logsTotal, setLogsTotal] = useState(0);
   const [logsEnabled, setLogsEnabled] = useState<boolean | null>(null);
   const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(50);
   const [logFilters, setLogFilters] = useState<LogFilters>({});
   const [filterForm] = Form.useForm<LogFilters>();
 
@@ -529,7 +530,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
             setGroups(groupData); setAccounts(accountData);
             if (view !== 'logs') break;
             // Conversation records are read from the same endpoint as the legacy logs route.
-            const result = await api.listLogs({ page: logPage, pageSize: 20, q: logFilters.q, pluginId: logFilters.pluginId,
+            const result = await api.listLogs({ page: logPage, pageSize: logPageSize, q: logFilters.q, pluginId: logFilters.pluginId,
               openid: logFilters.openid, accountId: logFilters.accountId, groupId: logFilters.groupId,
               from: parseTimestamp(logFilters.from), to: parseTimestamp(logFilters.to) });
             if (!active) return;
@@ -582,7 +583,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
     };
     void load();
     return () => { active = false; };
-  }, [page, view, refreshKey, logPage, logFilters]);
+  }, [page, view, refreshKey, logPage, logPageSize, logFilters]);
 
   const navItems = [
     { key: 'overview', icon: <BookOutlined />, label: tr('运行总览') },
@@ -670,7 +671,7 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
               {page === 'conversations' && <section className="conversation-workspace"><Tabs activeKey={view} onChange={(key) => go(`/admin/conversations/${key}`)} items={[
                 { key: 'status', label: tr('运行状态'), children: view === 'status' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="status" /> },
                 { key: 'approvals', label: tr('操作审批'), children: view === 'approvals' && <ChatbotRuntimePage groups={groups} accounts={accounts} onError={handleError} onNavigate={setPage} onRefresh={refresh} view="approvals" /> },
-                { key: 'logs', label: tr('聊天记录'), children: <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} onPage={setLogPage} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} onCleared={() => { setLogPage(1); refresh(); }} /> },
+                { key: 'logs', label: tr('聊天记录'), children: <LogsPage data={logs} total={logsTotal} enabled={logsEnabled} plugins={plugins} accounts={accounts} groups={groups} page={logPage} pageSize={logPageSize} onPage={setLogPage} onPageSize={(value) => { setLogPage(1); setLogPageSize(value); }} form={filterForm} onFilter={(values) => { setLogPage(1); setLogFilters(values); }} onCleared={() => { setLogPage(1); refresh(); }} /> },
                 { key: 'statistics', label: tr('统计'), children: view === 'statistics' && <ConversationStatistics groups={groups} accounts={accounts} /> },
                 { key: 'memories', label: tr('会话记忆'), children: view === 'memories' && <ConversationMemories groups={groups} accounts={accounts} /> },
               ]} /></section>}
@@ -1254,7 +1255,7 @@ function SlangReviewEditor({ candidate, onSave }: { candidate: ChatbotSlangCandi
 }
 
 function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, view }: { groups: GroupRecord[]; accounts: BotAccountRecord[]; onError: (error: unknown) => void; onNavigate: (page: AdminPage) => void; onRefresh: () => void; view: 'status' | 'approvals' }) {
-  const { tr } = useI18n();
+  const { tr, language } = useI18n();
   const { message } = AntApp.useApp();
   const [conversationTargets, setConversationTargets] = useState<ChatbotConversationSummary[]>([]);
   const [selectedConversationKey, setSelectedConversationKey] = useState('');
@@ -1337,6 +1338,19 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
     }
   }, [selectedGroup, selectedConversation, tr]);
   useEffect(() => { void refresh(); }, [refresh]);
+  const refreshLiveStatus = useCallback(async () => {
+    if (!selectedGroup || !selectedConversation) return;
+    try {
+      const current = await api.getChatbotConversation(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId);
+      setStatus(current);
+      setApprovals(current.pendingApprovals);
+    } catch { /* Keep the last snapshot when a background poll fails. */ }
+  }, [selectedGroup, selectedConversation]);
+  useEffect(() => {
+    if (view !== 'status' || !selectedGroup || !selectedConversation) return;
+    const timer = window.setInterval(() => void refreshLiveStatus(), 2_500);
+    return () => window.clearInterval(timer);
+  }, [view, selectedGroup, selectedConversation, refreshLiveStatus]);
   const runControl = async (payload: Record<string, unknown>) => {
     if (!selectedGroup || !selectedConversation) return;
     setBusy(true);
@@ -1440,6 +1454,26 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
         <div><span>{tr('平台连接')}</span><strong>{status.connected ? tr('已连接') : tr('未连接')}</strong></div>
         <div><span>{tr('待审批工具')}</span><strong>{approvals.filter((item) => item.status === 'pending').length}</strong></div><div><span>{tr('待继续等待')}</span><strong>{status.pendingAgentWait ? tr('是') : tr('否')}</strong></div>
       </div>}
+      {status?.activity && <div className={`runtime-activity${status.active ? ' is-active' : ''}`}>
+        <div className="runtime-activity-head">
+          <Tag color={status.activity.phase === 'error' ? 'error' : status.activity.phase === 'completed' ? 'success' : 'processing'}>{tr(({ thinking: '思考中', tool: '调用工具', replying: '发送回复', completed: '已完成', error: '失败' } as Record<string, string>)[status.activity.phase] ?? status.activity.phase)}</Tag>
+          {status.active && <span className="runtime-live-dot" />}
+          <span>{tr('最近更新')}：{prettyDate(status.activity.updatedAt, language)}</span>
+          <span>{tr('每 2.5 秒自动刷新')}</span>
+        </div>
+        {status.activity.input && <div className="runtime-activity-block"><span>{tr('触发消息')}</span><pre>{status.activity.input}</pre></div>}
+        {status.activity.reasoning && <div className="runtime-activity-block"><span>{tr('思考内容')}</span><pre className="runtime-activity-scroll">{status.activity.reasoning}</pre></div>}
+        {status.activity.tools.length > 0 && <div className="runtime-activity-block"><span>{tr('工具调用')}</span><div className="runtime-tool-list">
+          {status.activity.tools.map((tool) => <div className="runtime-tool-row" key={tool.id}>
+            <div className="runtime-tool-head"><code>{tool.name}</code><Tag color={tool.status === 'error' ? 'error' : tool.status === 'completed' ? 'success' : 'processing'}>{tr(({ running: '执行中', pending: '待审批', completed: '已完成', error: '失败' } as Record<string, string>)[tool.status] ?? tool.status)}</Tag><span>{tool.finishedAt ? `${Math.max(0, tool.finishedAt - tool.startedAt)} ms` : tr('进行中')}</span></div>
+            {tool.arguments && <pre className="runtime-activity-scroll">{tool.arguments}</pre>}
+            {tool.result && <pre className="runtime-activity-scroll">{tool.result}</pre>}
+          </div>)}
+        </div></div>}
+        {status.activity.reply && <div className="runtime-activity-block"><span>{tr('已发送回复')}</span><pre className="runtime-activity-scroll">{status.activity.reply}</pre></div>}
+        {status.activity.error && <Alert type="error" showIcon message={tr('处理失败')} description={status.activity.error} />}
+      </div>}
+      {status && !status.activity && <p className="form-note runtime-activity-empty">{tr('暂无实时活动。发送消息后，这里会自动显示思考内容与工具调用。')}</p>}
     </Card>
     {selectedGroup && status && <>
       {view === 'status' && <Card className="runtime-control-card" title={tr('临时会话控制')}>
@@ -1521,7 +1555,7 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
   const visibleConversationFields = conversationFields(definition?.type).filter((field) => field.key !== 'bridge_allowed_private' || conversationType === 'private');
   const basicConfigFields = visibleConversationFields.filter((field) => field.placement === 'basic');
   const advancedConfigFields = visibleConversationFields.filter((field) => field.placement === 'advanced');
-  const otherConfigFields = visibleConversationFields.filter((field) => !field.placement);
+  const otherConfigFields = visibleConversationFields.filter((field) => !field.placement && field.key !== 'agent_show_reasoning');
   const identityPolicyId = Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined;
   const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
   const overrideProviderId = Form.useWatch('providerId', { form, preserve: true }) as string | undefined;
@@ -1694,6 +1728,10 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
         <Form.Item name="toolApprovalMode" label={tr('审批模式')}><Select options={[{ value: 'per-tool', label: tr('逐工具设置') }, { value: 'all-approve', label: tr('全部需要审批') }, { value: 'all-allow', label: tr('全部允许（高风险）') }]} /></Form.Item>
         {approvalMode === 'all-allow' && <Alert type="warning" showIcon message={tr('全部允许会跳过此群已授权工具的人工审批，保存时必须再次确认。')} />}
         {approvalMode === 'per-tool' && (availableTools.length ? <div className="tool-approval-list">{availableTools.map((id) => <Form.Item key={id} name={['toolApprovalRules', id]} label={tools.find((item) => item.id === id)?.name ?? id}><Select options={[{ value: 'approve', label: tr('需要审批') }, { value: 'allow', label: tr('允许') }, { value: 'disabled', label: tr('禁用') }]} placeholder={tr('按身份策略默认规则')} allowClear /></Form.Item>)}</div> : <p className="form-note">{tr('当前身份策略未授权工具，无法在群内增加工具。')}</p>)}
+        <div className="form-section-heading"><span>{tr('思考内容')}</span><small>{tr('仅影响本群')}</small></div>
+        <Form.Item name={['config', 'agent_show_reasoning']} label={tr('输出思考内容')} valuePropName="checked" extra={tr('开启后，模型返回的思考内容会以「思考过程」单独发送；部分模型不返回思考内容。会话管理里也会保留最近一次思考与工具调用。')}>
+          <Switch checkedChildren={tr('开启')} unCheckedChildren={tr('关闭')} />
+        </Form.Item>
         <div className="effective-summary" aria-live="polite">
           {editing?.effective && <>
             <strong>{tr('已保存的服务端生效值')}</strong>
@@ -2612,8 +2650,8 @@ function ExtensionsPanel({ data, onRefresh, onError }: { data: ExtensionRecord[]
   </div>;
 }
 
-function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPage, form, onFilter, onCleared }: {
-  data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; onPage: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void; onCleared: () => void;
+function LogsPage({ data, total, enabled, plugins, accounts, groups, page, pageSize, onPage, onPageSize, form, onFilter, onCleared }: {
+  data: ConversationLog[]; total: number; enabled: boolean | null; plugins: PluginRecord[]; accounts: BotAccountRecord[]; groups: GroupRecord[]; page: number; pageSize: number; onPage: (value: number) => void; onPageSize: (value: number) => void; form: FormInstance<LogFilters>; onFilter: (values: LogFilters) => void; onCleared: () => void;
 }) {
   const { language, tr, localized } = useI18n();
   const { message } = AntApp.useApp();
@@ -2700,7 +2738,7 @@ function LogsPage({ data, total, enabled, plugins, accounts, groups, page, onPag
         <Button size="small" danger loading={clearing} disabled={!total} icon={<DeleteOutlined />}>{tr('清除日志')}</Button>
       </Popconfirm>
     </Space></div>
-    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 1050 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / 20))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / 20))} 页`} · {total} RECORDS / 30D</span><Pagination current={page} pageSize={20} total={total} showSizeChanger={false} onChange={onPage} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
+    {data.length ? <><Table<ConversationLog> rowKey="id" columns={columns} dataSource={data} pagination={false} scroll={{ x: 1050 }} className="data-table logs-table" /><div className="logs-pagination"><span>{language === 'en' ? `Page ${page} of ${Math.max(1, Math.ceil(total / pageSize))}` : `第 ${page} 页 / 共 ${Math.max(1, Math.ceil(total / pageSize))} 页`} · {total} RECORDS / 30D</span><Pagination current={page} pageSize={pageSize} total={total} showSizeChanger pageSizeOptions={['20', '50', '100']} onChange={(nextPage, nextSize) => { if (nextSize !== pageSize) onPageSize(nextSize); else onPage(nextPage); }} /></div></> : <EmptyTable title={tr('没有匹配的对话记录')} description={tr('尝试调整筛选条件，或确认服务端日志记录已启用。')} />}
     <Modal open={Boolean(errorRow)} title={tr('错误详情')} width={760} onCancel={() => setErrorRow(null)}
       footer={<Space><Button icon={<CopyOutlined />} onClick={() => { void navigator.clipboard.writeText(errorText).then(() => message.success(tr('已复制'))).catch(() => message.error(tr('复制失败，请手动选择文本'))); }}>{tr('复制错误')}</Button><Button type="primary" onClick={() => setErrorRow(null)}>{tr('关闭')}</Button></Space>}>
       {errorRow && <div className="log-error-detail">

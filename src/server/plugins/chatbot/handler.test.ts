@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BotAccountRecord, ChatMessage, CommandRecord, ConversationLog, ExtensionRecord, GroupRecord, ProviderRecord } from '../../../shared/types';
+import type { BotAccountRecord, ChatMessage, CommandRecord, ConversationLog, ExtensionRecord, GroupRecord, JsonObject, ProviderRecord } from '../../../shared/types';
 import type { MemeMetadata, MemeStore, MemeStoreListEntry, MemeStoreValue } from './meme-library';
 import type { QQAccountContext, QQGroupMessage } from '../../protocols/qq/types';
 import type { ConversationMemory, ConversationMemoryRepository } from '../../storage/conversation-memory-repository';
@@ -127,6 +127,23 @@ describe('createChatbotHandler', () => {
     expect(request.messages.map((entry) => entry.role)).toEqual(['system', 'assistant', 'user']);
     expect(deps.getRecentContext).toHaveBeenCalledWith(JSON.stringify(['account-1', 'group', 'group-openid']), 50);
     expect(deps.recordGroupCost).toHaveBeenCalledWith(group, 0.00002, 1_000);
+  });
+
+  it('publishes live activity and optionally sends model reasoning', async () => {
+    let state: JsonObject = {};
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      choices: [{ message: { content: 'hello back', reasoning_content: 'planned answer' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    }));
+    const { deps, sentReplies } = dependencies({
+      fetch,
+      findGroup: vi.fn(async () => ({ ...group, config: { agent_show_reasoning: true } })),
+      getState: vi.fn(async () => state),
+      setState: vi.fn(async (_key: string, next: JsonObject) => { state = next; }),
+    });
+    await createChatbotHandler(deps)(account, message());
+    expect(sentReplies).toEqual(['思考过程：\nplanned answer', 'hello back']);
+    expect(state.runtimeActivity).toMatchObject({ phase: 'completed', reasoning: 'planned answer', reply: 'hello back', tools: [] });
   });
 
   it('sends a user-facing notice when the upstream model API fails', async () => {

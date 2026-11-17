@@ -14,10 +14,11 @@ import type {
   ProjectMemoryRecord,
   ProviderRecord,
   ScheduleRecord,
+  ChatbotRuntimeActivity,
 } from '../shared/types';
 
 export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
-export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; gatewayMode?: 'webhook' | 'websocket'; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; initialPrompt?: string; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string; arguments?: Record<string, unknown> }>; policyIds?: Record<string, string> }
+export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; gatewayMode?: 'webhook' | 'websocket'; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; initialPrompt?: string; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string; arguments?: Record<string, unknown> }>; policyIds?: Record<string, string>; activity?: ChatbotRuntimeActivity | null; active?: boolean }
 export interface ChatbotConversationStats { enabled: boolean; scanned: number; truncated: boolean; messagesIn: number; repliesOut: number; errors: number; costUsd: number; charges: number }
 export interface ChatbotWake { id: string; dueAt: number; reason: string }
 export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }

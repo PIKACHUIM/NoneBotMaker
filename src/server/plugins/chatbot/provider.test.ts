@@ -33,6 +33,13 @@ describe('OpenAI compatible JSON responses', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('keeps reasoning content from JSON and streamed responses', async () => {
+    const jsonResult = await completeOpenAICompatible(provider, request, mockFetch(json({ choices: [{ message: { content: 'answer', reasoning_content: 'planned answer' } }] })));
+    expect(jsonResult).toMatchObject({ content: 'answer', reasoning: 'planned answer' });
+    const text = event(choice({ reasoning_content: 'first ' })) + event(choice({ reasoning_content: 'second', content: 'answer' })) + event(choice({}, 'stop')) + done;
+    await expect(streamed(textStream(text))).resolves.toMatchObject({ content: 'answer', reasoning: 'first second' });
+  });
+
   it('allows long model responses beyond the default network timeout', async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout');
     try {

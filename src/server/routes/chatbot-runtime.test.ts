@@ -100,6 +100,18 @@ describe('chatbot conversation management API', () => {
     expect(unsafeTools.status).toBe(400);
   });
 
+  it('returns the live activity snapshot used by the conversation console', async () => {
+    const f = fixture();
+    const scope = JSON.stringify(['account-1', 'group', 'group-openid']);
+    const at = Date.now();
+    f.values.set(`nonebotmaker:chatbot:context:state:${encodeURIComponent(scope)}`, JSON.stringify({
+      runtimeActivity: { phase: 'tool', startedAt: at - 1_000, updatedAt: at, input: 'search news', reasoning: 'need current news',
+        tools: [{ id: 'call-1', name: 'WebSearch', status: 'running', startedAt: at, arguments: '{"query":"news"}' }] },
+    }));
+    const response = await authorized(f, '/chatbot/conversations/account-1/group-1');
+    expect(await response.json()).toMatchObject({ data: { active: true, activity: { phase: 'tool', reasoning: 'need current news', tools: [{ name: 'WebSearch', status: 'running' }] } } });
+  });
+
   it('allows only authenticated control-plane sessions to reject a pending MCP operation as the configured conversation owner', async () => {
     const f = fixture();
     const scope = JSON.stringify(['account-1', 'group', 'group-openid']);

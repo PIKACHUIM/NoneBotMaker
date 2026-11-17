@@ -9,6 +9,7 @@ import { createConversationLogRepository, sanitizeLogDetails } from '../storage/
 import { createPersistentChatbotStores, createStoredChatbotHandler } from '../plugins/chatbot/runtime';
 import { ToolApprovalManager } from '../plugins/chatbot/approval';
 import { applyGroupPolicies, loadPolicyLayers } from '../plugins/chatbot/policies';
+import { readRuntimeActivity, runtimeActivityIsActive } from '../plugins/chatbot/activity';
 import { createMemeLibrary } from '../plugins/chatbot/meme-library';
 import { createKVMemeStore } from '../plugins/chatbot/meme-storage';
 import { createKVVoiceAssetStore, createVoiceLibrary } from '../plugins/chatbot/voice-library';
@@ -119,7 +120,8 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
     case 'status': {
       const mode = typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat');
       const context = await stores.conversationStore.getRecent(scope, 1000);
-      return { groupId: group.id, accountId: group.accountId, externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled, connected: false, mode, silent: state.silent === true, model: group.model, providerId: group.providerId, contextMessages: context.length, initialPromptPending: typeof state.initialPrompt === 'string', ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}), disabledTools: [...configIdSet(state.disabledTools)], pendingApprovals: safeApprovalSummary(state), pendingAgentWait: Boolean(state.pendingAgentWait) };
+      const activity = readRuntimeActivity(state);
+      return { groupId: group.id, accountId: group.accountId, externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled, connected: false, mode, silent: state.silent === true, model: group.model, providerId: group.providerId, contextMessages: context.length, initialPromptPending: typeof state.initialPrompt === 'string', ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}), disabledTools: [...configIdSet(state.disabledTools)], pendingApprovals: safeApprovalSummary(state), pendingAgentWait: Boolean(state.pendingAgentWait), activity, active: runtimeActivityIsActive(activity, Date.now()) };
     }
     case 'reset':
       if (!stores.conversationStore.clear) throw new ApiError(503, 'conversation_reset_unavailable');

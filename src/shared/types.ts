@@ -349,6 +349,33 @@ export interface ConversationLog {
   expiresAt: number;
 }
 
+export type ChatbotActivityPhase = 'thinking' | 'tool' | 'replying' | 'completed' | 'error';
+export type ChatbotActivityToolStatus = 'running' | 'pending' | 'completed' | 'error';
+
+export interface ChatbotActivityTool {
+  id: string;
+  name: string;
+  status: ChatbotActivityToolStatus;
+  startedAt: number;
+  finishedAt?: number;
+  arguments?: string;
+  result?: string;
+}
+
+/** Best-effort live snapshot of the conversation currently being processed. */
+export interface ChatbotRuntimeActivity {
+  phase: ChatbotActivityPhase;
+  startedAt: number;
+  updatedAt: number;
+  messageId?: string;
+  userName?: string;
+  input?: string;
+  reasoning?: string;
+  tools: ChatbotActivityTool[];
+  reply?: string;
+  error?: string;
+}
+
 export interface MessageAttachment {
   type: 'image' | 'audio' | 'video' | 'file';
   url: string;

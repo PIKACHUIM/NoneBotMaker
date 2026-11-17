@@ -430,6 +430,10 @@ const chatbotDefinition: PluginDefinition = {
       '控制回复的随机性，0–2；是否支持取决于所选模型。',
       'Controls randomness from 0 to 2; support depends on the selected model.',
     ], { group: agentGroup, default: 0.7, min: 0, max: 2, step: 0.1, scope: 'dialog' }),
+    boolean('agent_show_reasoning', ['输出思考内容', 'Show reasoning'], [
+      '开启后，模型返回的思考内容会以「思考过程」单独发送到当前会话；部分模型不返回思考内容，开启后也可能没有额外内容。',
+      'When enabled, any reasoning text returned by the model is sent to this conversation as a separate “reasoning” message. Some models do not return reasoning.',
+    ], { group: agentGroup, default: false }),
     text('bridge_owner_ids', ['管理员 ID', 'Owner IDs'], [
       '管理员即使不在白名单中也会被允许；多个 ID 用逗号分隔。',
       'Owners are allowed even when not on the allowlist; separate multiple IDs with commas.',

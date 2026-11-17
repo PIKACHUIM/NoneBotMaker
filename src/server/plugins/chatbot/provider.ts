@@ -8,11 +8,21 @@ export interface ProviderChatResult {
   completionTokens: number;
   cachedPromptTokens: number;
   finishReason?: string;
+  reasoning?: string;
 }
 
 interface ProviderResponse {
-  choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown }; finish_reason?: unknown }>;
+  choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown; reasoning_content?: unknown; reasoning?: unknown }; finish_reason?: unknown }>;
   usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } };
+}
+
+const MAX_REASONING_CHARS = 64_000;
+
+function reasoningText(message: { reasoning_content?: unknown; reasoning?: unknown } | undefined): string {
+  if (!message) return '';
+  const value = typeof message.reasoning_content === 'string' ? message.reasoning_content
+    : typeof message.reasoning === 'string' ? message.reasoning : '';
+  return value.trim() ? value.slice(0, MAX_REASONING_CHARS) : '';
 }
 
 const MAX_STREAM_BYTES = 2 * 1024 * 1024;
@@ -62,11 +72,13 @@ export async function completeOpenAICompatible(
   if (!content && !toolCalls.length) throw new Error('Chat provider response is empty.');
   const promptTokens = tokenCount(result.usage?.prompt_tokens, estimateTokens({ messages: request.messages, tools: request.tools }));
   const finish = finishReason(result.choices[0].finish_reason);
+  const reasoning = reasoningText(message);
   return {
     content, toolCalls, promptTokens,
     completionTokens: tokenCount(result.usage?.completion_tokens, estimateTokens({ content, toolCalls })),
     cachedPromptTokens: Math.min(promptTokens, tokenCount(result.usage?.prompt_tokens_details?.cached_tokens, 0)),
     ...(finish ? { finishReason: finish } : {}),
+    ...(reasoning ? { reasoning } : {}),
   };
 }
 
@@ -95,6 +107,7 @@ async function readCompletionStream(response: Response): Promise<ProviderRespons
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const calls = new Map<number, { id?: string; type?: 'function'; function: { name?: string; arguments: string } }>();
   let content = '';
+  let reasoning = '';
   let usage: ProviderResponse['usage'];
   let reason: string | undefined;
   let finished = false;
@@ -112,7 +125,7 @@ async function readCompletionStream(response: Response): Promise<ProviderRespons
       finished = true;
       return;
     }
-    const chunk = parseResponse(text) as Omit<ProviderResponse, 'choices'> & { error?: unknown; choices?: Array<{ index?: unknown; delta?: { content?: unknown; tool_calls?: unknown }; finish_reason?: unknown }> };
+    const chunk = parseResponse(text) as Omit<ProviderResponse, 'choices'> & { error?: unknown; choices?: Array<{ index?: unknown; delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: unknown }; finish_reason?: unknown }> };
     if (chunk.error != null || !Array.isArray(chunk.choices)) throw new Error('Chat provider stream chunk is invalid.');
     if (chunk.usage != null) {
       if (typeof chunk.usage !== 'object' || Array.isArray(chunk.usage)) throw new Error('Chat provider usage is invalid.');
@@ -129,6 +142,12 @@ async function readCompletionStream(response: Response): Promise<ProviderRespons
     if (delta.content != null) {
       if (typeof delta.content !== 'string') throw new Error('Chat provider content delta is invalid.');
       content += delta.content;
+    }
+    if (delta.reasoning_content != null || delta.reasoning != null) {
+      const piece = typeof delta.reasoning_content === 'string' ? delta.reasoning_content
+        : typeof delta.reasoning === 'string' ? delta.reasoning : null;
+      if (piece === null) throw new Error('Chat provider reasoning delta is invalid.');
+      if (reasoning.length < MAX_REASONING_CHARS) reasoning += piece.slice(0, MAX_REASONING_CHARS - reasoning.length);
     }
     if (delta.tool_calls !== undefined) {
       if (!Array.isArray(delta.tool_calls) || delta.tool_calls.length > 32) throw new Error('Chat provider tool calls are invalid.');
@@ -207,7 +226,7 @@ async function readCompletionStream(response: Response): Promise<ProviderRespons
       return call;
     });
     if (toolCalls.length && reason !== 'tool_calls' || reason === 'tool_calls' && !toolCalls.length) throw new Error('Chat provider tool call finish reason is invalid.');
-    return { choices: [{ message: { content, tool_calls: toolCalls }, finish_reason: reason }], usage };
+    return { choices: [{ message: { content, tool_calls: toolCalls, ...(reasoning.trim() ? { reasoning_content: reasoning } : {}) }, finish_reason: reason }], usage };
   } finally {
     try { await reader.cancel(); } finally { reader.releaseLock(); }
   }

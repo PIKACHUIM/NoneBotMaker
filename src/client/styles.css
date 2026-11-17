@@ -729,3 +729,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .help-block p { margin: 0; }
 .code-block { margin: 4px 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2, rgba(0, 0, 0, .04)); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.65; white-space: pre; }
 .extension-sample-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.runtime-activity { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.runtime-activity.is-active { border-color: var(--accent, #4f7cff); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #4f7cff) 35%, transparent); }
+.runtime-activity-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.runtime-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #4f7cff); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #4f7cff) 18%, transparent); animation: runtime-pulse 1.6s ease-in-out infinite; }
+.runtime-activity-block { display: grid; gap: 4px; margin-top: 12px; font-size: 12px; }
+.runtime-activity-block > span { color: var(--muted); }
+.runtime-activity-block pre, .runtime-activity-scroll { margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2, rgba(0, 0, 0, .035)); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; max-height: 220px; }
+.runtime-tool-list { display: grid; gap: 8px; }
+.runtime-tool-row { padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
+.runtime-tool-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+.runtime-tool-head span { color: var(--muted); }
+@keyframes runtime-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }

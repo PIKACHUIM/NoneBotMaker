@@ -10,6 +10,7 @@ import { createConversationLogRepository, sanitizeLogDetails } from '../../serve
 import { createStoredChatbotHandler, type GroupConversationStore, type GroupCostStore } from '../../server/plugins/chatbot/runtime';
 import { ToolApprovalManager } from '../../server/plugins/chatbot/approval';
 import { applyGroupPolicies, hasPolicySelection, loadPolicyLayers } from '../../server/plugins/chatbot/policies';
+import { readRuntimeActivity, runtimeActivityIsActive } from '../../server/plugins/chatbot/activity';
 import { createRepository } from '../../server/storage/repository';
 import { decryptSecrets } from '../../server/storage/secrets';
 import { getQQAccessToken, replyToQQGroup, sendQQMedia } from '../../server/protocols/qq/api';
@@ -287,6 +288,7 @@ export class QQGatewayDurableObject {
         requestedBy: typeof approval.requestedBy === 'string' ? approval.requestedBy : '', ...(args ? { arguments: args } : {}) }];
     }) : [];
     if (action === 'status') {
+      const activity = readRuntimeActivity(state);
       return Response.json({ data: {
         accountId, groupId, externalId: group.externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled,
         connected: this.socket?.readyState === WebSocket.OPEN, gatewayMode: this.env.API_METHOD === 'websocket' ? 'websocket' : 'webhook', mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
@@ -294,7 +296,8 @@ export class QQGatewayDurableObject {
         contextMessages: (await store.getRecent(scope, 1000)).length, initialPromptPending: typeof state.initialPrompt === 'string',
         ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}),
         disabledTools: [...configIdSet(state.disabledTools)], pendingAgentWait: Boolean(state.pendingAgentWait),
-        pendingApprovals: approvals, policyIds: { dialog: group.dialogPolicyId ?? '', voice: group.voicePolicyId ?? '', identity: group.identityPolicyId ?? '' },
+        pendingApprovals: approvals, activity, active: runtimeActivityIsActive(activity, this.now()),
+        policyIds: { dialog: group.dialogPolicyId ?? '', voice: group.voicePolicyId ?? '', identity: group.identityPolicyId ?? '' },
       } });
     }
     if (action === 'reset') {
