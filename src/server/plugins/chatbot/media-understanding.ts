@@ -50,7 +50,6 @@ async function geminiDescribe(provider: ProviderRecord, model: string, media: Do
   const response = await safeFetch(geminiEndpoint(provider.baseUrl, `models/${model.replace(/^models\//i, '')}:generateContent`), {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${provider.apiKey}`,
       'x-goog-api-key': provider.apiKey,
       'content-type': 'application/json',
       accept: 'application/json',

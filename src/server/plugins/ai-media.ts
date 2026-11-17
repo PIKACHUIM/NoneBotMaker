@@ -112,7 +112,7 @@ async function geminiSpeech(provider: ProviderRecord, model: string, input: stri
   const geminiModel = model.replace(/^models\//i, '');
   const response = await safeFetch(geminiEndpoint(provider.baseUrl, `models/${geminiModel}:generateContent`), {
     method: 'POST',
-    headers: { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey, 'content-type': 'application/json', accept: 'application/json' },
+    headers: { 'x-goog-api-key': provider.apiKey, 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: input }] }],
       generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },

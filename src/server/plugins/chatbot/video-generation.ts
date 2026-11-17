@@ -236,7 +236,6 @@ async function generateVeo(
   maxPolls: number,
 ): Promise<Uint8Array> {
   const headers = {
-    authorization: `Bearer ${provider.apiKey}`,
     'x-goog-api-key': provider.apiKey,
     'content-type': 'application/json',
     accept: 'application/json',
@@ -270,12 +269,12 @@ async function generateVeo(
     }
   }
   if (!downloadUrl) throw new Error('Video generation timed out before the provider returned a file.');
-  return downloadVideo(downloadUrl, fetchImpl, { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey });
+  return downloadVideo(downloadUrl, fetchImpl, { 'x-goog-api-key': provider.apiKey });
 }
 
 /** Prefer the configured Veo id, but fall back when the provider says that model does not exist. */
 async function resolveVeoModel(provider: ProviderRecord, configured: string, fetchImpl: typeof fetch): Promise<string> {
-  const headers = { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey, accept: 'application/json' };
+  const headers = { 'x-goog-api-key': provider.apiKey, accept: 'application/json' };
   for (const candidate of [configured, ...VEO_FALLBACKS.filter((entry) => entry !== configured)]) {
     try {
       const response = await safeFetch(geminiEndpoint(provider.baseUrl, `models/${candidate}`), { headers }, fetchImpl, 15_000);
