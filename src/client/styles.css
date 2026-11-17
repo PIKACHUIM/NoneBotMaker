@@ -446,27 +446,53 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .full-width { width: 100%; }
 .schema-fields { padding-top: 6px; }
-.form-section-heading { display: flex; justify-content: space-between; align-items: center; padding: 13px 0 10px; margin: 8px 0 11px; border-top: 1px solid var(--line); color: var(--accent); font: 8px var(--mono); letter-spacing: .09em; }
+.form-section-heading { display: flex; justify-content: space-between; align-items: center; padding: 12px 0 8px; margin: 4px 0 10px; border-top: 1px solid var(--line); color: var(--accent); font: 8px var(--mono); letter-spacing: .09em; }
 .form-section-heading small { color: var(--muted-strong); font: 8px var(--mono); }
-.form-grid { display: grid; gap: 0 14px; }
+.form-grid { display: grid; gap: 0 16px; }
+.form-grid .ant-form-item-control-input { min-height: 32px; display: flex; align-items: center; }
+.form-grid .ant-form-item-control-input-content { width: 100%; }
 .two-cols { grid-template-columns: 1fr 1fr; }
 .three-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.policy-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 16px 0 0; }
-.policy-card-grid.secondary-policies { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 16px 0 24px; }
-.policy-select-card { min-width: 0; padding: 16px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.policy-select-card.is-required { border-color: var(--line-accent); }
-.policy-select-card.is-invalid { border-color: var(--danger); }
-.policy-select-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
-.policy-select-head strong { color: var(--heading); font-size: 16px; font-weight: 500; }
-.policy-select-head .ant-tag { margin: 0; font-size: 12px; }
-.policy-select-card .ant-form-item { margin-bottom: 12px; }
-.policy-select-card .ant-form-item-label label { font-size: 14px; }
-.policy-select-detail, .policy-select-warning { margin: 0 0 12px; color: var(--text-soft); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.policy-select-list { display: grid; gap: 6px; margin: 12px 0 18px; }
+.policy-select-row { display: grid; grid-template-columns: 130px minmax(0, 1.25fr) minmax(170px, .9fr); align-items: center; gap: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.policy-select-row.is-required { border-color: var(--line-accent); }
+.policy-select-row.is-invalid { border-color: var(--danger); }
+.policy-select-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.policy-select-head strong { color: var(--heading); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.policy-select-head .ant-tag { margin: 0; font-size: 10px; line-height: 18px; }
+.policy-select-control { margin: 0 !important; min-width: 0; }
+.policy-select-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.policy-select-detail, .policy-select-warning { margin: 0; min-width: 0; color: var(--text-soft); font-size: 11px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .policy-select-warning { color: var(--danger); }
-.policy-select-card > a { align-self: flex-start; margin-top: auto; color: var(--accent); font-size: 12px; }
-.effective-summary { display: grid; gap: 8px; padding: 16px; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-soft); background: var(--surface-raised); font-size: 12px; line-height: 1.6; }
-.effective-summary strong { color: var(--heading); font-size: 14px; }
-.tool-approval-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.policy-select-meta > a { flex: 0 0 auto; color: var(--accent); font-size: 11px; white-space: nowrap; }
+.effective-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 14px 16px; margin: 14px 0 20px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-soft); background: var(--surface-raised); font-size: 11px; line-height: 1.55; }
+.effective-summary section { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.effective-summary strong { margin-bottom: 2px; color: var(--heading); font-size: 12px; font-weight: 600; }
+.summary-line { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; min-width: 0; }
+.summary-line > span:first-child { color: var(--muted); white-space: nowrap; }
+.summary-line > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.tool-approval-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; }
+.group-name-row { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: center; gap: 16px; }
+.group-name-row > .ant-form-item { margin-bottom: 0; }
+.form-item-inline.ant-form-item { margin-bottom: 0; }
+.form-item-inline > .ant-form-item-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 10px; width: 100%; }
+.form-item-inline .ant-form-item-label { flex: 0 0 auto; padding: 0; }
+.form-item-inline .ant-form-item-label > label { height: auto; margin: 0; }
+.form-item-inline .ant-form-item-control { flex: 1 1 auto; min-width: 0; }
+.form-item-inline .ant-form-item-control-input { min-height: 0; }
+.compact-schema-fields { padding-top: 2px; }
+.compact-field-grid { display: grid; gap: 0 16px; }
+.compact-field-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compact-field-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.compact-field-grid .ant-form-item { margin-bottom: 10px; }
+.compact-field-grid .ant-form-item-label { padding-bottom: 4px; }
+.compact-field-grid .ant-form-item-label > label { font-size: 12px; }
+.compact-field-grid .ant-form-item-control-input { min-height: 32px; display: flex; align-items: center; }
+.compact-note { margin: 0 0 10px; }
+.inline-setting { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 9px 11px; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.inline-setting-copy { display: grid; gap: 3px; min-width: 0; }
+.inline-setting-copy strong { color: var(--text-body); font-size: 12px; font-weight: 500; }
+.inline-setting-copy small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .account-memory-section { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
 .account-memory-section h2 { margin: 0 0 8px; color: var(--heading); font-size: 20px; }
 .account-memory-section p { color: var(--text-soft); font-size: 12px; }
@@ -580,7 +606,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 @media (max-width: 850px) {
   .overview-status-links { grid-template-columns: 1fr; }
-  .policy-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .policy-select-row { grid-template-columns: 1fr; gap: 7px; }
+  .policy-select-meta { justify-content: space-between; }
+  .policy-select-detail { white-space: normal; }
+  .tool-approval-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .landing-shell, .login-shell { padding: 0 22px; }
   .landing-hero { min-height: 0; padding: 54px 0; grid-template-columns: 1fr; }
   .hero-copy h1 { font-size: clamp(46px, 9vw, 68px); }
@@ -680,8 +709,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .page-toolbar { align-items: flex-start; }
   .page-toolbar .ant-btn { padding-inline: 9px; font-size: 9px; }
   .data-page { padding-top: 13px; }
-  .two-cols, .three-cols { grid-template-columns: 1fr; gap: 0; }
-  .policy-card-grid, .policy-card-grid.secondary-policies, .tool-approval-list { grid-template-columns: 1fr; gap: 16px; }
+  .two-cols, .three-cols, .compact-field-grid.cols-2, .compact-field-grid.cols-3, .group-name-row { grid-template-columns: 1fr; gap: 0; }
+  .effective-summary { grid-template-columns: 1fr; gap: 12px; }
+  .policy-select-row, .tool-approval-list { grid-template-columns: 1fr; gap: 8px; }
   .ant-drawer .ant-drawer-body { padding: 18px; }
   .integration-tabs .ant-tabs-tab { padding-inline: 4px; }
   .integration-tabs .ant-tabs-tab-btn { font-size: 9px; }

@@ -1072,6 +1072,26 @@ function SchemaFields({ fields, path, editing = false }: { fields: PluginFieldDe
   return <div className="schema-fields">{[...sections].map(([label, items]) => <section key={label} className="schema-section"><div className="form-section-heading"><span>{label}</span><small>{items.length} FIELDS</small></div>{items.map((field) => <PluginField key={field.key} field={field} path={[path, field.key]} editing={editing} />)}</section>)}</div>;
 }
 
+function CompactSchemaFields({ fields, path, editing = false, columns = 3, note }: { fields: PluginFieldDefinition[]; path: string; editing?: boolean; columns?: 2 | 3; note?: string }) {
+  const { tr, localized } = useI18n();
+  const sections = new Map<string, PluginFieldDefinition[]>();
+  for (const field of fields) {
+    const label = field.group ? localized(field.group) : tr('其他');
+    sections.set(label, [...(sections.get(label) ?? []), field]);
+  }
+  return <div className="compact-schema-fields">{[...sections].map(([label, items]) => <section key={label} className="schema-section">
+    <div className="form-section-heading"><span>{label}</span><small>{items.length} FIELDS</small></div>
+    {note && <p className="form-note compact-note">{note}</p>}
+    <div className={`compact-field-grid cols-${columns}`}>{items.map((field) => <Form.Item
+      key={field.key}
+      name={[path, field.key]}
+      label={localized(field.label)}
+      valuePropName={field.type === 'boolean' ? 'checked' : 'value'}
+      rules={field.required && !(editing && field.secret) ? [{ required: true, message: tr('此字段为必填项') }] : undefined}
+    ><PluginFieldInput field={field} editing={editing} /></Form.Item>)}</div>
+  </section>)}</div>;
+}
+
 function editableFieldValues(fields: PluginFieldDefinition[], previous: JsonObject = {}) {
   const values = { ...defaultFieldValues(fields), ...previous };
   for (const field of fields) {
@@ -1524,18 +1544,20 @@ function PolicySelectCard({ type, name, required = false, policies, value, optio
 }) {
   const { tr } = useI18n();
   const policy = policies.find((item) => item.id === value && item.type === type);
-  return <div className={`policy-select-card${required ? ' is-required' : ''}${value && !policy?.enabled ? ' is-invalid' : ''}`}>
+  return <div className={`policy-select-row${required ? ' is-required' : ''}${value && !policy?.enabled ? ' is-invalid' : ''}`}>
     <div className="policy-select-head"><strong>{tr(policyTypeNames[type])}</strong><Tag color={required ? 'processing' : 'default'}>{required ? tr('必选') : tr('可选')}</Tag></div>
-    <Form.Item name={name} label={tr('所选策略')} rules={[{ validator: async (_, selected: string | undefined) => {
+    <Form.Item name={name} className="policy-select-control" rules={[{ validator: async (_, selected: string | undefined) => {
       if (required && !selected) throw new Error(tr('请选择可用策略'));
       if (selected && !policies.some((item) => item.id === selected && item.type === type && item.enabled)) throw new Error(tr('原策略不可用，请重新选择'));
     } }]}>
-      <Select allowClear={!required} placeholder={required ? tr('请选择可用策略') : tr('关闭 / 不选择')} options={options} />
+      <Select aria-label={tr('所选策略')} allowClear={!required} placeholder={required ? tr('请选择可用策略') : tr('关闭 / 不选择')} options={options} />
     </Form.Item>
-    <p className="policy-select-detail">{detail}</p>
-    {value && policy && !policy.enabled && <p className="policy-select-warning">{tr('原策略已停用，请重新选择可用策略。')}</p>}
-    {value && !policy && <p className="policy-select-warning">{tr('原策略已不存在，请重新选择。')}</p>}
-    <a href={href} target="_blank" rel="noopener noreferrer">{tr('在新标签编辑策略')} <ArrowRightOutlined /></a>
+    <div className="policy-select-meta">
+      <p className="policy-select-detail">{detail}</p>
+      {value && policy && !policy.enabled && <p className="policy-select-warning">{tr('原策略已停用，请重新选择可用策略。')}</p>}
+      {value && !policy && <p className="policy-select-warning">{tr('原策略已不存在，请重新选择。')}</p>}
+      <a href={href} target="_blank" rel="noopener noreferrer">{tr('编辑')} <ArrowRightOutlined /></a>
+    </div>
   </div>;
 }
 
@@ -1684,25 +1706,23 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
             </div>}
           </Form.List>
         </Form.Item>
-        {selectedAccountId && basicConfigFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}
-        <div className="form-grid two-cols">
-          <Form.Item name="name" label={tr('群聊名称')}><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
-          <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
+        {selectedAccountId && basicConfigFields.length > 0 && <div className="form-grid two-cols">{basicConfigFields.map((field) => <PluginField key={field.key} field={field} path={['config', field.key]} editing={Boolean(editing)} />)}</div>}
+        <div className="group-name-row">
+          <Form.Item name="name" label={tr('群聊名称')} className="form-item-inline"><Input placeholder={tr('可选的群聊备注名称')} /></Form.Item>
+          <Form.Item name="enabled" label={tr('启用此群聊策略')} valuePropName="checked" className="form-item-inline"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
         </div>
         {editing && <p className="form-note">{tr('账号与会话类型创建后不可变更；会话 ID 可随时增减。')}</p>}
         <div className="form-section-heading"><span>02 / {tr('核心策略')}</span><small>{tr('身份与对话必选')}</small></div>
         {!identityPolicies.length && <Alert type="warning" showIcon message={tr('还没有可用的身份策略')} description={tr('先到策略管理创建身份策略，不能通过群内模型覆盖代替。')} action={<Button size="small" href="#/admin/identities">{tr('去创建')}</Button>} />}
         {!policies.some((item) => item.type === 'dialog' && item.enabled) && <Alert type="warning" showIcon message={tr('还没有可用的对话策略')} action={<Button size="small" href="#/admin/dialogs">{tr('去创建')}</Button>} />}
-        <div className="policy-card-grid primary-policies">
+        <div className="policy-select-list">
           <PolicySelectCard type="identity" name="identityPolicyId" required policies={policies} value={identityPolicyId} options={policyOptions('identity')} detail={identityPolicy ? `${providers.find((item) => item.id === identityPolicy.providerId)?.name ?? tr('未配置')} · ${identityPolicy.model || tr('未配置')}` : tr('选择后显示模型来源')} href="#/admin/identities" />
           <PolicySelectCard type="dialog" name="dialogPolicyId" required policies={policies} value={dialogPolicyId} options={policyOptions('dialog')} detail={policies.find((item) => item.id === dialogPolicyId)?.config.agent_max_rounds !== undefined ? `${tr('工具调用轮数上限')}：${policies.find((item) => item.id === dialogPolicyId)?.config.agent_max_rounds}` : tr('选择后显示回复方式')} href="#/admin/dialogs" />
           <PolicySelectCard type="voice" name="voicePolicyId" policies={policies} value={voicePolicyId} options={policyOptions('voice')} detail={voicePolicyId ? String(policies.find((item) => item.id === voicePolicyId)?.config.voice_model || tr('未配置语音模型')) : tr('关闭，不会调用语音合成')} href="#/admin/voices" />
-        </div>
-        <div className="policy-card-grid secondary-policies">
           <PolicySelectCard type="cost" name="costPolicyId" policies={policies} value={costPolicyId} options={policyOptions('cost')} detail={costPolicyId ? tr('预算来自费用策略') : tr('未选：不限额；注意可能产生费用')} href="#/admin/budgets" />
           <PolicySelectCard type="memory" name="memoryPolicyId" policies={policies} value={memoryPolicyId} options={policyOptions('memory')} detail={memoryPolicyId ? policies.find((item) => item.id === memoryPolicyId)?.config.memory_enabled === false ? tr('所选策略已关闭会话记忆') : tr('记忆模式来自所选策略') : tr('未选：关闭会话记忆')} href="#/admin/memory-policies" />
         </div>
-        {selectedAccountId && otherConfigFields.length > 0 && <SchemaFields fields={otherConfigFields} path="config" editing={Boolean(editing)} />}
+        {selectedAccountId && otherConfigFields.length > 0 && <CompactSchemaFields fields={otherConfigFields} path="config" editing={Boolean(editing)} columns={3} note={tr('生图与视频需先在「调用工具」中启用，并在身份策略授权；费用仍受本群所选费用策略约束。')} />}
         <div className="form-section-heading"><span>03 / {tr('群聊能力追加')}</span><small>{tr('可选，叠加在身份策略之上')}</small></div>
         <p className="form-note">{tr('身份策略已有的 Skills、MCP 与 Rules 会保留；这里只增加此群额外的能力，不会移除身份授权。')}</p>
         <div className="form-grid three-cols">
@@ -1715,33 +1735,36 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
           <Form.Item name="providerId" label={tr('AI供应商覆盖')} extra={tr('供应商与模型必须成组覆盖；两项留空继承身份策略。')}><Select allowClear placeholder={tr('继承身份策略')} options={providers.filter((item) => item.enabled).map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
           <Form.Item name="model" label={tr('模型覆盖')}><AutoComplete options={provider?.models.map((model) => ({ label: model, value: model })) ?? []} placeholder={tr('继承身份策略或输入模型 ID')} filterOption /></Form.Item>
         </div>
+        <Form.Item name="systemPrompt" label={tr('群专属追加规则')} extra={tr('只追加在身份基础规则之后；人设仅在身份策略编辑，/role 激活时优先使用角色卡。')}><Input.TextArea rows={3} placeholder={tr('此群独有的行为要求；留空使用身份基础规则')} /></Form.Item>
         <div className="form-grid two-cols">
-          <Form.Item name="systemPrompt" label={tr('群专属追加规则')} extra={tr('只追加在身份基础规则之后；人设仅在身份策略编辑，/role 激活时优先使用角色卡。')}><Input.TextArea rows={3} placeholder={tr('此群独有的行为要求；留空使用身份基础规则')} /></Form.Item>
           <Form.Item name="nonMentionReplyRate" label={tr('未 @ 回复概率')} extra={tr('0 表示仅在被 @ 时回复；1 表示每条消息参与判定。')}><InputNumber className="full-width" min={0} max={1} step={0.01} precision={2} /></Form.Item>
-        </div>
-        <div className="form-grid two-cols">
           <Form.Item name="whitelistEnabled" label={tr('启用用户白名单')} valuePropName="checked"><Switch checkedChildren={tr('启用')} unCheckedChildren={tr('停用')} /></Form.Item>
-          <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('空格或逗号分隔；白名单关闭时不生效。')}><Input.TextArea rows={2} placeholder="user-id-1, user-id-2" /></Form.Item>
         </div>
+        {whitelistEnabled && <Form.Item name="whitelistText" label={tr('允许的用户 ID')} extra={tr('空格或逗号分隔；白名单关闭时不生效。')}><Input.TextArea rows={2} placeholder="user-id-1, user-id-2" /></Form.Item>}
         <div className="form-section-heading"><span>{tr('工具审批')}</span><small>{tr('只能约束身份已授权的工具')}</small></div>
         <Form.Item name="toolApprovalMode" label={tr('审批模式')}><Select options={[{ value: 'per-tool', label: tr('逐工具设置') }, { value: 'all-approve', label: tr('全部需要审批') }, { value: 'all-allow', label: tr('全部允许（高风险）') }]} /></Form.Item>
         {approvalMode === 'all-allow' && <Alert type="warning" showIcon message={tr('全部允许会跳过此群已授权工具的人工审批，保存时必须再次确认。')} />}
         {approvalMode === 'per-tool' && (availableTools.length ? <div className="tool-approval-list">{availableTools.map((id) => <Form.Item key={id} name={['toolApprovalRules', id]} label={tools.find((item) => item.id === id)?.name ?? id}><Select options={[{ value: 'approve', label: tr('需要审批') }, { value: 'allow', label: tr('允许') }, { value: 'disabled', label: tr('禁用') }]} placeholder={tr('按身份策略默认规则')} allowClear /></Form.Item>)}</div> : <p className="form-note">{tr('当前身份策略未授权工具，无法在群内增加工具。')}</p>)}
         <div className="form-section-heading"><span>{tr('思考内容')}</span><small>{tr('仅影响本群')}</small></div>
-        <Form.Item name={['config', 'agent_show_reasoning']} label={tr('输出思考内容')} valuePropName="checked" extra={tr('开启后，模型返回的思考内容会以「思考过程」单独发送；部分模型不返回思考内容。会话管理里也会保留最近一次思考与工具调用。')}>
-          <Switch checkedChildren={tr('开启')} unCheckedChildren={tr('关闭')} />
-        </Form.Item>
+        <div className="inline-setting">
+          <div className="inline-setting-copy"><strong>{tr('输出思考内容')}</strong><small>{tr('开启后，模型返回的思考内容会以「思考过程」单独发送；部分模型不返回思考内容。会话管理里也会保留最近一次思考与工具调用。')}</small></div>
+          <Form.Item name={['config', 'agent_show_reasoning']} valuePropName="checked" noStyle><Switch aria-label={tr('输出思考内容')} checkedChildren={tr('开启')} unCheckedChildren={tr('关闭')} /></Form.Item>
+        </div>
         <div className="effective-summary" aria-live="polite">
-          {editing?.effective && <>
+          <section>
             <strong>{tr('已保存的服务端生效值')}</strong>
-            <div>{tr('模型')}：{providers.find((item) => item.id === editing.effective?.providerId)?.name ?? (editing.effective.providerId || tr('未配置'))} / {editing.effective.model || tr('未配置')} · {editing.providerId ? tr('本群覆盖') : tr('身份策略')}</div>
-            <div>{tr('人设')}：{editing.effective.persona ? tr('身份策略默认人设（会话 /role 可覆盖）') : tr('未配置')} · {tr('合并后规则')}：{editing.effective.systemPrompt ? editing.systemPrompt ? tr('身份策略 + 本群追加') : tr('身份策略') : tr('未设置')}</div>
-            <div>{tr('费用')}：{tr('每日限额')} ${editing.effective.dailyCostLimit} / {tr('每月限额')} ${editing.effective.monthlyCostLimit} / {tr('总限额')} ${editing.effective.totalCostLimit} · {editing.costPolicyId ? tr('费用策略') : tr('不限额')}</div>
-          </>}
-          <strong>{tr('当前表单选择（保存后才生效）')}</strong>
-          <div>{tr('人设和基础规则')}：{identityPolicy?.name ?? tr('未选择身份策略')} · {tr('模型')}：{overrideModel && overrideProviderId ? `${provider?.name ?? overrideProviderId} / ${overrideModel} (${tr('本群覆盖')})` : `${providers.find((item) => item.id === identityPolicy?.providerId)?.name ?? tr('未配置')} / ${identityPolicy?.model || tr('未配置')} (${tr('身份策略')})`}</div>
-          <div>{tr('对话')}：{policyName(policies, 'dialog', dialogPolicyId) || tr('未选择')} · {tr('语音')}：{policyName(policies, 'voice', voicePolicyId) || tr('关闭')}</div>
-          <div>{tr('费用')}：{policyName(policies, 'cost', costPolicyId) || tr('不限额')} · {tr('记忆')}：{policyName(policies, 'memory', memoryPolicyId) || tr('关闭')}</div>
+            {editing?.effective ? <>
+              <div className="summary-line"><span>{tr('模型')}</span><span>{providers.find((item) => item.id === editing.effective?.providerId)?.name ?? (editing.effective.providerId || tr('未配置'))} / {editing.effective.model || tr('未配置')} · {editing.providerId ? tr('本群覆盖') : tr('身份策略')}</span></div>
+              <div className="summary-line"><span>{tr('人设')}</span><span>{editing.effective.persona ? tr('身份策略默认人设（会话 /role 可覆盖）') : tr('未配置')} · {tr('合并后规则')}：{editing.effective.systemPrompt ? editing.systemPrompt ? tr('身份策略 + 本群追加') : tr('身份策略') : tr('未设置')}</span></div>
+              <div className="summary-line"><span>{tr('费用')}</span><span>{tr('每日限额')} ${editing.effective.dailyCostLimit} / {tr('每月限额')} ${editing.effective.monthlyCostLimit} / {tr('总限额')} ${editing.effective.totalCostLimit} · {editing.costPolicyId ? tr('费用策略') : tr('不限额')}</span></div>
+            </> : <p className="muted">{tr('尚未保存')}</p>}
+          </section>
+          <section>
+            <strong>{tr('当前表单选择（保存后才生效）')}</strong>
+            <div className="summary-line"><span>{tr('人设 / 模型')}</span><span>{identityPolicy?.name ?? tr('未选择身份策略')} · {overrideModel && overrideProviderId ? `${provider?.name ?? overrideProviderId} / ${overrideModel} (${tr('本群覆盖')})` : `${providers.find((item) => item.id === identityPolicy?.providerId)?.name ?? tr('未配置')} / ${identityPolicy?.model || tr('未配置')} (${tr('身份策略')})`}</span></div>
+            <div className="summary-line"><span>{tr('对话 / 语音')}</span><span>{policyName(policies, 'dialog', dialogPolicyId) || tr('未选择')} · {policyName(policies, 'voice', voicePolicyId) || tr('关闭')}</span></div>
+            <div className="summary-line"><span>{tr('费用 / 记忆')}</span><span>{policyName(policies, 'cost', costPolicyId) || tr('不限额')} · {policyName(policies, 'memory', memoryPolicyId) || tr('关闭')}</span></div>
+          </section>
         </div>
         <div className="form-section-heading"><span>05 / {tr('高级选项')}</span><small>{tr('按需展开')}</small></div>
         <Collapse className="policy-overrides advanced-settings" size="small" items={[{ key: 'advanced', label: tr('时区与预留模式参数'), extra: <span className="policy-overrides-summary">{advancedSummary}</span>, children: <>
