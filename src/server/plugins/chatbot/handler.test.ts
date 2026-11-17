@@ -147,7 +147,7 @@ describe('createChatbotHandler', () => {
   });
 
   it('transcribes an attachment with the configured understanding model before the chat request', async () => {
-    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url === 'https://media.example/cat') return new Response('cat-bytes', { headers: { 'content-type': 'image/png' } });
       if (url.includes('vision.example')) return Response.json({
