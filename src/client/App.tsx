@@ -1576,7 +1576,7 @@ function GroupsPage({ groups, accounts, providers, policies, tools, libraries, o
   const visibleConversationFields = conversationFields(definition?.type).filter((field) => field.key !== 'bridge_allowed_private' || conversationType === 'private');
   const basicConfigFields = visibleConversationFields.filter((field) => field.placement === 'basic');
   const advancedConfigFields = visibleConversationFields.filter((field) => field.placement === 'advanced');
-  const otherConfigFields = visibleConversationFields.filter((field) => !field.placement && field.key !== 'agent_show_reasoning');
+  const otherConfigFields = visibleConversationFields.filter((field) => !field.placement && !field.hidden && field.key !== 'agent_show_reasoning');
   const identityPolicyId = Form.useWatch('identityPolicyId', { form, preserve: true }) as string | undefined;
   const identityPolicy = policies.find((item) => item.type === 'identity' && item.id === identityPolicyId && item.enabled);
   const overrideProviderId = Form.useWatch('providerId', { form, preserve: true }) as string | undefined;

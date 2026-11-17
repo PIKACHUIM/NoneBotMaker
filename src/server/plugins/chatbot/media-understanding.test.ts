@@ -15,7 +15,7 @@ describe('media understanding', () => {
       ? dns()
       : Response.json({ candidates: [{ content: { parts: [{ text: '图片里有一行文字。' }] } }] }));
     const text = await describeMedia(provider, 'gemini-2.5-flash', media, 'image', fetchImpl);
-    expect(text).toBe('图片里有一行文字。');
+    expect(text).toMatchObject({ text: '图片里有一行文字。', model: 'gemini-2.5-flash' });
     const call = fetchImpl.mock.calls.find(([url]) => String(url).includes(':generateContent'))!;
     expect(String(call[0])).toBe('https://vision.example/v1beta/models/gemini-2.5-flash:generateContent');
     expect(JSON.parse(String(call[1]?.body))).toMatchObject({
@@ -29,7 +29,7 @@ describe('media understanding', () => {
       ? dns()
       : Response.json({ choices: [{ message: { content: '一只猫。' } }] }));
     const text = await describeMedia(provider, 'gpt-6-astra', media, 'image', fetchImpl);
-    expect(text).toBe('一只猫。');
+    expect(text).toMatchObject({ text: '一只猫。', model: 'gpt-6-astra' });
     const call = fetchImpl.mock.calls.find(([url]) => String(url).endsWith('/chat/completions'))!;
     expect(JSON.parse(String(call[1]?.body))).toMatchObject({ model: 'gpt-6-astra', messages: [{ role: 'user', content: [{ type: 'text' }, { type: 'image_url' }] }] });
   });
@@ -38,6 +38,17 @@ describe('media understanding', () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).includes('dns-query') ? dns() : Response.json({}));
     await expect(describeMedia(provider, 'gpt-6-astra', { bytes: new Uint8Array([1]), mime: 'audio/ogg' }, 'audio', fetchImpl))
       .rejects.toThrow('MP3/WAV');
+  });
+
+  it('retries a sibling Gemini model only when the model id is rejected', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('dns-query')) return dns();
+      if (url.includes('gemini-2.5-flash:')) return new Response(JSON.stringify({ error: { message: '404 model not found' } }), { status: 404, headers: { 'content-type': 'application/json' } });
+      return Response.json({ candidates: [{ content: { parts: [{ text: 'ok' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2 } });
+    });
+    const result = await describeMedia(provider, 'gemini-2.5-flash', media, 'image', fetchImpl);
+    expect(result).toMatchObject({ text: 'ok', model: 'gemini-3.8-flash', inputTokens: 10, outputTokens: 2 });
   });
 
   it('rejects unconfigured models and unavailable providers', async () => {

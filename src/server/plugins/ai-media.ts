@@ -1,5 +1,5 @@
 import type { ProviderRecord } from '../../shared/types';
-import { boundedBytes, boundedText, geminiEndpoint, openAiEndpoint, publicHttpsUrl, safeFetch } from './chatbot/network';
+import { boundedBytes, boundedText, geminiEndpoint, isMissingModelError, openAiEndpoint, publicHttpsUrl, safeFetch } from './chatbot/network';
 
 export type SpeechProtocol = 'openai' | 'gemini' | 'minimax';
 
@@ -18,11 +18,14 @@ export interface SpeechResult {
   contentType: 'audio/mpeg' | 'audio/wav';
   filename: 'speech.mp3' | 'speech.wav';
   inputCharacters: number;
+  model: string;
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const MAX_INPUT_CHARS = 4096;
 const DEFAULT_VOICES: Record<SpeechProtocol, string> = { openai: 'alloy', gemini: 'Kore', minimax: 'male-qn-qingse' };
+/** Google renames TTS previews frequently; a model-id 404 falls through to a sibling. */
+const GEMINI_TTS_FALLBACKS = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts', 'gemini-3.8-flash-tts', 'gemini-4-argon-tts'];
 
 /** Picks the speech protocol from an explicit setting or the model naming convention. */
 export function speechProtocolFor(model: string, configured: unknown = 'auto'): SpeechProtocol {
@@ -83,9 +86,9 @@ function pcmSampleRate(mime: string): number {
   return rate ? Math.min(48_000, Math.max(8_000, Number(rate))) : 24_000;
 }
 
-function audioResult(bytes: Uint8Array, inputCharacters: number): SpeechResult {
-  if (isMp3(bytes)) return { bytes, contentType: 'audio/mpeg', filename: 'speech.mp3', inputCharacters };
-  if (isWav(bytes)) return { bytes, contentType: 'audio/wav', filename: 'speech.wav', inputCharacters };
+function audioResult(bytes: Uint8Array, inputCharacters: number, model: string): SpeechResult {
+  if (isMp3(bytes)) return { bytes, contentType: 'audio/mpeg', filename: 'speech.mp3', inputCharacters, model };
+  if (isWav(bytes)) return { bytes, contentType: 'audio/wav', filename: 'speech.wav', inputCharacters, model };
   throw new Error('Speech provider returned invalid MP3 or WAV audio.');
 }
 
@@ -102,7 +105,7 @@ async function openAiSpeech(provider: ProviderRecord, model: string, input: stri
   }
   const bytes = await boundedBytes(response, maxBytes);
   if (!bytes.length) throw new Error('Speech provider returned empty audio.');
-  return audioResult(bytes, inputCharacters);
+  return audioResult(bytes, inputCharacters, model);
 }
 
 async function geminiSpeech(provider: ProviderRecord, model: string, input: string, voice: string, maxBytes: number, inputCharacters: number, fetchImpl: typeof fetch): Promise<SpeechResult> {
@@ -127,7 +130,7 @@ async function geminiSpeech(provider: ProviderRecord, model: string, input: stri
   let bytes = decodeBase64(inline.data);
   if (bytes.byteLength > maxBytes) throw new Error('Response exceeds size limit.');
   if (!isMp3(bytes) && !isWav(bytes)) bytes = wavFromPcm(bytes, pcmSampleRate(mime));
-  return audioResult(bytes, inputCharacters);
+  return audioResult(bytes, inputCharacters, model);
 }
 
 async function miniMaxSpeech(provider: ProviderRecord, model: string, input: string, voice: string, speed: number, maxBytes: number, inputCharacters: number, fetchImpl: typeof fetch): Promise<SpeechResult> {
@@ -149,7 +152,7 @@ async function miniMaxSpeech(provider: ProviderRecord, model: string, input: str
   const bytes = decodeHex(payload.data.audio);
   if (!bytes.length) throw new Error('Speech provider returned empty audio.');
   if (bytes.byteLength > maxBytes) throw new Error('Response exceeds size limit.');
-  return audioResult(bytes, inputCharacters);
+  return audioResult(bytes, inputCharacters, model);
 }
 
 export async function createSpeech(
@@ -174,9 +177,19 @@ export async function createSpeech(
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_UPLOAD_BYTES) throw new Error('Invalid speech media limit.');
   const inputCharacters = Array.from(input).length;
   if (!inputCharacters || inputCharacters > maxTextChars) throw new Error('Speech text exceeds the configured limit.');
-  return protocol === 'gemini'
-    ? geminiSpeech(provider, model, input, voice, maxBytes, inputCharacters, fetchImpl)
-    : protocol === 'minimax'
-      ? miniMaxSpeech(provider, model, input, voice, speed, maxBytes, inputCharacters, fetchImpl)
-      : openAiSpeech(provider, model, input, voice, speed, maxBytes, inputCharacters, fetchImpl);
+  if (protocol === 'gemini') {
+    let lastError: unknown;
+    for (const candidate of [model, ...GEMINI_TTS_FALLBACKS.filter((entry) => entry !== model)]) {
+      try {
+        return await geminiSpeech(provider, candidate, input, voice, maxBytes, inputCharacters, fetchImpl);
+      } catch (error) {
+        lastError = error;
+        if (!isMissingModelError(error)) throw error;
+      }
+    }
+    throw lastError;
+  }
+  return protocol === 'minimax'
+    ? miniMaxSpeech(provider, model, input, voice, speed, maxBytes, inputCharacters, fetchImpl)
+    : openAiSpeech(provider, model, input, voice, speed, maxBytes, inputCharacters, fetchImpl);
 }

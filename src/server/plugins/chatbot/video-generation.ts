@@ -1,11 +1,12 @@
 import type { ProviderRecord } from '../../../shared/types';
-import { boundedBytes, boundedText, geminiEndpoint, publicHttpsUrl, safeFetch } from './network';
+import { boundedBytes, boundedText, geminiEndpoint, isMissingModelError, publicHttpsUrl, safeFetch } from './network';
 
 /** QQ rich-media upload rejects anything above 5 MiB, so larger videos fail before sending. */
 export const MAX_VIDEO_BYTES = 5 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_MAX_POLLS = 30;
+const VEO_FALLBACKS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview', 'veo-3.0-generate-001', 'veo-2.0-generate-001'];
 
 export type VideoProtocol = 'minimax' | 'openai' | 'veo';
 export type VideoResolution = '768P' | '1080P';
@@ -36,6 +37,7 @@ export interface VideoGenerationResult {
   pricingSource: 'price' | 'per_second_fallback';
   estimated: boolean;
   priceId?: string;
+  model: string;
 }
 
 export class VideoGenerationAttemptError extends Error {
@@ -271,6 +273,22 @@ async function generateVeo(
   return downloadVideo(downloadUrl, fetchImpl, { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey });
 }
 
+/** Prefer the configured Veo id, but fall back when the provider says that model does not exist. */
+async function resolveVeoModel(provider: ProviderRecord, configured: string, fetchImpl: typeof fetch): Promise<string> {
+  const headers = { authorization: `Bearer ${provider.apiKey}`, 'x-goog-api-key': provider.apiKey, accept: 'application/json' };
+  for (const candidate of [configured, ...VEO_FALLBACKS.filter((entry) => entry !== configured)]) {
+    try {
+      const response = await safeFetch(geminiEndpoint(provider.baseUrl, `models/${candidate}`), { headers }, fetchImpl, 15_000);
+      await response.body?.cancel();
+      return candidate;
+    } catch (error) {
+      // A missing model returns 404; auth or gateway failures must not be masked by switching models.
+      if (!isMissingModelError(error)) return configured;
+    }
+  }
+  return configured;
+}
+
 /** Performs one video generation. Caller must gate tool enablement, approval, budget and media sending. */
 export async function generateVideo(
   provider: ProviderRecord,
@@ -301,10 +319,11 @@ export async function generateVideo(
   const pollIntervalMs = Number.isSafeInteger(options.pollIntervalMs) && options.pollIntervalMs! >= 0 ? options.pollIntervalMs! : DEFAULT_POLL_INTERVAL_MS;
   const maxPolls = Number.isSafeInteger(options.maxPolls) && options.maxPolls! > 0 ? options.maxPolls! : DEFAULT_MAX_POLLS;
   try {
+    const effectiveModel = request.protocol === 'veo' ? await resolveVeoModel(provider, model, fetchImpl) : model;
     const bytes = request.protocol === 'minimax'
       ? await generateMiniMax(provider, request, fetchImpl, pollIntervalMs, maxPolls)
       : request.protocol === 'veo'
-        ? await generateVeo(provider, request, fetchImpl, pollIntervalMs, maxPolls)
+        ? await generateVeo(provider, { ...request, model: effectiveModel }, fetchImpl, pollIntervalMs, maxPolls)
         : await generateOpenAiStyle(provider, request, fetchImpl, pollIntervalMs, maxPolls);
     return {
       bytes,
@@ -315,6 +334,7 @@ export async function generateVideo(
       cost: estimatedCost,
       pricingSource: priced ? 'price' : 'per_second_fallback',
       estimated: !priced,
+      model: effectiveModel,
       ...(priced && price?.id ? { priceId: price.id } : {}),
     };
   } catch (error) {

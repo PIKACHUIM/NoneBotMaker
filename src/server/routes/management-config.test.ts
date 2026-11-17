@@ -559,6 +559,7 @@ describe('capability policies', () => {
     expect(definition.groupFields.filter((field) => !field.scope).map((field) => field.key)).toEqual([
       'agent_show_reasoning', 'bridge_owner_ids', 'bridge_commands_enabled', 'bridge_allowed_private', 'bridge_mode', 'bridge_reserved_prompt', 'bridge_reserved2_prompt', 'timezone',
       'media_image_enabled', 'media_image_size', 'media_image_quality', 'media_video_enabled', 'media_video_resolution', 'media_video_duration',
+      'media_understanding_provider_id', 'media_understanding_model', 'media_understanding_mode', 'media_understanding_protocol',
     ]);
 
     const setup = configuredApp();

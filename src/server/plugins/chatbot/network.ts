@@ -29,8 +29,13 @@ export function geminiEndpoint(baseUrl: string, endpoint: string): string {
   return url.toString();
 }
 
-export function publicHttpsUrl(value: string): URL {
-  const url = new URL(value);
+/** True when an upstream rejected the model id itself, so trying a sibling model is safe. */
+export function isMissingModelError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b404\b|not[\s_-]*found|does not exist|unknown model|invalid model|model[^.]{0,40}(?:not supported|unsupported)/i.test(message);
+}
+
+export function publicHttpsUrl(value: string): URL {  const url = new URL(value);
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') ||
       !host.includes('.') || /(^|\.)(localhost|local|internal|lan|home|test|invalid)$/.test(host) ||

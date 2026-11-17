@@ -601,6 +601,36 @@ const chatbotDefinition: PluginDefinition = {
       '请求的视频时长，4–15 秒；供应商可能只接受 6 或 10 秒，具体以接口返回为准。',
       'Requested video duration, 4–15 seconds. Some providers accept only 6 or 10 seconds and their error is surfaced.',
     ], { group: mediaGroup, default: 6, min: 4, max: 15, step: 1 }),
+    text('media_understanding_provider_id', ['媒体理解供应商', 'Understanding provider'], [
+      '当对话模型不能读取图片、音频或视频时，用这个供应商的多模态模型先转写为文字。',
+      'When the chat model cannot read images, audio or video, this provider’s multimodal model transcribes it to text first.',
+    ], { group: mediaGroup, default: '', hidden: true }),
+    text('media_understanding_model', ['媒体理解模型', 'Understanding model'], [
+      '支持图片、音频与视频输入的多模态模型；Gemini 模型会自动使用原生接口。',
+      'A multimodal model that accepts image, audio and video input; Gemini models use the native API automatically.',
+    ], { group: mediaGroup, default: '', hidden: true }),
+    text('media_understanding_mode', ['媒体理解模式', 'Understanding mode'], [
+      'fallback 只在对话模型不支持该附件时转写；always 始终先转写；off 关闭。',
+      'fallback transcribes only unsupported attachments; always transcribes every attachment; off disables it.',
+    ], {
+      group: mediaGroup, default: 'fallback', hidden: true,
+      options: [
+        { value: 'fallback', label: { zh: '仅模型不支持时', en: 'Only when unsupported' } },
+        { value: 'always', label: { zh: '始终先转写', en: 'Always transcribe' } },
+        { value: 'off', label: { zh: '关闭', en: 'Off' } },
+      ],
+    }),
+    text('media_understanding_protocol', ['媒体理解协议', 'Understanding protocol'], [
+      'auto 根据模型名识别；gemini 使用原生 generateContent；openai 使用 chat/completions。',
+      'auto detects from the model name; gemini uses native generateContent; openai uses chat/completions.',
+    ], {
+      group: mediaGroup, default: 'auto', hidden: true,
+      options: [
+        { value: 'auto', label: { zh: '自动识别', en: 'Auto detect' } },
+        { value: 'gemini', label: { zh: 'Gemini 原生', en: 'Gemini native' } },
+        { value: 'openai', label: { zh: 'OpenAI 兼容', en: 'OpenAI compatible' } },
+      ],
+    }),
   ],
   credentialFields: qqCredentialFields,
   protocolDefinitions: builtinChatProtocols,
