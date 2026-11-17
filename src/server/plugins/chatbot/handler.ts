@@ -513,7 +513,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
             throw error;
           }
           await dependencies.recordGroupCost(billingGroup, result.cost, now());
-          await log('out', '', 'video_completed', { model: result.model, requestedModel: videoModel, providerId, resolution: result.resolution, duration: result.duration,
+          await log('out', '', 'video_completed', { model: result.model, requestedModel: videoModel, protocol: result.protocol, providerId, resolution: result.resolution, duration: result.duration,
             cost: result.cost, pricingSource: result.pricingSource, estimated: result.estimated, priceId: result.priceId,
             media: { type: 'video', contentType: result.contentType, size: result.bytes.byteLength } });
           if (!(await (dependencies.reserveOutbound ?? reserveOutbound)(key, 1, now(), Math.trunc(configNumber(config, 'bridge_max_messages_per_minute', 6, 1, 60))))) throw new Error('Outbound message rate limit reached after video generation.');

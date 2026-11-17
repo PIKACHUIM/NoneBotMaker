@@ -1,5 +1,5 @@
 import type { ProviderRecord } from '../../../shared/types';
-import { boundedBytes, boundedText, geminiEndpoint, isMissingModelError, publicHttpsUrl, safeFetch } from './network';
+import { boundedBytes, boundedText, geminiEndpoint, isMissingModelError, openAiEndpoint, publicHttpsUrl, safeFetch } from './network';
 
 /** QQ rich-media upload rejects anything above 5 MiB, so larger videos fail before sending. */
 export const MAX_VIDEO_BYTES = 5 * 1024 * 1024;
@@ -7,6 +7,7 @@ const MAX_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_MAX_POLLS = 30;
 const VEO_FALLBACKS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview', 'veo-3.0-generate-001', 'veo-2.0-generate-001'];
+const OPENAI_VIDEO_FALLBACKS = ['veo-3.1', 'veo-3.1-fast', 'kling-v2.5', 'kling-v2.1', 'seedance-2.5', 'seedance-1.0-pro', 'runway-gen4-turbo', 'sora-2'];
 
 export type VideoProtocol = 'minimax' | 'openai' | 'veo';
 export type VideoResolution = '768P' | '1080P';
@@ -38,6 +39,7 @@ export interface VideoGenerationResult {
   estimated: boolean;
   priceId?: string;
   model: string;
+  protocol: VideoProtocol;
 }
 
 export class VideoGenerationAttemptError extends Error {
@@ -178,25 +180,69 @@ async function generateMiniMax(
   return downloadVideo(downloadUrl, fetchImpl);
 }
 
+async function discoverOpenAiVideoModel(provider: ProviderRecord, configured: string, fetchImpl: typeof fetch): Promise<string> {
+  try {
+    const response = await safeFetch(openAiEndpoint(provider.baseUrl, 'models'), {
+      headers: { authorization: `Bearer ${provider.apiKey}`, accept: 'application/json' },
+    }, fetchImpl, 20_000);
+    const payload = JSON.parse(await boundedText(response, 1_000_000)) as { data?: Array<{ id?: unknown }> };
+    const ids = (payload.data ?? []).flatMap((entry) => typeof entry?.id === 'string' ? [entry.id] : []);
+    if (ids.includes(configured)) return configured;
+    return ids.find((id) => /sora|veo|kling|seedance|hailuo|video|runway/i.test(id)) ?? configured;
+  } catch {
+    // Model listing is optional; the configured id remains the fallback.
+    return configured;
+  }
+}
+
+interface OpenAiVideoResult {
+  bytes: Uint8Array;
+  model: string;
+}
+
+/** Snaps a requested duration to the values video models actually accept. */
+function openAiSeconds(model: string, duration: number): number {
+  if (/sora/i.test(model)) return duration <= 4 ? 4 : duration <= 8 ? 8 : 12;
+  if (/veo/i.test(model)) return duration <= 4 ? 4 : duration <= 6 ? 6 : 8;
+  if (/kling/i.test(model)) return duration <= 5 ? 5 : 10;
+  return duration;
+}
+
 async function generateOpenAiStyle(
   provider: ProviderRecord,
   request: VideoGenerationRequest,
   fetchImpl: typeof fetch,
   pollIntervalMs: number,
   maxPolls: number,
-): Promise<Uint8Array> {
-  const created = await requestJson(await safeFetch(apiEndpoint(provider.baseUrl, 'videos'), {
-    method: 'POST',
-    headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({
-      model: request.model,
-      prompt: request.prompt,
-      seconds: String(request.duration),
-      size: request.resolution === '1080P' ? '1920x1080' : '1280x720',
-    }),
-  }, fetchImpl, 60_000), 'Video provider');
-  const taskId = deepString(created, 'id') ?? deepString(created, 'task_id');
-  if (!taskId || !/^[\w.:-]{1,256}$/.test(taskId)) throw new Error('Video provider did not return a task id.');
+): Promise<OpenAiVideoResult> {
+  const preferred = await discoverOpenAiVideoModel(provider, request.model, fetchImpl);
+  let taskId: string | undefined;
+  let usedModel = preferred;
+  let lastError: unknown;
+  for (const candidate of [preferred, ...OPENAI_VIDEO_FALLBACKS.filter((entry) => entry !== preferred)]) {
+    const seconds = openAiSeconds(candidate, request.duration);
+    try {
+      const created = await requestJson(await safeFetch(apiEndpoint(provider.baseUrl, 'videos'), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${provider.apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          model: candidate,
+          prompt: request.prompt,
+          seconds: String(seconds),
+          size: request.resolution === '1080P' ? '1920x1080' : '1280x720',
+        }),
+      }, fetchImpl, 60_000), 'Video provider');
+      const id = deepString(created, 'id') ?? deepString(created, 'task_id');
+      if (!id || !/^[\w.:-]{1,256}$/.test(id)) throw new Error('Video provider did not return a task id.');
+      taskId = id;
+      usedModel = candidate;
+      break;
+    } catch (error) {
+      lastError = error;
+      if (!isMissingModelError(error)) throw error;
+    }
+  }
+  if (!taskId) throw lastError ?? new Error('No video model is available for this provider.');
 
   for (let poll = 0; poll < maxPolls; poll += 1) {
     if (poll > 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -208,7 +254,7 @@ async function generateOpenAiStyle(
     if (state === 'failed' || error) throw new Error(error ?? 'Video generation failed.');
     const directUrl = deepString(status, 'url') ?? deepString(status, 'video', 'url');
     if (['completed', 'succeeded', 'success'].includes(state)) {
-      if (directUrl) return downloadVideo(directUrl, fetchImpl);
+      if (directUrl) return { bytes: await downloadVideo(directUrl, fetchImpl), model: usedModel };
       const content = await safeFetch(apiEndpoint(provider.baseUrl, `videos/${encodeURIComponent(taskId)}/content`), {
         headers: { authorization: `Bearer ${provider.apiKey}`, accept: 'video/mp4,video/*;q=0.9' },
       }, fetchImpl, 120_000);
@@ -217,11 +263,11 @@ async function generateOpenAiStyle(
         const payload = await requestJson(content, 'Video content');
         const url = deepString(payload, 'url') ?? deepString(payload, 'video', 'url');
         if (!url) throw new Error('Video provider did not return video data.');
-        return downloadVideo(url, fetchImpl);
+        return { bytes: await downloadVideo(url, fetchImpl), model: usedModel };
       }
       const bytes = await boundedBytes(content, MAX_VIDEO_BYTES);
       assertMp4(bytes);
-      return bytes;
+      return { bytes, model: usedModel };
     }
   }
   throw new Error('Video generation timed out before the provider returned a file.');
@@ -319,11 +365,28 @@ export async function generateVideo(
   const maxPolls = Number.isSafeInteger(options.maxPolls) && options.maxPolls! > 0 ? options.maxPolls! : DEFAULT_MAX_POLLS;
   try {
     const effectiveModel = request.protocol === 'veo' ? await resolveVeoModel(provider, model, fetchImpl) : model;
-    const bytes = request.protocol === 'minimax'
-      ? await generateMiniMax(provider, request, fetchImpl, pollIntervalMs, maxPolls)
-      : request.protocol === 'veo'
-        ? await generateVeo(provider, { ...request, model: effectiveModel }, fetchImpl, pollIntervalMs, maxPolls)
-        : await generateOpenAiStyle(provider, request, fetchImpl, pollIntervalMs, maxPolls);
+    let bytes: Uint8Array;
+    let usedModel = effectiveModel;
+    let usedProtocol = request.protocol;
+    if (request.protocol === 'minimax') {
+      bytes = await generateMiniMax(provider, request, fetchImpl, pollIntervalMs, maxPolls);
+    } else if (request.protocol === 'veo') {
+      try {
+        bytes = await generateVeo(provider, { ...request, model: effectiveModel }, fetchImpl, pollIntervalMs, maxPolls);
+      } catch (error) {
+        // A relay key issued for the OpenAI platform cannot call native Gemini/Veo.
+        // The same relay still exposes the OpenAI-compatible /videos route.
+        if (!/platform is not gemini/i.test(error instanceof Error ? error.message : '')) throw error;
+        const fallback = await generateOpenAiStyle(provider, { ...request, model }, fetchImpl, pollIntervalMs, maxPolls);
+        bytes = fallback.bytes;
+        usedModel = fallback.model;
+        usedProtocol = 'openai';
+      }
+    } else {
+      const fallback = await generateOpenAiStyle(provider, request, fetchImpl, pollIntervalMs, maxPolls);
+      bytes = fallback.bytes;
+      usedModel = fallback.model;
+    }
     return {
       bytes,
       contentType: 'video/mp4',
@@ -333,7 +396,8 @@ export async function generateVideo(
       cost: estimatedCost,
       pricingSource: priced ? 'price' : 'per_second_fallback',
       estimated: !priced,
-      model: effectiveModel,
+      model: usedModel,
+      protocol: usedProtocol,
       ...(priced && price?.id ? { priceId: price.id } : {}),
     };
   } catch (error) {

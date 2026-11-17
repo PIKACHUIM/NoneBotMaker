@@ -74,6 +74,24 @@ describe('video generation', () => {
     expect((download?.[1]?.headers as Record<string, string>)['x-goog-api-key']).toBe('private-key');
   });
 
+  it('falls back to the OpenAI /videos route when the relay key is not a Gemini platform', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('cloudflare-dns.com')) return dns();
+      if (url.includes(':predictLongRunning')) return new Response(JSON.stringify({ error: { code: 400, message: 'API key group platform is not gemini' } }), { status: 400, headers: { 'content-type': 'application/json' } });
+      if (url === 'https://relay.example/v1/models') return json({ data: [{ id: 'gpt-6-astra' }, { id: 'sora-2' }] });
+      if (url === 'https://relay.example/v1/videos') return json({ id: 'task-video-1' });
+      if (url === 'https://relay.example/v1/videos/task-video-1') return json({ status: 'completed', url: 'https://cdn.example.com/fallback.mp4' });
+      if (url === 'https://cdn.example.com/fallback.mp4') return new Response(mp4, { headers: { 'content-type': 'video/mp4' } });
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    const result = await generateVideo({ ...provider, baseUrl: 'https://relay.example/v1', models: ['veo-configured'] },
+      { ...request, model: 'veo-configured', protocol: 'veo' }, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 2 });
+    expect(result).toMatchObject({ protocol: 'openai', model: 'sora-2', bytes: mp4 });
+    const create = fetchImpl.mock.calls.find(([url]) => String(url) === 'https://relay.example/v1/videos');
+    expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({ model: 'sora-2', seconds: '8' });
+  });
+
   it('charges the configured fallback and reports failures', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
