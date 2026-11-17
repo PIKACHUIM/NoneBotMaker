@@ -1353,7 +1353,7 @@ export function createChatbotHandler(dependencies: ChatbotHandlerDependencies): 
       const errorMessage = error instanceof Error ? error.message : 'Chatbot execution failed.';
       await publishActivity({ phase: 'error', error: activityText(errorMessage, 1000) });
       const errorCode = /timed?\s*out|aborted due to timeout|timeout/i.test(errorMessage) ? 'timeout' : undefined;
-      try { await log('out', '', 'error', { error: errorMessage, ...(errorCode ? { errorCode } : {}), sentCount }); }
+      try { await log('out', '', 'error', { error: errorMessage, model, providerId: provider?.id, ...(errorCode ? { errorCode } : {}), sentCount }); }
       catch { /* The user-facing notice below is still useful when logging is unavailable. */ }
       const notice = chatErrorNotice(errorMessage);
       if (!message.isWake && sentCount === 0 && notice) {

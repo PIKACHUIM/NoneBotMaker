@@ -132,6 +132,36 @@ describe('video generation', () => {
     }
   });
 
+  it('stops on a platform-level video rejection without charging the group', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('cloudflare-dns.com')) return dns();
+      if (url.endsWith('/v1/models')) return json({ data: [] });
+      return new Response(JSON.stringify({ error: { message: 'Videos API is not supported for this platform', type: 'invalid_request_error' } }),
+        { status: 404, headers: { 'content-type': 'application/json' } });
+    });
+    const error = await generateVideo({ ...provider, baseUrl: 'https://relay.example' },
+      { ...request, protocol: 'openai' }, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 1 })
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(VideoGenerationAttemptError);
+    expect((error as Error).message).toMatch(/not allowed to use the video API/);
+    expect((error as VideoGenerationAttemptError).billable).toBe(false);
+  });
+
+  it('reports every candidate the relay rejected', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('cloudflare-dns.com')) return dns();
+      if (url.endsWith('/v1/models')) return json({ data: [{ id: 'sora-2' }, { id: 'chat-model' }] });
+      return new Response(JSON.stringify({ error: { message: 'model not found' } }),
+        { status: 404, headers: { 'content-type': 'application/json' } });
+    });
+    const error = await generateVideo({ ...provider, baseUrl: 'https://relay.example', models: ['sora-2'] },
+      { ...request, model: 'sora-2', protocol: 'openai' }, null, fetchImpl, { pollIntervalMs: 0, maxPolls: 1 })
+      .catch((reason: unknown) => reason);
+    expect((error as Error).message).toMatch(/rejected every candidate \(sora-2, /);
+  });
+
   it('normalizes versioned provider base URLs without duplicating /v1', () => {
     expect(videoApiUrl('https://api.minimax.io', 'video_generation')).toBe('https://api.minimax.io/v1/video_generation');
     expect(videoApiUrl('https://api.example.com/v1', 'videos')).toBe('https://api.example.com/v1/videos');

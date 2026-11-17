@@ -7,7 +7,7 @@ const MAX_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_MAX_POLLS = 30;
 const VEO_FALLBACKS = ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview', 'veo-3.0-generate-001', 'veo-2.0-generate-001'];
-const OPENAI_VIDEO_FALLBACKS = ['veo-3.1', 'veo-3.1-fast', 'kling-v2.5', 'kling-v2.1', 'seedance-2.5', 'seedance-1.0-pro', 'runway-gen4-turbo', 'sora-2'];
+const OPENAI_VIDEO_FALLBACKS = ['sora-2', 'sora-2-pro', 'veo-3.1', 'veo-3.1-fast', 'kling-v2.5', 'kling-v2.1', 'seedance-2.5', 'runway-gen4-turbo'];
 
 export type VideoProtocol = 'minimax' | 'openai' | 'veo';
 export type VideoResolution = '768P' | '1080P';
@@ -52,7 +52,7 @@ export class VideoGenerationAttemptError extends Error {
     super(message);
     this.name = 'VideoGenerationAttemptError';
     this.estimatedCost = estimatedCost;
-    this.billable = !/Remote request failed \(4\d{2}\)/i.test(message);
+    this.billable = !/Remote request failed \(4\d{2}\)/i.test(message) && !videoCapabilityError(message);
   }
 }
 
@@ -180,19 +180,35 @@ async function generateMiniMax(
   return downloadVideo(downloadUrl, fetchImpl);
 }
 
-async function discoverOpenAiVideoModel(provider: ProviderRecord, configured: string, fetchImpl: typeof fetch): Promise<string> {
+/** Lists the video-capable ids the relay advertises, with the configured model kept first. */
+async function discoverOpenAiVideoModels(provider: ProviderRecord, configured: string, fetchImpl: typeof fetch): Promise<string[]> {
+  const fallback = OPENAI_VIDEO_FALLBACKS.filter((entry) => entry !== configured);
   try {
     const response = await safeFetch(openAiEndpoint(provider.baseUrl, 'models'), {
       headers: { authorization: `Bearer ${provider.apiKey}`, accept: 'application/json' },
     }, fetchImpl, 20_000);
     const payload = JSON.parse(await boundedText(response, 1_000_000)) as { data?: Array<{ id?: unknown }> };
     const ids = (payload.data ?? []).flatMap((entry) => typeof entry?.id === 'string' ? [entry.id] : []);
-    if (ids.includes(configured)) return configured;
-    return ids.find((id) => /sora|veo|kling|seedance|hailuo|video|runway/i.test(id)) ?? configured;
+    const videoIds = ids.filter((id) => /sora|veo|kling|seedance|hailuo|video|runway|jimeng|vidu|pika/i.test(id));
+    const ordered = videoIds.includes(configured)
+      ? [configured, ...videoIds.filter((id) => id !== configured)]
+      : [...videoIds, configured];
+    return [...new Set([...ordered, ...fallback])].slice(0, 5);
   } catch {
-    // Model listing is optional; the configured id remains the fallback.
-    return configured;
+    // Model listing is optional; the configured id remains the first candidate.
+    return [configured, ...fallback].slice(0, 5);
   }
+}
+
+/**
+ * Relays reject the whole Videos API (not one model) when the key's group has no video access.
+ * Retrying other model ids cannot help, so this must surface to the administrator instead.
+ */
+export function videoCapabilityError(message: string): string | undefined {
+  if (/videos? api is not supported|not supported for this platform|platform is not gemini|no available (?:video )?channel|not allowed to use the video api|视频.*(?:不可用|不支持)/i.test(message)) {
+    return 'The provider key is not allowed to use the video API. Use a key/group with video access or switch the video provider.';
+  }
+  return undefined;
 }
 
 interface OpenAiVideoResult {
@@ -215,12 +231,14 @@ async function generateOpenAiStyle(
   pollIntervalMs: number,
   maxPolls: number,
 ): Promise<OpenAiVideoResult> {
-  const preferred = await discoverOpenAiVideoModel(provider, request.model, fetchImpl);
+  const candidates = await discoverOpenAiVideoModels(provider, request.model, fetchImpl);
   let taskId: string | undefined;
-  let usedModel = preferred;
+  let usedModel = candidates[0] ?? request.model;
   let lastError: unknown;
-  for (const candidate of [preferred, ...OPENAI_VIDEO_FALLBACKS.filter((entry) => entry !== preferred)]) {
+  const tried: string[] = [];
+  for (const candidate of candidates) {
     const seconds = openAiSeconds(candidate, request.duration);
+    tried.push(candidate);
     try {
       const created = await requestJson(await safeFetch(apiEndpoint(provider.baseUrl, 'videos'), {
         method: 'POST',
@@ -232,17 +250,24 @@ async function generateOpenAiStyle(
           size: request.resolution === '1080P' ? '1920x1080' : '1280x720',
         }),
       }, fetchImpl, 60_000), 'Video provider');
-      const id = deepString(created, 'id') ?? deepString(created, 'task_id');
+      const id = deepString(created, 'id') ?? deepString(created, 'task_id')
+        ?? deepString(created, 'data', 'task_id') ?? deepString(created, 'data', 'id') ?? deepString(created, 'task', 'id');
       if (!id || !/^[\w.:-]{1,256}$/.test(id)) throw new Error('Video provider did not return a task id.');
       taskId = id;
       usedModel = candidate;
       break;
     } catch (error) {
       lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const capability = videoCapabilityError(message);
+      if (capability) throw new Error(capability);
       if (!isMissingModelError(error)) throw error;
     }
   }
-  if (!taskId) throw lastError ?? new Error('No video model is available for this provider.');
+  if (!taskId) {
+    const detail = lastError instanceof Error ? lastError.message : '';
+    throw new Error(`Video API /videos rejected every candidate (${tried.join(', ')}).${detail ? ` Last error: ${detail}` : ''}`);
+  }
 
   for (let poll = 0; poll < maxPolls; poll += 1) {
     if (poll > 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -375,8 +400,8 @@ export async function generateVideo(
         bytes = await generateVeo(provider, { ...request, model: effectiveModel }, fetchImpl, pollIntervalMs, maxPolls);
       } catch (error) {
         // A relay key issued for the OpenAI platform cannot call native Gemini/Veo.
-        // The same relay still exposes the OpenAI-compatible /videos route.
-        if (!/platform is not gemini/i.test(error instanceof Error ? error.message : '')) throw error;
+        // The same relay may still expose the OpenAI-compatible /videos route.
+        if (!videoCapabilityError(error instanceof Error ? error.message : String(error))) throw error;
         const fallback = await generateOpenAiStyle(provider, { ...request, model }, fetchImpl, pollIntervalMs, maxPolls);
         bytes = fallback.bytes;
         usedModel = fallback.model;
