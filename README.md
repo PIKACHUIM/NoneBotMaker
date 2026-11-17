@@ -2,7 +2,7 @@
 
 # NoneBotMaker
 
-面向 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost 与微信公众号的 Serverless 管理与 AI 聊天服务
+面向 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、Messenger、Instagram、Viber、VK、Zulip、Rocket.Chat、DoDo、Matrix、Revolt、Mastodon、Misskey、飞书、钉钉、Mattermost 与微信公众号的 Serverless 管理与 AI 聊天服务
 
 [在线文档站](https://cfnbot.opkg.cn/) · [English](README.en.md) · [AGPL-3.0](LICENSE)
 
@@ -30,8 +30,19 @@ NoneBotMaker 使用 TypeScript、Hono 和 React，提供聊天机器人账号、
 | Satori | Satori WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | 通过 Koishi 等 SDK 接入多平台；仅文本 |
 | KOOK | Gateway WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | 频道/私聊文本、图片与文件；需 Cloudflare |
 | 企业微信 | 自建应用回调（加密模式） | `/webhook/wecom` | 仅一对一；支持文本与媒体；需配置可信 IP |
+| Facebook Messenger | Meta Webhook | `/webhook/messenger` | 主页一对一；文本与附件 |
+| Instagram Messaging | Meta Webhook | `/webhook/instagram` | 专业账号一对一文本 |
+| Viber | 机器人 Webhook | `/webhook/viber` | 一对一文本；HMAC 签名校验 |
+| VK | Callback API | `/webhook/vk` | 社区私聊与群聊文本 |
+| Zulip | 传出 Webhook + REST | `/webhook/zulip` | 频道主题与私聊；文件按链接发送 |
+| Rocket.Chat | 传出 Webhook + REST | `/webhook/rocketchat` | 频道/私聊文本与文件 |
+| DoDo | Gateway WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | 频道/私聊文本与图片；需 Cloudflare |
+| Matrix | `/sync` 长轮询（Cloudflare Durable Object） | 自动连接，无回调地址 | 仅未加密房间；文本与媒体 |
+| Revolt | Bonfire WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | 频道/私聊文本与附件 |
+| Mastodon | 用户流 WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | @ 提及与私信；文本与媒体 |
+| Misskey | 流式 API WebSocket（Cloudflare Durable Object） | 自动连接，无回调地址 | 频道、@ 提及与私信；文本与媒体 |
 
-各平台的凭据、回调配置和限制见[聊天平台接入](docs/guide/chat-platforms.md)。钉钉回调不支持主动媒体消息，微信公众号不支持客服消息文件类型，也不支持安全模式（加密）回调。OneBot 需要同时配置 HTTP 上报地址与 API 地址；Telegram 需要设置 `secret_token`；Slack 需要 `chat:write`（发文件还需 `files:write`）；WhatsApp 受 24 小时客服窗口限制；Discord、Satori 与 KOOK 只在 Cloudflare 上通过 Durable Objects 建立长连接，EdgeOne/ESA 不支持；企业微信需要把服务出口 IP 加入可信 IP。
+各平台的凭据、回调配置和限制见[聊天平台接入](docs/guide/chat-platforms.md)。钉钉回调不支持主动媒体消息，微信公众号不支持客服消息文件类型，也不支持安全模式（加密）回调。OneBot 需要同时配置 HTTP 上报地址与 API 地址；Telegram 需要设置 `secret_token`；Slack 需要 `chat:write`（发文件还需 `files:write`）；WhatsApp 受 24 小时客服窗口限制；Discord、Satori、KOOK、DoDo、Matrix、Revolt、Mastodon 与 Misskey 只在 Cloudflare 上通过 Durable Objects 建立长连接，EdgeOne/ESA 不支持；企业微信需要把服务出口 IP 加入可信 IP。
 
 <div align="center">
   <img src="docs/index.png" alt="NoneBotMaker 管理台运行总览" width="100%">
@@ -39,7 +50,7 @@ NoneBotMaker 使用 TypeScript、Hono 和 React，提供聊天机器人账号、
 
 ### 兼容性边界
 
-本项目是在 Serverless 环境中实现的 TypeScript 服务，不是 Python NoneBot、Koishi 或 NapCat 运行时。它通过各平台官方 Webhook/API 接入，不能直接加载任意 Python/Node 插件、driver/adapter 或本地 shell、文件系统工具。真实 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost、微信、AI、Brave、TTS 和媒体能力需要使用真实账号与服务联调。
+本项目是在 Serverless 环境中实现的 TypeScript 服务，不是 Python NoneBot、Koishi 或 NapCat 运行时。它通过各平台官方 Webhook/API 接入，不能直接加载任意 Python/Node 插件、driver/adapter 或本地 shell、文件系统工具。真实 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、Messenger、Instagram、Viber、VK、Zulip、Rocket.Chat、DoDo、Matrix、Revolt、Mastodon、Misskey、飞书、钉钉、Mattermost 与微信公众号、AI、Brave、TTS 和媒体能力需要使用真实账号与服务联调。
 
 ## 快速部署
 
@@ -61,7 +72,7 @@ NoneBotMaker 使用 TypeScript、Hono 和 React，提供聊天机器人账号、
 
 ## 功能介绍
 
-- **管理台**：管理插件、QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/企业微信/飞书/钉钉/Mattermost/微信账号、会话策略、AI 供应商、模型价格、MCP、Skills/Rules 和记忆。
+- **管理台**：管理插件、QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/企业微信/Messenger/Instagram/Viber/VK/Zulip/Rocket.Chat/DoDo/Matrix/Revolt/Mastodon/Misskey/飞书/钉钉/Mattermost/微信账号、会话策略、AI 供应商、模型价格、MCP、Skills/Rules 和记忆。
 - **AI 对话**：支持兼容 OpenAI 的 API、多轮工具调用、流式响应、会话上下文与角色卡。
 - **人设与提示词**：每个会话可单独设置人设，和身份策略、系统规则、角色卡、记忆及 Skills/Rules 分层组装。
 - **工具与审批**：提供联网搜索、消息和媒体工具；MCP 工具受 allowlist 与 owner 审批控制，待审批调用可先编辑参数再批准。

@@ -8,6 +8,24 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function isWsUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['ws:', 'wss:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Builds the runtime account context for any supported protocol.
  * Credentials are normalized against the protocol's field list so a record
@@ -68,6 +86,31 @@ export function toChatAccountContext(account: BotAccountRecord, plugin: JsonObje
     !/^[A-Za-z0-9_-]{5,64}$/.test(stringValue(normalized.corpId)) ||
     !/^\d{1,12}$/.test(stringValue(normalized.agentId)) ||
     !/^[A-Za-z0-9+/]{43}$/.test(stringValue(normalized.encodingAESKey))
+  )) return null;
+  if (protocol.id === 'messenger' && !/^\d{5,32}$/.test(stringValue(normalized.pageId))) return null;
+  if (protocol.id === 'vk' && !/^\d{1,20}$/.test(stringValue(normalized.groupId))) return null;
+  if (protocol.id === 'zulip' && (
+    !isHttpUrl(stringValue(normalized.siteUrl)) || !/^[^@\s]+@[^@\s]+$/.test(stringValue(normalized.botEmail))
+  )) return null;
+  if (protocol.id === 'rocketchat' && (
+    !isHttpUrl(stringValue(normalized.serverUrl)) || !stringValue(normalized.userId).trim()
+  )) return null;
+  if (protocol.id === 'matrix' && (
+    !isHttpUrl(stringValue(normalized.homeserverUrl)) || !/^@[^:\s]+:[^\s]+$/.test(stringValue(normalized.userId))
+  )) return null;
+  if (protocol.id === 'revolt' && (
+    !stringValue(normalized.botId).trim() ||
+    (stringValue(normalized.apiUrl) && !isHttpUrl(stringValue(normalized.apiUrl))) ||
+    (stringValue(normalized.wsUrl) && !isWsUrl(stringValue(normalized.wsUrl)))
+  )) return null;
+  if (protocol.id === 'mastodon' && (
+    !isHttpUrl(stringValue(normalized.instanceUrl)) || !/^\d{1,32}$/.test(stringValue(normalized.accountId))
+  )) return null;
+  if (protocol.id === 'dodo' && !stringValue(normalized.clientId).trim()) return null;
+  if (protocol.id === 'instagram' && !/^\d{5,32}$/.test(stringValue(normalized.igUserId))) return null;
+  if (protocol.id === 'viber' && !stringValue(normalized.authToken).trim()) return null;
+  if (protocol.id === 'misskey' && (
+    !isHttpUrl(stringValue(normalized.host)) || !stringValue(normalized.userId).trim()
   )) return null;
   const appId = stringValue(normalized[protocol.identifierField]).trim();
   const secretField = protocol.secretField ?? 'appSecret';

@@ -2,7 +2,7 @@
 
 # NoneBotMaker
 
-A serverless management and AI chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost, and WeChat Official Accounts
+A serverless management and AI chat service for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost, and WeChat Official Accounts
 
 [Online docs](https://cfnbot.opkg.cn/en/) · [简体中文](README.md) · [AGPL-3.0](LICENSE)
 
@@ -30,8 +30,19 @@ Built with TypeScript, Hono, and React, NoneBotMaker manages chat bot accounts, 
 | Satori | Satori WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Connects to multiple platforms through Koishi and other SDKs; text only |
 | KOOK | Gateway WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Channel and direct text, images, and files; requires Cloudflare |
 | WeCom | Self-built app callback (encrypted mode) | `/webhook/wecom` | Direct messages only; text and media; trusted IP required |
+| Facebook Messenger | Meta Webhook | `/webhook/messenger` | Page one-to-one text and attachments |
+| Instagram Messaging | Meta Webhook | `/webhook/instagram` | Professional account one-to-one text |
+| Viber | Bot Webhook | `/webhook/viber` | One-to-one text with HMAC verification |
+| VK | Callback API | `/webhook/vk` | Community direct and group text |
+| Zulip | Outgoing webhook + REST | `/webhook/zulip` | Stream topics and direct messages; files sent as links |
+| Rocket.Chat | Outgoing webhook + REST | `/webhook/rocketchat` | Channel/direct text and files |
+| DoDo | Gateway WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Channel/direct text and images; requires Cloudflare |
+| Matrix | `/sync` long polling (Cloudflare Durable Object) | Auto-connected, no callback URL | Unencrypted rooms only; text and media |
+| Revolt | Bonfire WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Channel/direct text and attachments |
+| Mastodon | User streaming WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Mentions and direct messages; text and media |
+| Misskey | Streaming API WebSocket (Cloudflare Durable Object) | Auto-connected, no callback URL | Channels, mentions, and direct messages; text and media |
 
-See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, callback configuration, and limitations. DingTalk callbacks do not support proactive media, and WeChat Official Accounts do not support file customer-service messages or encrypted (safe-mode) callbacks. OneBot requires both an HTTP report URL and an API base URL; Telegram requires a `secret_token`; Slack requires `chat:write` (plus `files:write` for uploads); WhatsApp is limited by the 24-hour customer-service window; Discord, Satori, and KOOK use Durable Object WebSockets and are only available on Cloudflare, not EdgeOne or ESA; WeCom requires the service egress IP in its trusted IP list.
+See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, callback configuration, and limitations. DingTalk callbacks do not support proactive media, and WeChat Official Accounts do not support file customer-service messages or encrypted (safe-mode) callbacks. OneBot requires both an HTTP report URL and an API base URL; Telegram requires a `secret_token`; Slack requires `chat:write` (plus `files:write` for uploads); WhatsApp is limited by the 24-hour customer-service window; Discord, Satori, KOOK, DoDo, Matrix, Revolt, Mastodon, and Misskey use Durable Object connections and are only available on Cloudflare, not EdgeOne or ESA; WeCom requires the service egress IP in its trusted IP list.
 
 <div align="center">
   <img src="docs/index.png" alt="NoneBotMaker admin console overview" width="100%">
@@ -39,7 +50,7 @@ See [Chat platform setup](docs/en/guide/chat-platforms.md) for credentials, call
 
 ### Compatibility
 
-This is a TypeScript service for serverless runtimes, not a Python NoneBot, Koishi, or NapCat runtime. It connects through each platform's official Webhooks/APIs and cannot load arbitrary Python/Node plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost, WeChat, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
+This is a TypeScript service for serverless runtimes, not a Python NoneBot, Koishi, or NapCat runtime. It connects through each platform's official Webhooks/APIs and cannot load arbitrary Python/Node plugins, drivers/adapters, or local shell/filesystem tools. Real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost, and WeChat Official Accounts, AI, Brave, TTS, and media capabilities require integration tests with real accounts and services.
 
 ## Quick Deployment
 
@@ -61,7 +72,7 @@ See the [quick deployment guide](docs/en/guide/quick-start.md) for details.
 
 ## Features
 
-- **Admin console:** Manage plugins, QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/WeCom/Feishu/DingTalk/Mattermost/WeChat accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
+- **Admin console:** Manage plugins, QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/WeCom/Messenger/Instagram/Viber/VK/Zulip/Rocket.Chat/DoDo/Matrix/Revolt/Mastodon/Misskey/Feishu/DingTalk/Mattermost/WeChat accounts, conversation policies, AI providers, model pricing, MCP, Skills/Rules, and memory.
 - **AI chat:** OpenAI-compatible APIs, multi-round tool calls, streaming, conversation context, and role cards.
 - **Persona and prompts:** Per-conversation personas layered with identity policy, system rules, role cards, memory, and Skills/Rules.
 - **Tools and approvals:** Web search, messaging, and media tools; MCP tools are controlled by allowlists and owner approval, and pending arguments can be edited before approval.

@@ -12,6 +12,12 @@ import { createLineWebhookRouter } from './protocols/line/webhook';
 import { createWhatsAppWebhookRouter } from './protocols/whatsapp/webhook';
 import { createMattermostWebhookRouter } from './protocols/mattermost/webhook';
 import { createWeComWebhookRouter } from './protocols/wecom/webhook';
+import { createMessengerWebhookRouter } from './protocols/messenger/webhook';
+import { createVkWebhookRouter } from './protocols/vk/webhook';
+import { createZulipWebhookRouter } from './protocols/zulip/webhook';
+import { createRocketChatWebhookRouter } from './protocols/rocketchat/webhook';
+import { createInstagramWebhookRouter } from './protocols/instagram/webhook';
+import { createViberWebhookRouter } from './protocols/viber/webhook';
 import type { ChatAccountContext, ChatPlatformMessage } from './protocols/types';
 import { sendChatMedia, sendChatText } from './protocols/sender';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from './plugins/chatbot/runtime';
@@ -54,6 +60,12 @@ export function createApp() {
   app.route('/', createWhatsAppWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createMattermostWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createWeComWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createMessengerWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createVkWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createZulipWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createRocketChatWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createInstagramWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createViberWebhookRouter({ handleMessage: handleInboundMessage }));
   return app;
 }
 

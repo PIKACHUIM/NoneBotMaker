@@ -41,6 +41,39 @@ const mocks = vi.hoisted(() => ({
   wecomText: vi.fn(async () => undefined),
   wecomMedia: vi.fn(async () => undefined),
   wecomProactive: vi.fn(async () => undefined),
+  messengerText: vi.fn(async () => undefined),
+  messengerMedia: vi.fn(async () => undefined),
+  messengerProactive: vi.fn(async () => undefined),
+  vkText: vi.fn(async () => undefined),
+  vkMedia: vi.fn(async () => undefined),
+  vkProactive: vi.fn(async () => undefined),
+  zulipText: vi.fn(async () => undefined),
+  zulipMedia: vi.fn(async () => undefined),
+  zulipProactive: vi.fn(async () => undefined),
+  rcText: vi.fn(async () => undefined),
+  rcMedia: vi.fn(async () => undefined),
+  rcProactive: vi.fn(async () => undefined),
+  dodoText: vi.fn(async () => undefined),
+  dodoMedia: vi.fn(async () => undefined),
+  dodoProactive: vi.fn(async () => undefined),
+  matrixText: vi.fn(async () => undefined),
+  matrixMedia: vi.fn(async () => undefined),
+  matrixProactive: vi.fn(async () => undefined),
+  revoltText: vi.fn(async () => undefined),
+  revoltMedia: vi.fn(async () => undefined),
+  revoltProactive: vi.fn(async () => undefined),
+  mastodonText: vi.fn(async () => undefined),
+  mastodonMedia: vi.fn(async () => undefined),
+  mastodonProactive: vi.fn(async () => undefined),
+  instagramText: vi.fn(async () => undefined),
+  instagramMedia: vi.fn(async () => undefined),
+  instagramProactive: vi.fn(async () => undefined),
+  viberText: vi.fn(async () => undefined),
+  viberMedia: vi.fn(async () => undefined),
+  viberProactive: vi.fn(async () => undefined),
+  misskeyText: vi.fn(async () => undefined),
+  misskeyMedia: vi.fn(async () => undefined),
+  misskeyProactive: vi.fn(async () => undefined),
 }));
 
 vi.mock('./qq/api', () => ({ replyToQQMessage: mocks.qqText, sendQQMedia: mocks.qqMedia, replyToQQGroup: mocks.qqProactive }));
@@ -57,11 +90,22 @@ vi.mock('./discord/api', () => ({ sendDiscordText: mocks.discordText, sendDiscor
 vi.mock('./satori/api', () => ({ sendSatoriText: mocks.satoriText, sendSatoriMedia: mocks.satoriMedia, sendSatoriProactiveText: mocks.satoriProactive }));
 vi.mock('./kook/api', () => ({ sendKookText: mocks.kookText, sendKookMedia: mocks.kookMedia, sendKookProactiveText: mocks.kookProactive }));
 vi.mock('./wecom/api', () => ({ sendWeComText: mocks.wecomText, sendWeComMedia: mocks.wecomMedia, sendWeComProactiveText: mocks.wecomProactive }));
+vi.mock('./messenger/api', () => ({ sendMessengerText: mocks.messengerText, sendMessengerMedia: mocks.messengerMedia, sendMessengerProactiveText: mocks.messengerProactive }));
+vi.mock('./vk/api', () => ({ sendVkText: mocks.vkText, sendVkMedia: mocks.vkMedia, sendVkProactiveText: mocks.vkProactive }));
+vi.mock('./zulip/api', () => ({ sendZulipText: mocks.zulipText, sendZulipMedia: mocks.zulipMedia, sendZulipProactiveText: mocks.zulipProactive }));
+vi.mock('./rocketchat/api', () => ({ sendRocketChatText: mocks.rcText, sendRocketChatMedia: mocks.rcMedia, sendRocketChatProactiveText: mocks.rcProactive }));
+vi.mock('./dodo/api', () => ({ sendDodoText: mocks.dodoText, sendDodoMedia: mocks.dodoMedia, sendDodoProactiveText: mocks.dodoProactive }));
+vi.mock('./matrix/api', () => ({ sendMatrixText: mocks.matrixText, sendMatrixMedia: mocks.matrixMedia, sendMatrixProactiveText: mocks.matrixProactive }));
+vi.mock('./revolt/api', () => ({ sendRevoltText: mocks.revoltText, sendRevoltMedia: mocks.revoltMedia, sendRevoltProactiveText: mocks.revoltProactive }));
+vi.mock('./mastodon/api', () => ({ sendMastodonText: mocks.mastodonText, sendMastodonMedia: mocks.mastodonMedia, sendMastodonProactiveText: mocks.mastodonProactive }));
+vi.mock('./instagram/api', () => ({ sendInstagramText: mocks.instagramText, sendInstagramMedia: mocks.instagramMedia, sendInstagramProactiveText: mocks.instagramProactive }));
+vi.mock('./viber/api', () => ({ sendViberText: mocks.viberText, sendViberMedia: mocks.viberMedia, sendViberProactiveText: mocks.viberProactive }));
+vi.mock('./misskey/api', () => ({ sendMisskeyText: mocks.misskeyText, sendMisskeyMedia: mocks.misskeyMedia, sendMisskeyProactiveText: mocks.misskeyProactive }));
 
 import { sendChatMedia, sendChatText, sendProactiveChatText } from './sender';
 
-const protocols = ['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom'];
-const mediaProtocols = ['qq', 'feishu', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom'];
+const protocols = ['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom', 'messenger', 'vk', 'zulip', 'rocketchat', 'dodo', 'matrix', 'revolt', 'mastodon', 'instagram', 'viber', 'misskey'];
+const mediaProtocols = ['qq', 'feishu', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom', 'messenger', 'zulip', 'rocketchat', 'dodo', 'matrix', 'revolt', 'mastodon', 'instagram', 'viber', 'misskey'];
 
 function account(protocol: string): ChatAccountContext {
   return {
@@ -91,6 +135,17 @@ describe('chat protocol sender', () => {
     expect(mocks.satoriText).toHaveBeenCalledTimes(1);
     expect(mocks.kookText).toHaveBeenCalledTimes(1);
     expect(mocks.wecomText).toHaveBeenCalledTimes(1);
+    expect(mocks.messengerText).toHaveBeenCalledTimes(1);
+    expect(mocks.vkText).toHaveBeenCalledTimes(1);
+    expect(mocks.zulipText).toHaveBeenCalledTimes(1);
+    expect(mocks.rcText).toHaveBeenCalledTimes(1);
+    expect(mocks.dodoText).toHaveBeenCalledTimes(1);
+    expect(mocks.matrixText).toHaveBeenCalledTimes(1);
+    expect(mocks.revoltText).toHaveBeenCalledTimes(1);
+    expect(mocks.mastodonText).toHaveBeenCalledTimes(1);
+    expect(mocks.instagramText).toHaveBeenCalledTimes(1);
+    expect(mocks.viberText).toHaveBeenCalledTimes(1);
+    expect(mocks.misskeyText).toHaveBeenCalledTimes(1);
     expect(mocks.qqMedia).toHaveBeenCalledTimes(1);
     expect(mocks.feishuMedia).toHaveBeenCalledTimes(1);
     expect(mocks.wechatMedia).toHaveBeenCalledTimes(1);
@@ -104,6 +159,14 @@ describe('chat protocol sender', () => {
     expect(mocks.satoriMedia).toHaveBeenCalledTimes(1);
     expect(mocks.kookMedia).toHaveBeenCalledTimes(1);
     expect(mocks.wecomMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.messengerMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.zulipMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.rcMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.dodoMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.matrixMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.revoltMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.mastodonMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.misskeyMedia).toHaveBeenCalledTimes(1);
   });
 
   it('uses proactive sends for schedules', async () => {
@@ -122,9 +185,20 @@ describe('chat protocol sender', () => {
     expect(mocks.satoriProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
     expect(mocks.kookProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
     expect(mocks.wecomProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.messengerProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.vkProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.zulipProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.rcProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.dodoProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'private', 'hi');
+    expect(mocks.matrixProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.revoltProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.mastodonProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.instagramProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.viberProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
+    expect(mocks.misskeyProactive).toHaveBeenCalledWith(expect.anything(), 'target', 'hi');
   });
 
   it('rejects unknown protocols instead of silently dropping messages', async () => {
-    await expect(sendChatText(account('matrix'), 'target', 'message', 'hi', options)).rejects.toThrow('Unsupported chat protocol');
+    await expect(sendChatText(account('irc'), 'target', 'message', 'hi', options)).rejects.toThrow('Unsupported chat protocol');
   });
 });

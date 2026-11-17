@@ -1373,7 +1373,7 @@ function AccountsPage({ data, onRefresh, onError }: { data: BotAccountRecord[]; 
           form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, CHATBOT_PLUGIN_TYPE), protocol === editing?.protocol ? editing.credentials : {}) });
         }} /></Form.Item>
         {protocolDefinition && (protocolDefinition.transport === 'websocket'
-          ? <p className="form-note">{tr('此协议使用 Cloudflare Durable Object WebSocket 网关，不需要回调地址；账号启用后会自动连接。')}</p>
+          ? <p className="form-note">{tr('此协议使用 Cloudflare Durable Object 长连接或长轮询，不需要回调地址；账号启用后会自动连接。')}</p>
           : <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>)}
         {credentialFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{protocolDefinition?.id ?? definition?.type} / {credentialFields.length} FIELDS</small></div>

@@ -165,6 +165,150 @@ Notes:
 - Replies use the app message API for text, images, voice, video, and files; media is uploaded first and sent by media_id.
 - Serverless egress IPs are not fixed and may not satisfy the trusted IP allowlist. Verify with a test enterprise before going live.
 
+## Facebook Messenger
+
+1. Create an app in the [Meta developer console](https://developers.facebook.com/), add the Messenger product, and connect a Facebook Page.
+2. Generate a Page Access Token under Messenger → Settings and note the App Secret.
+3. Set the callback URL to `https://<domain>/webhook/messenger`, enter a Verify Token, and subscribe to the `messages` field.
+4. In the admin console, add an account, choose Facebook Messenger, and enter the Page ID, Page Access Token, App Secret, and Verify Token.
+
+Notes:
+
+- The GET check echoes `hub.challenge`; POST callbacks are verified with `X-Hub-Signature-256`.
+- Only one-to-one Page-to-user conversations are supported.
+- Outbound text, images, audio, video, and files are supported; media is uploaded as a reusable attachment and sent by attachment_id.
+
+## VK
+
+1. Create a community token with the messages scope and configure the Callback API server URL `https://<domain>/webhook/vk` in the VK community settings.
+2. Note the numeric community ID, the Callback API secret, and the confirmation string.
+3. In the admin console, add an account, choose VK, and enter the Group ID, community access token, Callback Secret, and Confirmation Token.
+
+Notes:
+
+- The service returns the confirmation string verbatim and verifies the `secret` on every callback.
+- A `peer_id` of 2000000000 or greater is treated as a group chat, otherwise as a direct message.
+- Outbound text only; images and files need a prior VK upload and are currently sent as links.
+
+## Zulip
+
+1. Create an outgoing webhook bot under **Settings → Bots** and note the bot email and API key.
+2. Set the outgoing webhook URL to `https://<domain>/webhook/zulip` and note the Token.
+3. In the admin console, add an account, choose Zulip, and enter the site URL, bot email, API key, and webhook token.
+4. Stream conversations use `stream:<stream_id>:<topic>` and direct messages use `dm:<user_id>`; `/openid` prints the value.
+
+Notes:
+
+- Outgoing webhooks fire only when the bot is mentioned.
+- Replies use `POST /api/v1/messages` with the stream topic.
+- Files are uploaded to `/api/v1/user_uploads` and sent as Markdown links.
+
+## Rocket.Chat
+
+1. Create an outgoing webhook integration under **Administration → Integrations**, set the URL to `https://<domain>/webhook/rocketchat`, and note the Token.
+2. Prepare a bot account or personal access token and note the User ID and Auth Token.
+3. In the admin console, add an account, choose Rocket.Chat, and enter the server URL, User ID, Auth Token, and webhook token.
+4. Conversation external IDs use room IDs.
+
+Notes:
+
+- The service verifies the callback token and replies through `chat.postMessage`.
+- Files are uploaded to `/api/v1/rooms.media/:rid` and confirmed before being attached.
+- Outgoing webhooks fire only on trigger words or mentions.
+
+## DoDo
+
+DoDo provides event subscriptions only over WebSocket, so it uses the Cloudflare Durable Object gateway.
+
+1. Create a bot in the [DoDo open platform](https://open.imdodo.com/) and note the Client ID and Token.
+2. Invite the bot to the community and grant message permissions.
+3. In the admin console, add an account, choose DoDo, and enter the Client ID and Token.
+4. Channel conversations use the channel ID; direct messages use `islandId|userId`, which `/openid` prints.
+
+Notes:
+
+- The service calls `/api/v2/websocket/connection` for the gateway URL and sends a heartbeat every 25 seconds.
+- All channel messages enter the runtime; direct messages are always answered.
+- Images are uploaded to `/api/v2/resource/picture/upload` and sent as picture messages; other media is sent as a link.
+
+## Matrix
+
+Matrix has no Webhook, so the Durable Object runs a continuous `/sync` long poll.
+
+1. Create a bot account on the homeserver and obtain an access token with room message read/write permission.
+2. Invite the bot to the rooms it should serve; the service joins on invite.
+3. In the admin console, add an account, choose Matrix, and enter the homeserver URL, bot MXID, and access token.
+4. Conversation external IDs use room IDs (`!xxx:server`).
+
+Notes:
+
+- The initial sync only records `next_batch`, so history is never replayed.
+- Encrypted rooms (E2EE) are not decrypted; use unencrypted rooms.
+- Sends use `PUT /rooms/{roomId}/send/m.room.message/{txnId}`; media uploads to `/_matrix/media/v3/upload`.
+- Rooms require an @mention or a reply to the bot; rooms listed in `m.direct` always trigger.
+
+## Revolt
+
+1. Create a bot under **Settings → My Bots** in Revolt and note the bot user ID and token.
+2. Invite the bot to the server and grant message permissions.
+3. In the admin console, add an account, choose Revolt, and enter the bot user ID and token; self-hosted instances can also set the API and WebSocket URLs.
+4. Conversation external IDs use channel IDs.
+
+Notes:
+
+- The service connects to the Bonfire WebSocket and sends a Ping every 20 seconds; channel types from `Ready` distinguish direct messages from server channels.
+- Channels require an @mention; direct messages are always answered.
+- Files upload to the Autumn file server and are sent as attachments.
+
+## Mastodon
+
+1. Create an application under **Development** on the instance with `read:statuses` and `write:statuses`, and note the access token.
+2. Note the bot's local numeric account ID.
+3. In the admin console, add an account, choose Mastodon, and enter the instance URL, account ID, and access token.
+4. Conversation external IDs use `acct:user@instance`.
+
+Notes:
+
+- The service connects to `/api/v1/streaming?stream=user` and handles `update` events.
+- Replies mention the author; direct messages use `direct` visibility and public mentions use `unlisted`.
+- Text is truncated to Mastodon's default 500 characters; media uploads to `/api/v2/media`.
+- The access token appears in the WebSocket query string, so use a dedicated token and rotate it.
+
+## Instagram Messaging
+
+1. Link an Instagram professional account to a Facebook Page in the Meta developer console and grant `instagram_manage_messages`.
+2. Set the callback URL to `https://<domain>/webhook/instagram`, enter a Verify Token, and subscribe to `messages`.
+3. In the admin console, add an account, choose Instagram Messaging, and enter the Instagram account ID, Page Access Token, App Secret, and Verify Token.
+
+Notes:
+
+- Callbacks use the Messenger event shape; the service matches `entry.id` and verifies `X-Hub-Signature-256`.
+- One-to-one text replies only; media needs a public HTTPS URL and is not supported.
+
+## Viber
+
+1. Create a bot in the Viber admin console, note the Auth Token, and set the webhook to `https://<domain>/webhook/viber`.
+2. In the admin console, add an account, choose Viber, and enter the Auth Token and bot name.
+3. Conversation external IDs use the Viber user ID (`sender.id`).
+
+Notes:
+
+- The service signs the raw request body with HMAC-SHA256 using the auth token and compares `X-Viber-Content-Signature`.
+- One-to-one text only; media needs a public URL and is not supported.
+
+## Misskey
+
+1. Create an access token under **Settings → API** with note and read permissions; note the instance URL, bot userId, and token.
+2. In the admin console, add an account, choose Misskey, and enter the instance URL, bot user ID, and access token.
+3. Conversation external IDs are `channel:<channelId>` or `user:<userId>`.
+
+Notes:
+
+- The service connects to `/streaming?i=<token>`, subscribes to the `main` channel, and pings every 30 seconds.
+- Direct messages (`specified`) are always answered; public notes require an @mention or a reply to the bot.
+- Files upload to `/api/drive/files/create` and are attached with `fileIds`.
+- The token appears in the WebSocket query string, so use a dedicated token.
+
 ## Feishu / Lark
 
 1. Create an enterprise self-built app on [Feishu Open Platform](https://open.feishu.cn/) and note the App ID and App Secret.
@@ -211,7 +355,7 @@ Notes:
 
 - Obtain platform external IDs with `/openid` and enter them under **Groups**. A group record may contain several external IDs, while context remains isolated per real conversation.
 - Schedule `message` actions send text proactively through the account protocol; `prompt` and `command` actions pass a synthetic message to the chat runtime. QQ uses `QQ_GATEWAY_SESSIONS` when configured, while other platforms execute in the current process.
-- Proactive messages require the matching platform capability: RobotCode for DingTalk, a valid `access_token` and open interaction window for WeChat, app permissions for Feishu, a reachable HTTP API for OneBot, a valid Bot Token for Telegram, `chat:write` for Slack, a Channel Access Token for LINE, the 24-hour window for WhatsApp, and a post-capable access token for Mattermost.
+- Proactive messages require the matching platform capability: RobotCode for DingTalk, a valid `access_token` and open interaction window for WeChat, app permissions for Feishu, a reachable HTTP API for OneBot, a valid Bot Token for Telegram, `chat:write` for Slack, a Channel Access Token for LINE, the 24-hour window for WhatsApp, a post-capable access token for Mattermost, the bot API key for Zulip, an auth token for Rocket.Chat, a community token for VK, `write:statuses` for Mastodon, and the bot token for DoDo or Revolt.
 
 ## NoneBot2 adapter coverage
 
@@ -229,10 +373,12 @@ The table maps the chat protocol adapters documented by NoneBot2. It does not co
 | Console | ❌ | The project has an admin console and conversation management, but no simulated chat channel |
 | Satori | ✅ | `/v1/events` WebSocket plus `/v1/message.create`, using a Cloudflare Durable Object |
 | Discord | ✅ | Gateway v10 WebSocket, using a Cloudflare Durable Object |
-| DoDo | ❌ | Long-lived bot connection protocol, not implemented |
+| DoDo | ✅ | Gateway WebSocket plus the open API, using a Cloudflare Durable Object |
 | Kritor | ❌ | Separate WebSocket/TCP standard, not implemented |
 | Milky | ❌ | Separate WebSocket standard, not implemented |
 | DingTalk / WeCom / WeChat Official Account / Slack / LINE / WhatsApp / Mattermost | ✅ | Additional native Webhook protocols in this project, see above |
+| Facebook Messenger / Instagram / Viber / VK / Zulip / Rocket.Chat | ✅ | Additional native Webhook protocols in this project, see above |
+| Matrix / Revolt / Mastodon / Misskey | ✅ | Long-lived or polling transports, using a Cloudflare Durable Object |
 | KOOK | ✅ | Gateway WebSocket plus REST, using a Cloudflare Durable Object |
 
 ## Common chat apps
@@ -244,14 +390,19 @@ The table maps the chat protocol adapters documented by NoneBot2. It does not co
 | Personal WeChat | ❌ | No official bot API; third-party protocols are unstable and risk account bans |
 | DingTalk / Feishu | ✅ | See above |
 | Telegram / Discord / Slack / WhatsApp / LINE / KOOK / Mattermost | ✅ | See the per-platform limits above |
-| DoDo | ⏳ | Uses a dedicated WebSocket and event envelope; protocol details still being completed |
-| Matrix | ⏳ | Needs `/sync` long polling or an application service |
+| DoDo | ✅ | Gateway WebSocket plus the open API |
+| Matrix | ✅ | `/sync` long polling; unencrypted rooms only |
 | Microsoft Teams | ⏳ | Bot Framework JWT validation, planned |
 | Google Chat | ⏳ | Google JWT validation, planned |
-| VK | ⏳ | Callback API, planned |
-| Mastodon / Misskey | ⏳ | Streaming API / Webhook, planned |
-| Zulip / Rocket.Chat | ⏳ | Outgoing Webhooks, planned |
-| Signal / Instagram / Messenger | ❌ | No general bot API or requires extra review |
+| VK | ✅ | Callback API |
+| Mastodon | ✅ | User streaming WebSocket |
+| Misskey | ✅ | Streaming API WebSocket |
+| Zulip / Rocket.Chat | ✅ | Outgoing Webhooks plus REST |
+| Revolt | ✅ | Bonfire WebSocket |
+| Instagram | ✅ | Professional account direct messages |
+| Threads | ❌ | No general bot messaging API |
+| Viber | ✅ | Bot Webhooks |
+| Signal | ❌ | No official bot API |
 | Douyin / Xiaohongshu | ❌ | No public general bot API |
 
 ## Troubleshooting

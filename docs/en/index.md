@@ -3,7 +3,7 @@ layout: home
 hero:
   name: NoneBotMaker
   text: Multi-platform Chat Bot Service
-  tagline: Manage QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost, and WeChat Official Account bots, conversation policies, and AI chat capabilities on Cloudflare Workers, EdgeOne, or Alibaba Cloud ESA.
+  tagline: Manage QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost, and WeChat Official Accounts bots, conversation policies, and AI chat capabilities on Cloudflare Workers, EdgeOne, or Alibaba Cloud ESA.
   actions:
     - theme: brand
       text: Quick Deployment
@@ -16,7 +16,7 @@ hero:
       link: https://github.com/PIKACHUIM/NoneBotMaker
 features:
   - title: Accounts and Conversation Policies
-    details: Manage QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/WeCom/Feishu/DingTalk/Mattermost/WeChat accounts, then group/private conversation policies as separate scopes.
+    details: Manage QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Discord/Satori/KOOK/WeCom/Messenger/Instagram/Viber/VK/Zulip/Rocket.Chat/DoDo/Matrix/Revolt/Mastodon/Misskey/Feishu/DingTalk/Mattermost/WeChat accounts, then group/private conversation policies as separate scopes.
   - title: AI Tool Execution
     details: Supports OpenAI-compatible APIs, multi-round tool calls, MCP, web search, Skills/Rules, and conversation memory.
   - title: Serverless Storage
@@ -36,10 +36,10 @@ features:
 ## Documentation
 
 - [Quick deployment](/en/guide/quick-start): storage, secrets, migrations, and platform callback setup.
-- [Chat platform setup](/en/guide/chat-platforms): credentials, callbacks, and limits for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost, and WeChat.
+- [Chat platform setup](/en/guide/chat-platforms): credentials, callbacks, and limits for QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost, and WeChat Official Accounts.
 - [Admin console guide](/en/guide/user-guide): configure AI providers, accounts, policies, tools, and memory.
 - [Project requirements](/en/design/requirements): implemented capabilities and explicit boundaries.
 - [System architecture](/en/design/architecture): module boundaries, message flow, persistence, and trust boundaries.
 - [Local development and tests](/en/development/setup) and [platform deployment](/en/development/deployment).
 
-> Requirements and architecture are derived from the current code, configuration, and tests; they are not a separately approved product specification. End-to-end validation with real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost, WeChat, AI, Brave, and TTS services still requires real accounts and credentials.
+> Requirements and architecture are derived from the current code, configuration, and tests; they are not a separately approved product specification. End-to-end validation with real QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost, and WeChat Official Accounts, AI, Brave, and TTS services still requires real accounts and credentials.

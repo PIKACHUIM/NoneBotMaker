@@ -93,7 +93,7 @@ const EN: Record<string, string> = {
   '平台协议': 'Platform protocol',
   '请选择平台协议': 'Select a platform protocol',
   '回调地址': 'Callback URL',
-  '此协议使用 Cloudflare Durable Object WebSocket 网关，不需要回调地址；账号启用后会自动连接。': 'This protocol uses the Cloudflare Durable Object WebSocket gateway and needs no callback URL; the account connects automatically once enabled.',
+  '此协议使用 Cloudflare Durable Object 长连接或长轮询，不需要回调地址；账号启用后会自动连接。': 'This protocol uses a Cloudflare Durable Object connection or long poll and needs no callback URL; the account connects automatically once enabled.',
   '新增账号': 'Add account',
   '新增平台账号': 'Add platform account',
   '新增机器人账号': 'Add bot account',

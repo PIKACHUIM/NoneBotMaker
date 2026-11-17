@@ -9,6 +9,16 @@ import { normalizeSatoriEvent, type SatoriEvent, type SatoriSignal } from '../..
 import { satoriEventsUrl } from '../../server/protocols/satori/api';
 import { getKookGatewayUrl } from '../../server/protocols/kook/api';
 import { normalizeKookEvent, type KookEvent } from '../../server/protocols/kook/message';
+import { getDodoGatewayUrl } from '../../server/protocols/dodo/api';
+import { normalizeDodoEvent, type DodoEvent } from '../../server/protocols/dodo/message';
+import { revoltGatewayUrl } from '../../server/protocols/revolt/api';
+import { normalizeRevoltMessage, revoltChannelTypes, type RevoltMessageEvent, type RevoltReadyEvent } from '../../server/protocols/revolt/message';
+import { mastodonStreamUrl } from '../../server/protocols/mastodon/api';
+import { normalizeMastodonStatus, type MastodonStatus } from '../../server/protocols/mastodon/message';
+import { fetchMatrixDirectRooms, joinMatrixRoom, matrixSync } from '../../server/protocols/matrix/sync';
+import { normalizeMatrixEvent } from '../../server/protocols/matrix/message';
+import { misskeyStreamUrl } from '../../server/protocols/misskey/api';
+import { normalizeMisskeyNote, type MisskeyFrame } from '../../server/protocols/misskey/message';
 
 const DISCORD_GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 // GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
@@ -20,7 +30,7 @@ const DEDUPE_RETENTION_MS = 10 * 60_000;
 const MAX_RECENT_EVENTS = 400;
 const SATORI_HEARTBEAT_MS = 10_000;
 
-const GATEWAY_PROTOCOLS = new Set(['discord', 'satori', 'kook']);
+const GATEWAY_PROTOCOLS = new Set(['discord', 'satori', 'kook', 'dodo', 'matrix', 'revolt', 'mastodon', 'misskey']);
 
 interface DurableStorageData {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -82,7 +92,9 @@ export class ChatGatewayDurableObject {
   private accountId?: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private heartbeatInterval = 41_250;
-  private gatewayProtocol?: 'discord' | 'satori' | 'kook';
+  private gatewayProtocol?: 'discord' | 'satori' | 'kook' | 'dodo' | 'revolt' | 'mastodon' | 'misskey';
+  private matrixActive = false;
+  private revoltChannelTypes: Record<string, string> = {};
   private awaitingHeartbeatAck = false;
   private reconnectAttempt = 0;
   private lastSequence = 0;
@@ -155,6 +167,9 @@ export class ChatGatewayDurableObject {
       await this.state.storage.delete('satoriSn');
       await this.state.storage.delete('kookSession');
       await this.state.storage.delete('kookSn');
+      await this.state.storage.delete('revoltChannels');
+      await this.state.storage.delete('matrixSince');
+      await this.state.storage.delete('matrixDirectRooms');
       await this.state.storage.put('accountVersion', version);
     }
 
@@ -166,7 +181,12 @@ export class ChatGatewayDurableObject {
     }
     if (account.protocol === 'discord') await this.connectDiscord(account);
     else if (account.protocol === 'satori') await this.connectSatori(account);
-    else await this.connectKook(account);
+    else if (account.protocol === 'kook') await this.connectKook(account);
+    else if (account.protocol === 'dodo') await this.connectDodo(account);
+    else if (account.protocol === 'revolt') await this.connectRevolt(account);
+    else if (account.protocol === 'mastodon') await this.connectMastodon(account);
+    else if (account.protocol === 'misskey') await this.connectMisskey(account);
+    else this.state.waitUntil(this.runMatrix(account));
   }
 
   private async connectDiscord(account: ChatAccountContext): Promise<void> {
@@ -416,6 +436,219 @@ export class ChatGatewayDurableObject {
     if (message) await this.handleMessage(account, message);
   }
 
+  private async connectDodo(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'dodo';
+    const url = await getDodoGatewayUrl(account);
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    socket.addEventListener('message', (event) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleDodoFrame(account, event.data))
+        .catch(async (error) => {
+          console.error('DoDo gateway frame failed.', errorMessage(error));
+          await this.closeSocket();
+          await this.scheduleReconnect();
+        });
+      this.state.waitUntil(this.messageQueue);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.clearHeartbeat();
+      this.socket = undefined;
+      this.state.waitUntil(this.scheduleReconnect());
+    });
+    socket.addEventListener('error', () => socket.close());
+    this.startHeartbeat(25_000);
+    await this.scheduleMaintenance();
+  }
+
+  private async handleDodoFrame(account: ChatAccountContext, data: string | ArrayBuffer | Blob): Promise<void> {
+    const text = typeof data === 'string' ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data);
+    const frame = JSON.parse(text) as { type?: unknown; data?: unknown };
+    if (frame.type === 1) return;
+    if (frame.type !== 200) return;
+    const event = (frame.data ?? {}) as DodoEvent;
+    const message = normalizeDodoEvent(event, account, Date.now());
+    if (message) await this.handleMessage(account, message);
+  }
+
+  private async connectRevolt(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'revolt';
+    this.revoltChannelTypes = await this.state.storage.get<Record<string, string>>('revoltChannels') ?? {};
+    const url = revoltGatewayUrl(account);
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      this.sendPacket({ type: 'Authenticate', token: credential(account, 'botToken') });
+      this.startHeartbeat(20_000);
+    });
+    socket.addEventListener('message', (event) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleRevoltFrame(account, event.data))
+        .catch(async (error) => {
+          console.error('Revolt gateway frame failed.', errorMessage(error));
+          await this.closeSocket();
+          await this.scheduleReconnect();
+        });
+      this.state.waitUntil(this.messageQueue);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.clearHeartbeat();
+      this.socket = undefined;
+      this.state.waitUntil(this.scheduleReconnect());
+    });
+    socket.addEventListener('error', () => socket.close());
+    await this.scheduleMaintenance();
+  }
+
+  private async handleRevoltFrame(account: ChatAccountContext, data: string | ArrayBuffer | Blob): Promise<void> {
+    const text = typeof data === 'string' ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data);
+    const frame = JSON.parse(text) as { type?: unknown };
+    if (frame.type === 'Ping') {
+      this.sendPacket({ type: 'Pong' });
+      return;
+    }
+    if (frame.type === 'Pong') return;
+    if (frame.type === 'Ready') {
+      this.revoltChannelTypes = revoltChannelTypes(frame as RevoltReadyEvent);
+      await this.state.storage.put('revoltChannels', this.revoltChannelTypes);
+      this.reconnectAttempt = 0;
+      return;
+    }
+    if (frame.type === 'Error') throw new Error('Revolt gateway reported an error.');
+    if (frame.type !== 'Message') return;
+    const message = normalizeRevoltMessage(frame as RevoltMessageEvent, account, this.revoltChannelTypes, Date.now());
+    if (message) await this.handleMessage(account, message);
+  }
+
+  private async connectMastodon(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'mastodon';
+    const socket = new WebSocket(mastodonStreamUrl(account));
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      this.reconnectAttempt = 0;
+    });
+    socket.addEventListener('message', (event) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleMastodonFrame(account, event.data))
+        .catch(async (error) => {
+          console.error('Mastodon stream frame failed.', errorMessage(error));
+          await this.closeSocket();
+          await this.scheduleReconnect();
+        });
+      this.state.waitUntil(this.messageQueue);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.clearHeartbeat();
+      this.socket = undefined;
+      this.state.waitUntil(this.scheduleReconnect());
+    });
+    socket.addEventListener('error', () => socket.close());
+    await this.scheduleMaintenance();
+  }
+
+  private async handleMastodonFrame(account: ChatAccountContext, data: string | ArrayBuffer | Blob): Promise<void> {
+    const text = typeof data === 'string' ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data);
+    const frame = JSON.parse(text) as { event?: unknown; payload?: unknown };
+    if (frame.event !== 'update' || typeof frame.payload !== 'string') return;
+    let status: MastodonStatus;
+    try {
+      status = JSON.parse(frame.payload) as MastodonStatus;
+    } catch {
+      return;
+    }
+    const message = normalizeMastodonStatus(status, account, Date.now());
+    if (message) await this.handleMessage(account, message);
+  }
+
+  private async connectMisskey(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'misskey';
+    const socket = new WebSocket(misskeyStreamUrl(account));
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      this.sendPacket({ type: 'connect', body: { channel: 'main', id: `nb-${account.account.id}` } });
+      this.startHeartbeat(30_000);
+    });
+    socket.addEventListener('message', (event) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleMisskeyFrame(account, event.data))
+        .catch(async (error) => {
+          console.error('Misskey stream frame failed.', errorMessage(error));
+          await this.closeSocket();
+          await this.scheduleReconnect();
+        });
+      this.state.waitUntil(this.messageQueue);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.clearHeartbeat();
+      this.socket = undefined;
+      this.state.waitUntil(this.scheduleReconnect());
+    });
+    socket.addEventListener('error', () => socket.close());
+    await this.scheduleMaintenance();
+  }
+
+  private async handleMisskeyFrame(account: ChatAccountContext, data: string | ArrayBuffer | Blob): Promise<void> {
+    const text = typeof data === 'string' ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data);
+    const frame = JSON.parse(text) as MisskeyFrame;
+    if (frame.type === 'connected' || frame.type === 'pong') {
+      this.reconnectAttempt = 0;
+      return;
+    }
+    if (frame.type !== 'channel') return;
+    const channel = frame.body;
+    if (!channel || channel.type !== 'note' || !channel.body || typeof channel.body !== 'object') return;
+    const message = normalizeMisskeyNote(channel.body, account, Date.now());
+    if (message) await this.handleMessage(account, message);
+  }
+
+  /**
+   * Matrix has no WebSocket API. The Durable Object alarm drives one /sync
+   * long-poll at a time, which keeps the account connected without a Worker
+   * request having to stay open.
+   */
+  private async runMatrix(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = undefined;
+    if (this.matrixActive) return;
+    this.matrixActive = true;
+    try {
+      let since = await this.state.storage.get<string>('matrixSince') ?? null;
+      if (!since) {
+        const initial = await matrixSync(account, null);
+        await this.state.storage.put('matrixSince', initial.nextBatch);
+        const directRooms = await fetchMatrixDirectRooms(account);
+        await this.state.storage.put('matrixDirectRooms', directRooms);
+        this.reconnectAttempt = 0;
+        await this.state.storage.setAlarm(Date.now() + 1_000);
+        return;
+      }
+      const directRooms = await this.state.storage.get<string[]>('matrixDirectRooms') ?? [];
+      const batch = await matrixSync(account, since);
+      for (const roomId of batch.inviteRooms.slice(0, 5)) {
+        try {
+          await joinMatrixRoom(account, roomId);
+        } catch (error) {
+          console.error('Matrix auto-join failed.', errorMessage(error));
+        }
+      }
+      for (const { roomId, event } of batch.events) {
+        const message = normalizeMatrixEvent(event, roomId, account, Date.now(), directRooms.includes(roomId));
+        if (message) await this.handleMessage(account, message);
+      }
+      await this.state.storage.put('matrixSince', batch.nextBatch);
+      this.reconnectAttempt = 0;
+      await this.state.storage.setAlarm(Date.now() + 500);
+    } catch (error) {
+      console.error('Matrix sync failed.', errorMessage(error));
+      await this.scheduleReconnect();
+    } finally {
+      this.matrixActive = false;
+    }
+  }
+
   private async handleMessage(account: ChatAccountContext, message: ChatPlatformMessage): Promise<void> {
     if (await this.wasProcessed(message.eventId ?? message.id)) return;
     const handler = createStoredChatbotHandler(this.env, {
@@ -460,6 +693,19 @@ export class ChatGatewayDurableObject {
       this.sendPacket({ s: 2, sn: this.lastSequence });
       return;
     }
+    if (this.gatewayProtocol === 'dodo') {
+      this.sendPacket({ type: 1 });
+      return;
+    }
+    if (this.gatewayProtocol === 'revolt') {
+      this.sendPacket({ type: 'Ping' });
+      return;
+    }
+    if (this.gatewayProtocol === 'misskey') {
+      this.sendPacket({ type: 'ping' });
+      return;
+    }
+    if (this.gatewayProtocol === 'mastodon' || !this.gatewayProtocol) return;
     if (this.gatewayProtocol === 'satori') {
       this.sendPacket({ op: 1 });
       return;

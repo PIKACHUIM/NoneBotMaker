@@ -137,7 +137,7 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
-    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom']);
+    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom', 'messenger', 'vk', 'zulip', 'rocketchat', 'dodo', 'matrix', 'revolt', 'mastodon', 'instagram', 'viber', 'misskey']);
     expect(definition.protocolDefinitions?.map((protocol) => [protocol.id, protocol.credentialFields.map((field) => field.key)])).toEqual([
       ['qq', ['appId', 'appSecret']],
       ['feishu', ['appId', 'appSecret', 'verificationToken', 'encryptKey']],
@@ -153,6 +153,17 @@ describe('configuration scopes and defaults', () => {
       ['satori', ['endpoint', 'platform', 'selfId', 'token']],
       ['kook', ['botId', 'token']],
       ['wecom', ['corpId', 'agentId', 'secret', 'token', 'encodingAESKey']],
+      ['messenger', ['pageId', 'pageAccessToken', 'appSecret', 'verifyToken']],
+      ['vk', ['groupId', 'accessToken', 'secret', 'confirmationToken']],
+      ['zulip', ['siteUrl', 'botEmail', 'apiKey', 'token']],
+      ['rocketchat', ['serverUrl', 'userId', 'authToken', 'token']],
+      ['dodo', ['clientId', 'token']],
+      ['matrix', ['homeserverUrl', 'userId', 'accessToken']],
+      ['revolt', ['botId', 'botToken', 'apiUrl', 'wsUrl']],
+      ['mastodon', ['instanceUrl', 'accountId', 'accessToken']],
+      ['instagram', ['igUserId', 'pageAccessToken', 'appSecret', 'verifyToken']],
+      ['viber', ['authToken', 'botName']],
+      ['misskey', ['host', 'userId', 'token']],
     ]);
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
@@ -700,7 +711,7 @@ describe('chat protocol credentials', () => {
     expect(missingToken.status).toBe(400);
     expect(await json(missingToken)).toEqual({ error: 'missing_verificationToken' });
     const unsupported = await writeRequest(setup, '/accounts', {
-      pluginId: 'plugin-1', protocol: 'matrix', name: 'Matrix', credentials: { appId: 'x', appSecret: 'secret' },
+      pluginId: 'plugin-1', protocol: 'irc', name: 'IRC', credentials: { appId: 'x', appSecret: 'secret' },
     });
     expect(unsupported.status).toBe(400);
     expect(await json(unsupported)).toEqual({ error: 'unsupported_protocol' });

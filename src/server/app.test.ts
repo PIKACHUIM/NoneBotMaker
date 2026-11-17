@@ -49,6 +49,25 @@ describe('app runtime routing', () => {
     expect(wecomVerify.status).toBe(403);
   });
 
+  it('mounts the Messenger, VK, Zulip and Rocket.Chat webhooks', async () => {
+    const messenger = await createApp().request('/webhook/messenger', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(messenger.status).toBe(200);
+    const messengerVerify = await createApp().request('/webhook/messenger?hub.mode=subscribe&hub.verify_token=x&hub.challenge=y');
+    expect(messengerVerify.status).toBe(503);
+    const vk = await createApp().request('/webhook/vk', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(vk.status).toBe(401);
+    const zulip = await createApp().request('/webhook/zulip', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(zulip.status).toBe(401);
+    const rocketchat = await createApp().request('/webhook/rocketchat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(rocketchat.status).toBe(401);
+    const instagram = await createApp().request('/webhook/instagram', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(instagram.status).toBe(200);
+    const instagramVerify = await createApp().request('/webhook/instagram?hub.mode=subscribe&hub.verify_token=x&hub.challenge=y');
+    expect(instagramVerify.status).toBe(503);
+    const viber = await createApp().request('/webhook/viber', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(viber.status).toBe(401);
+  });
+
   it('rejects websocket mode outside Cloudflare before routing', async () => {
     const response = await createApp().request('/api/health', {}, {
       API_METHOD: 'websocket',

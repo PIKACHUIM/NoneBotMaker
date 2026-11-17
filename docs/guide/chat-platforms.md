@@ -165,6 +165,150 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 - 回复通过应用消息接口发送，支持文本、图片、语音、视频与文件；素材先上传再按 media_id 发送。
 - Serverless 出口 IP 不固定，可能无法满足可信 IP 白名单；上线前请用测试企业验证。
 
+## Facebook Messenger
+
+1. 在 [Meta 开发者后台](https://developers.facebook.com/) 创建应用并添加 Messenger 产品，绑定一个 Facebook 主页。
+2. 在 Messenger → Settings 生成 Page Access Token，并记录 App Secret。
+3. 把 Callback URL 设为 `https://<domain>/webhook/messenger`，填写 Verify Token，订阅 `messages` 字段。
+4. 管理台新增账号 → 协议选 Facebook Messenger → 填写主页 ID、Page Access Token、App Secret 和 Verify Token。
+
+说明：
+
+- GET 校验回显 `hub.challenge`；POST 使用 `X-Hub-Signature-256` 校验。
+- 只支持主页与用户的一对一会话。
+- 出站支持文本、图片、音频、视频和文件；媒体先上传为可重用附件，再按 attachment_id 发送。
+
+## VK
+
+1. 在 VK 社区管理页面创建社区令牌（messages 权限），并在「管理 → API 使用 → Callback API」配置服务器地址 `https://<domain>/webhook/vk`。
+2. 记录社区数字 ID、Callback API 的 secret 和 confirmation 字符串。
+3. 管理台新增账号 → 协议选 VK → 填写群组 ID、社区访问令牌、Callback Secret 和 Confirmation Token。
+
+说明：
+
+- 服务会原样返回 confirmation 字符串完成回调验证，并逐条校验回调中的 `secret`。
+- `peer_id` 大于等于 2000000000 视为群聊，否则为私聊。
+- 出站仅支持文本；图片与文件需要先通过 VK 上传接口取得附件，暂由模型以链接形式回复。
+
+## Zulip
+
+1. 在 Zulip 的「设置 → 机器人」创建传入/传出 Webhook 机器人，记录机器人邮箱与 API Key。
+2. 在机器人配置中把 Outgoing Webhook URL 设为 `https://<domain>/webhook/zulip`，记录 Token。
+3. 管理台新增账号 → 协议选 Zulip → 填写站点地址、机器人邮箱、API Key 和 Webhook Token。
+4. 频道会话外部 ID 形如 `stream:<stream_id>:<topic>`，私聊形如 `dm:<user_id>`，发送 `/openid` 可确认。
+
+说明：
+
+- 传出 Webhook 只在 @ 机器人时触发。
+- 回复通过 `POST /api/v1/messages` 发送，频道消息带主题。
+- 文件先上传到 `/api/v1/user_uploads`，再以 Markdown 链接发送。
+
+## Rocket.Chat
+
+1. 在 Rocket.Chat 的「管理 → 集成 → 传出 Webhook」新建集成，填写回调地址 `https://<domain>/webhook/rocketchat` 并记录 Token。
+2. 准备机器人账号或个人访问令牌，记录 User ID 与 Auth Token。
+3. 管理台新增账号 → 协议选 Rocket.Chat → 填写服务器地址、User ID、Auth Token 和 Webhook Token。
+4. 会话外部 ID 使用房间 ID。
+
+说明：
+
+- 服务校验回调中的 Token，并通过 `chat.postMessage` 回复。
+- 文件先上传到 `/api/v1/rooms.media/:rid`，确认后附带在消息中。
+- 传出 Webhook 只在命中触发词或 @ 机器人时触发。
+
+## DoDo
+
+DoDo 只提供 WebSocket 事件订阅，因此使用 Cloudflare Durable Object 网关。
+
+1. 在 [DoDo 开放平台](https://open.imdodo.com/) 创建机器人，记录 Client ID 与 Token。
+2. 把机器人邀请到语音频道社区，并授予发送消息权限。
+3. 管理台新增账号 → 协议选 DoDo → 填写 Client ID 与 Token。
+4. 频道会话外部 ID 使用频道 ID；私聊使用 `islandId|用户ID`，`/openid` 会返回该格式。
+
+说明：
+
+- 服务先调用 `/api/v2/websocket/connection` 获取网关地址，再发送 25 秒心跳。
+- 频道内消息会全部进入运行时；私聊直接回复。
+- 图片先上传到 `/api/v2/resource/picture/upload`，再按图片消息发送；其他媒体以链接回复。
+
+## Matrix
+
+Matrix 没有 Webhook，服务通过 Durable Object 持续执行 `/sync` 长轮询。
+
+1. 在 homeserver 上创建机器人账号并取得 Access Token（需要 `m.room.message` 读写权限）。
+2. 把机器人邀请进需要服务的房间；收到邀请后服务会自动加入。
+3. 管理台新增账号 → 协议选 Matrix → 填写 Homeserver 地址、机器人 MXID 和 Access Token。
+4. 会话外部 ID 使用房间 ID（`!xxx:server`）。
+
+说明：
+
+- 首次同步只记录 `next_batch`，不会回放历史消息。
+- 已加入的加密房间（E2EE）不会解密，需要关闭加密或使用未加密房间。
+- 发送时使用 `PUT /rooms/{roomId}/send/m.room.message/{txnId}`；媒体先上传到 `/_matrix/media/v3/upload`。
+- 群聊需要 @ 机器人或回复机器人消息；`m.direct` 中的私聊房间始终触发。
+
+## Revolt
+
+1. 在 Revolt 客户端「设置 → My Bots」创建机器人，记录机器人用户 ID 与 Token。
+2. 把机器人邀请到服务器并授予发送消息权限。
+3. 管理台新增账号 → 协议选 Revolt → 填写机器人用户 ID 与 Bot Token；自建实例可另填 API 与 WebSocket 地址。
+4. 会话外部 ID 使用频道 ID。
+
+说明：
+
+- 服务连接 Bonfire WebSocket 并每 20 秒发送 Ping，`Ready` 事件中的频道类型用于区分私聊与服务器频道。
+- 频道内需要 @ 机器人才触发；私聊直接回复。
+- 文件先上传到 Autumn 附件服务，再按附件消息发送。
+
+## Mastodon
+
+1. 在实例的「开发 → 新建应用」创建应用，授予 `read:statuses` 与 `write:statuses`，记录访问令牌。
+2. 记录机器人账号的本地数字 ID。
+3. 管理台新增账号 → 协议选 Mastodon → 填写实例地址、账号 ID 和访问令牌。
+4. 会话外部 ID 形如 `acct:user@instance`。
+
+说明：
+
+- 服务连接 `/api/v1/streaming?stream=user`，处理 `update` 事件。
+- 回复会 @ 作者；私信使用 `direct` 可见性，公开提及使用 `unlisted`。
+- 文本按 Mastodon 默认 500 字符截断；媒体先上传到 `/api/v2/media`。
+- 访问令牌会出现在 WebSocket 查询参数中，请使用专用令牌并定期轮换。
+
+## Instagram Messaging
+
+1. 在 Meta 开发者后台把 Instagram 专业账号与 Facebook 主页绑定，并授予 `instagram_manage_messages`。
+2. 把 Callback URL 设为 `https://<domain>/webhook/instagram`，填写 Verify Token，订阅 `messages`。
+3. 管理台新增账号 → 协议选 Instagram Messaging → 填写 Instagram 账号 ID、Page Access Token、App Secret 和 Verify Token。
+
+说明：
+
+- 回调结构与 Messenger 相同，服务按 `entry.id` 匹配账号并用 `X-Hub-Signature-256` 校验。
+- 仅支持一对一文本回复；媒体需要公网 HTTPS URL，当前不支持。
+
+## Viber
+
+1. 在 Viber 管理后台创建机器人，记录 Auth Token，并把 Webhook 设为 `https://<domain>/webhook/viber`。
+2. 管理台新增账号 → 协议选 Viber → 填写 Auth Token 与机器人名称。
+3. 会话外部 ID 使用 Viber 用户 ID（`sender.id`）。
+
+说明：
+
+- 服务用 Auth Token 对原始请求体计算 HMAC-SHA256，并与 `X-Viber-Content-Signature` 比对。
+- 仅支持一对一文本；媒体需要公网 URL，当前不支持。
+
+## Misskey
+
+1. 在 Misskey 的「设置 → API」创建访问令牌，勾选发帖与查看权限；记录实例地址、机器人 userId 和令牌。
+2. 管理台新增账号 → 协议选 Misskey → 填写实例地址、机器人用户 ID 和访问令牌。
+3. 会话外部 ID 为 `channel:<channelId>` 或 `user:<userId>`。
+
+说明：
+
+- 服务连接 `/streaming?i=<token>` 并订阅 `main` 频道，每 30 秒发送 ping。
+- 私信（`specified`）直接回复；公开帖子需要 @ 机器人或回复机器人的帖子。
+- 文件先上传到 `/api/drive/files/create`，再按 `fileIds` 发帖。
+- 令牌会出现在 WebSocket 查询参数中，请使用专用令牌。
+
 ## 飞书 / Lark
 
 1. 在[飞书开放平台](https://open.feishu.cn/)创建企业自建应用，记录「凭证与基础信息」中的 App ID 和 App Secret。
@@ -211,7 +355,7 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 
 - 群聊和私聊的外部 ID 由各平台提供，先用 `/openid` 命令获取，再写入「群聊管理」。群聊记录可绑定多个外部 ID，但上下文按真实会话隔离。
 - 定时任务的 `message` 动作会按账号协议主动发送文本；`prompt` 和 `command` 动作会把合成消息交给聊天运行时。QQ 在配置 `QQ_GATEWAY_SESSIONS` 时优先投递到 Gateway，其他平台直接在本进程执行。
-- 需要主动消息的平台必须在账号凭据中提供对应能力：钉钉需要 RobotCode，微信公众号需要可用的 `access_token` 与交互窗口，飞书需要有效的应用权限，OneBot 需要可用的 HTTP API，Telegram 需要有效的 Bot Token，Slack 需要 `chat:write`，LINE 需要 Channel Access Token，WhatsApp 受 24 小时窗口限制，Mattermost 需要可创建帖子的访问令牌。
+- 需要主动消息的平台必须在账号凭据中提供对应能力：钉钉需要 RobotCode，微信公众号需要可用的 `access_token` 与交互窗口，飞书需要有效的应用权限，OneBot 需要可用的 HTTP API，Telegram 需要有效的 Bot Token，Slack 需要 `chat:write`，LINE 需要 Channel Access Token，WhatsApp 受 24 小时窗口限制，Mattermost 需要可创建帖子的访问令牌，Zulip 需要机器人 API Key，Rocket.Chat 需要 Auth Token，VK 需要社区令牌，Mastodon 需要 `write:statuses`。
 
 ## 与 NoneBot2 适配器的对应关系
 
@@ -229,10 +373,12 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 | Console | ❌ | 本项目有管理台和会话管理，但不提供模拟聊天入口 |
 | Satori | ✅ | `/v1/events` WebSocket + `/v1/message.create`，需要 Cloudflare Durable Object |
 | Discord | ✅ | Gateway v10 WebSocket，需要 Cloudflare Durable Object |
-| DoDo | ❌ | Bot 长连接协议，未实现 |
+| DoDo | ✅ | Gateway WebSocket + 开放接口，需要 Cloudflare Durable Object |
 | Kritor | ❌ | 独立 WebSocket/TCP 标准，未实现 |
 | Milky | ❌ | 独立 WebSocket 标准，未实现 |
 | 钉钉 / 企业微信 / 微信公众号 / Slack / LINE / WhatsApp / Mattermost | ✅ | 本项目额外支持的原生 Webhook 协议，见上文 |
+| Facebook Messenger / Instagram / Viber / VK / Zulip / Rocket.Chat | ✅ | 本项目额外支持的原生 Webhook 协议，见上文 |
+| Matrix / Revolt / Mastodon / Misskey | ✅ | 长连接或轮询接入，需要 Cloudflare Durable Object |
 | KOOK | ✅ | Gateway WebSocket + REST，需要 Cloudflare Durable Object |
 
 ## 常见聊天软件支持情况
@@ -244,14 +390,19 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 | 微信个人号 | ❌ | 官方未提供机器人 API，第三方协议不稳定且有封号风险 |
 | 钉钉 / 飞书 | ✅ | 见上文 |
 | Telegram / Discord / Slack / WhatsApp / LINE / KOOK / Mattermost | ✅ | 见上文各自限制 |
-| DoDo | ⏳ | 使用专用 WebSocket 与事件封装，待补齐协议细节后接入 |
-| Matrix | ⏳ | 需要 `/sync` 长轮询或 Application Service |
+| DoDo | ✅ | Gateway WebSocket + 开放接口 |
+| Matrix | ✅ | `/sync` 长轮询；仅未加密房间 |
 | Microsoft Teams | ⏳ | Bot Framework JWT 校验，计划中 |
 | Google Chat | ⏳ | 需要 Google JWT 校验，计划中 |
-| VK | ⏳ | Callback API，计划中 |
-| Mastodon / Misskey | ⏳ | 流式 API / Webhook，计划中 |
-| Zulip / Rocket.Chat | ⏳ | 传出 Webhook，计划中 |
-| Signal / Instagram / Messenger | ❌ | 无通用机器人 API 或需要额外审核，暂不支持 |
+| VK | ✅ | Callback API |
+| Mastodon | ✅ | 用户流 WebSocket |
+| Misskey | ✅ | 流式 API WebSocket |
+| Zulip / Rocket.Chat | ✅ | 传出 Webhook + REST |
+| Revolt | ✅ | Bonfire WebSocket |
+| Instagram | ✅ | 专业账号一对一消息 |
+| Threads | ❌ | 无通用机器人消息 API |
+| Viber | ✅ | 机器人 Webhook |
+| Signal | ❌ | 无官方 Bot API |
 | 抖音 / 小红书 | ❌ | 无公开通用机器人 API |
 
 ## 排查

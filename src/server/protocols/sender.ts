@@ -14,6 +14,17 @@ import { sendDiscordMedia, sendDiscordProactiveText, sendDiscordText } from './d
 import { sendSatoriMedia, sendSatoriProactiveText, sendSatoriText } from './satori/api';
 import { sendKookMedia, sendKookProactiveText, sendKookText } from './kook/api';
 import { sendWeComMedia, sendWeComProactiveText, sendWeComText } from './wecom/api';
+import { sendMessengerMedia, sendMessengerProactiveText, sendMessengerText } from './messenger/api';
+import { sendVkMedia, sendVkProactiveText, sendVkText } from './vk/api';
+import { sendZulipMedia, sendZulipProactiveText, sendZulipText } from './zulip/api';
+import { sendRocketChatMedia, sendRocketChatProactiveText, sendRocketChatText } from './rocketchat/api';
+import { sendDodoMedia, sendDodoProactiveText, sendDodoText } from './dodo/api';
+import { sendMatrixMedia, sendMatrixProactiveText, sendMatrixText } from './matrix/api';
+import { sendRevoltMedia, sendRevoltProactiveText, sendRevoltText } from './revolt/api';
+import { sendMastodonMedia, sendMastodonProactiveText, sendMastodonText } from './mastodon/api';
+import { sendInstagramMedia, sendInstagramProactiveText, sendInstagramText } from './instagram/api';
+import { sendViberMedia, sendViberProactiveText, sendViberText } from './viber/api';
+import { sendMisskeyMedia, sendMisskeyProactiveText, sendMisskeyText } from './misskey/api';
 
 export function unsupportedProtocol(protocol: string): Error {
   return new Error(`Unsupported chat protocol: ${protocol}`);
@@ -56,6 +67,28 @@ export async function sendChatText(
       return sendKookText(account, targetId, messageId, content, options);
     case 'wecom':
       return sendWeComText(account, targetId, messageId, content, options);
+    case 'messenger':
+      return sendMessengerText(account, targetId, messageId, content, options);
+    case 'vk':
+      return sendVkText(account, targetId, messageId, content, options);
+    case 'zulip':
+      return sendZulipText(account, targetId, messageId, content, options);
+    case 'rocketchat':
+      return sendRocketChatText(account, targetId, messageId, content, options);
+    case 'dodo':
+      return sendDodoText(account, targetId, messageId, content, options);
+    case 'matrix':
+      return sendMatrixText(account, targetId, messageId, content, options);
+    case 'revolt':
+      return sendRevoltText(account, targetId, messageId, content, options);
+    case 'mastodon':
+      return sendMastodonText(account, targetId, messageId, content, options);
+    case 'instagram':
+      return sendInstagramText(account, targetId, messageId, content, options);
+    case 'viber':
+      return sendViberText(account, targetId, messageId, content, options);
+    case 'misskey':
+      return sendMisskeyText(account, targetId, messageId, content, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -97,6 +130,28 @@ export async function sendChatMedia(
       return sendKookMedia(account, targetId, messageId, media, options);
     case 'wecom':
       return sendWeComMedia(account, targetId, messageId, media, options);
+    case 'messenger':
+      return sendMessengerMedia(account, targetId, messageId, media, options);
+    case 'vk':
+      return sendVkMedia(account, targetId, messageId, media, options);
+    case 'zulip':
+      return sendZulipMedia(account, targetId, messageId, media, options);
+    case 'rocketchat':
+      return sendRocketChatMedia(account, targetId, messageId, media, options);
+    case 'dodo':
+      return sendDodoMedia(account, targetId, messageId, media, options);
+    case 'matrix':
+      return sendMatrixMedia(account, targetId, messageId, media, options);
+    case 'revolt':
+      return sendRevoltMedia(account, targetId, messageId, media, options);
+    case 'mastodon':
+      return sendMastodonMedia(account, targetId, messageId, media, options);
+    case 'instagram':
+      return sendInstagramMedia(account, targetId, messageId, media, options);
+    case 'viber':
+      return sendViberMedia(account, targetId, messageId, media, options);
+    case 'misskey':
+      return sendMisskeyMedia(account, targetId, messageId, media, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -139,6 +194,28 @@ export async function sendProactiveChatText(
       return sendKookProactiveText(account, targetId, content);
     case 'wecom':
       return sendWeComProactiveText(account, targetId, content);
+    case 'messenger':
+      return sendMessengerProactiveText(account, targetId, content);
+    case 'vk':
+      return sendVkProactiveText(account, targetId, content);
+    case 'zulip':
+      return sendZulipProactiveText(account, targetId, content);
+    case 'rocketchat':
+      return sendRocketChatProactiveText(account, targetId, content);
+    case 'dodo':
+      return sendDodoProactiveText(account, targetId, conversationType, content);
+    case 'matrix':
+      return sendMatrixProactiveText(account, targetId, content);
+    case 'revolt':
+      return sendRevoltProactiveText(account, targetId, content);
+    case 'mastodon':
+      return sendMastodonProactiveText(account, targetId, content);
+    case 'instagram':
+      return sendInstagramProactiveText(account, targetId, content);
+    case 'viber':
+      return sendViberProactiveText(account, targetId, content);
+    case 'misskey':
+      return sendMisskeyProactiveText(account, targetId, content);
     default:
       throw unsupportedProtocol(account.protocol);
   }

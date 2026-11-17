@@ -619,6 +619,436 @@ const wecomCredentialFields: PluginFieldDefinition[] = [
   },
 ];
 
+const messengerCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'pageId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Facebook 主页 ID', en: 'Facebook Page ID' },
+    description: {
+      zh: '接收消息的 Facebook 主页 ID，用于匹配回调中的 entry.id。',
+      en: 'The Facebook Page ID that receives messages, matched against entry.id in callbacks.',
+    },
+  },
+  {
+    key: 'pageAccessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '主页访问令牌', en: 'Page access token' },
+    description: {
+      zh: 'Messenger Platform 主页访问令牌，用于调用 Send API；保存时留空保留已有值。',
+      en: 'The Messenger Platform page access token used by the Send API. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'App Secret', en: 'App Secret' },
+    description: {
+      zh: 'Meta 应用的 App Secret，用于校验 X-Hub-Signature-256；保存时留空保留已有值。',
+      en: 'The Meta app secret used to verify X-Hub-Signature-256. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'verifyToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Verify Token', en: 'Verify token' },
+    description: {
+      zh: 'Webhook 订阅时填写的 Verify Token，用于 GET 验证；保存时留空保留已有值。',
+      en: 'The verify token entered in the webhook subscription and used for the GET challenge. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const vkCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'groupId',
+    type: 'text',
+    required: true,
+    label: { zh: '群组 ID', en: 'Group ID' },
+    description: {
+      zh: 'VK 社区（群组）的数字 ID，用于匹配回调中的 group_id。',
+      en: 'The numeric VK community (group) ID matched against group_id in callbacks.',
+    },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '社区访问令牌', en: 'Community access token' },
+    description: {
+      zh: '具有 messages 权限的社区访问令牌，用于 messages.send；保存时留空保留已有值。',
+      en: 'A community access token with the messages scope, used by messages.send. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'secret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Callback Secret', en: 'Callback secret' },
+    description: {
+      zh: 'Callback API 中填写的 secret，服务会逐条校验回调来源；保存时留空保留已有值。',
+      en: 'The secret configured in the Callback API and checked on every callback. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'confirmationToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Confirmation Token', en: 'Confirmation token' },
+    description: {
+      zh: 'Callback API 的确认字符串，用于回应 VK 的 confirmation 请求；保存时留空保留已有值。',
+      en: 'The confirmation string returned for VK confirmation requests. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const zulipCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'siteUrl',
+    type: 'text',
+    required: true,
+    label: { zh: 'Zulip 站点地址', en: 'Zulip site URL' },
+    description: {
+      zh: '团队 Zulip 的根地址，例如 https://chat.example.com。',
+      en: 'The root URL of the Zulip organization, for example https://chat.example.com.',
+    },
+    placeholder: { zh: 'https://chat.example.com', en: 'https://chat.example.com' },
+  },
+  {
+    key: 'botEmail',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人邮箱', en: 'Bot email' },
+    description: {
+      zh: '传出 Webhook 机器人的邮箱，用于识别账号与 API 基本认证。',
+      en: 'The outgoing webhook bot email, used as the account identifier and for API basic auth.',
+    },
+  },
+  {
+    key: 'apiKey',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '机器人 API Key', en: 'Bot API key' },
+    description: {
+      zh: '机器人的 API Key，用于发送消息；保存时留空保留已有值。',
+      en: 'The bot API key used to send messages. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Webhook Token', en: 'Webhook token' },
+    description: {
+      zh: '传出 Webhook 机器人配置中的 Token，用于校验回调；保存时留空保留已有值。',
+      en: 'The token from the outgoing webhook bot configuration, used to verify callbacks. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const rocketChatCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'serverUrl',
+    type: 'text',
+    required: true,
+    label: { zh: '服务器地址', en: 'Server URL' },
+    description: {
+      zh: 'Rocket.Chat 服务器根地址，例如 https://chat.example.com。',
+      en: 'The Rocket.Chat server root URL, for example https://chat.example.com.',
+    },
+    placeholder: { zh: 'https://chat.example.com', en: 'https://chat.example.com' },
+  },
+  {
+    key: 'userId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人用户 ID', en: 'Bot user ID' },
+    description: {
+      zh: '发送消息所用账号的 User ID，作为 X-User-Id 请求头与账号标识。',
+      en: 'The user ID used for X-User-Id and as the account identifier.',
+    },
+  },
+  {
+    key: 'authToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Auth Token', en: 'Auth token' },
+    description: {
+      zh: '个人访问令牌，作为 X-Auth-Token 发送消息；保存时留空保留已有值。',
+      en: 'The personal access token sent as X-Auth-Token. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Webhook Token', en: 'Webhook token' },
+    description: {
+      zh: '传出 Webhook 集成中的 Token，用于校验回调；保存时留空保留已有值。',
+      en: 'The token from the outgoing webhook integration, used to verify callbacks. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const dodoCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'clientId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Client ID', en: 'Client ID' },
+    description: {
+      zh: 'DoDo 开放平台的机器人 Client ID，用于鉴权头 Bot {clientId}.{token}。',
+      en: 'The DoDo open platform Client ID used in the Bot {clientId}.{token} authorization header.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Token', en: 'Bot token' },
+    description: {
+      zh: 'DoDo 机器人 Token，用于 WebSocket 与开放接口；保存时留空保留已有值。',
+      en: 'The DoDo bot token used for the WebSocket and open API. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const matrixCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'homeserverUrl',
+    type: 'text',
+    required: true,
+    label: { zh: 'Homeserver 地址', en: 'Homeserver URL' },
+    description: {
+      zh: 'Matrix homeserver 根地址，例如 https://matrix.org。',
+      en: 'The Matrix homeserver root URL, for example https://matrix.org.',
+    },
+    placeholder: { zh: 'https://matrix.org', en: 'https://matrix.org' },
+  },
+  {
+    key: 'userId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人用户 ID', en: 'Bot user ID' },
+    description: {
+      zh: '机器人完整 MXID，例如 @bot:example.com，用于过滤自身消息。',
+      en: 'The bot MXID, for example @bot:example.com, used to skip its own messages.',
+    },
+    placeholder: { zh: '@bot:example.com', en: '@bot:example.com' },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Access Token', en: 'Access token' },
+    description: {
+      zh: '机器人账号的访问令牌；仅支持未加密房间，E2EE 需要额外设备验证。保存时留空保留已有值。',
+      en: 'The bot access token. Only unencrypted rooms are supported; E2EE needs device verification. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const revoltCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'botId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人用户 ID', en: 'Bot user ID' },
+    description: {
+      zh: 'Revolt 机器人账号的用户 ID，用于 @ 检测与账号标识。',
+      en: 'The Revolt bot user ID used for mention checks and as the account identifier.',
+    },
+  },
+  {
+    key: 'botToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Token', en: 'Bot token' },
+    description: {
+      zh: 'Revolt 机器人 Token，用于 WebSocket 鉴权与 x-bot-token 请求头；保存时留空保留已有值。',
+      en: 'The Revolt bot token for WebSocket authentication and the x-bot-token header. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'apiUrl',
+    type: 'text',
+    required: false,
+    label: { zh: 'API 地址（可选）', en: 'API URL (optional)' },
+    description: {
+      zh: '自建实例的 REST 地址；留空使用 https://api.revolt.chat。',
+      en: 'REST URL for self-hosted instances; leave empty to use https://api.revolt.chat.',
+    },
+    placeholder: { zh: 'https://api.revolt.chat', en: 'https://api.revolt.chat' },
+  },
+  {
+    key: 'wsUrl',
+    type: 'text',
+    required: false,
+    label: { zh: 'WebSocket 地址（可选）', en: 'WebSocket URL (optional)' },
+    description: {
+      zh: '自建实例的事件网关地址；留空使用 wss://ws.revolt.chat。',
+      en: 'Event gateway URL for self-hosted instances; leave empty to use wss://ws.revolt.chat.',
+    },
+    placeholder: { zh: 'wss://ws.revolt.chat', en: 'wss://ws.revolt.chat' },
+  },
+];
+
+const mastodonCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'instanceUrl',
+    type: 'text',
+    required: true,
+    label: { zh: '实例地址', en: 'Instance URL' },
+    description: {
+      zh: 'Mastodon 实例根地址，例如 https://mastodon.social。',
+      en: 'The Mastodon instance root URL, for example https://mastodon.social.',
+    },
+    placeholder: { zh: 'https://mastodon.social', en: 'https://mastodon.social' },
+  },
+  {
+    key: 'accountId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人账号 ID', en: 'Bot account ID' },
+    description: {
+      zh: '机器人账号的本地数字 ID，用于过滤自己发布的状态并作为账号标识。',
+      en: 'The bot local numeric account ID, used to skip its own statuses and as the account identifier.',
+    },
+  },
+  {
+    key: 'accessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '访问令牌', en: 'Access token' },
+    description: {
+      zh: '具有 read:statuses 与 write:statuses 权限的访问令牌；保存时留空保留已有值。',
+      en: 'An access token with read:statuses and write:statuses scopes. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const instagramCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'igUserId',
+    type: 'text',
+    required: true,
+    label: { zh: 'Instagram 专业账号 ID', en: 'Instagram professional account ID' },
+    description: {
+      zh: '与主页绑定的 Instagram 专业账号 ID，用于匹配回调中的 entry.id 与发送消息。',
+      en: 'The Instagram professional account ID linked to the Page, matched against entry.id and used for sending.',
+    },
+  },
+  {
+    key: 'pageAccessToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '主页访问令牌', en: 'Page access token' },
+    description: {
+      zh: '具有 instagram_manage_messages 权限的主页访问令牌；保存时留空保留已有值。',
+      en: 'A Page access token with instagram_manage_messages. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'appSecret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'App Secret', en: 'App Secret' },
+    description: {
+      zh: 'Meta 应用的 App Secret，用于校验 X-Hub-Signature-256；保存时留空保留已有值。',
+      en: 'The Meta app secret used to verify X-Hub-Signature-256. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'verifyToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Verify Token', en: 'Verify token' },
+    description: {
+      zh: 'Webhook 订阅时填写的 Verify Token，用于 GET 验证；保存时留空保留已有值。',
+      en: 'The verify token from the webhook subscription, used for the GET challenge. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const viberCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'authToken',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Auth Token', en: 'Auth token' },
+    description: {
+      zh: 'Viber 管理后台的机器人 Auth Token，用于校验回调签名与发送消息；保存时留空保留已有值。',
+      en: 'The Viber bot auth token used to verify callback signatures and send messages. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'botName',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人名称', en: 'Bot name' },
+    description: {
+      zh: '发送消息时使用的机器人显示名称，需要与 Viber 后台的机器人名称一致。',
+      en: 'The bot display name used when sending, which must match the name configured in the Viber console.',
+    },
+  },
+];
+
+const misskeyCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'host',
+    type: 'text',
+    required: true,
+    label: { zh: '实例地址', en: 'Instance URL' },
+    description: {
+      zh: 'Misskey 实例根地址，例如 https://misskey.io。',
+      en: 'The Misskey instance root URL, for example https://misskey.io.',
+    },
+    placeholder: { zh: 'https://misskey.io', en: 'https://misskey.io' },
+  },
+  {
+    key: 'userId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人用户 ID', en: 'Bot user ID' },
+    description: {
+      zh: '机器人账号的 userId，用于过滤自己的帖子与 @ 检测。',
+      en: 'The bot userId, used to skip its own notes and detect mentions.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '访问令牌', en: 'Access token' },
+    description: {
+      zh: '机器人账号的 API Token，同时用于流式连接与发帖；保存时留空保留已有值。',
+      en: 'The bot API token used for streaming and posting. Leave empty to keep the stored value.',
+    },
+  },
+];
+
 const builtinChatProtocols: ChatProtocolDefinition[] = [
   {
     id: 'qq',
@@ -807,6 +1237,160 @@ const builtinChatProtocols: ChatProtocolDefinition[] = [
     credentialFields: wecomCredentialFields,
     proactive: true,
   },
+  {
+    id: 'messenger',
+    name: { zh: 'Facebook Messenger', en: 'Facebook Messenger' },
+    description: {
+      zh: 'Meta Messenger Platform Webhook，支持主页一对一文本与附件回复。',
+      en: 'Meta Messenger Platform Webhooks for one-to-one text and attachment replies.',
+    },
+    identifierField: 'pageId',
+    verificationField: 'verifyToken',
+    secretField: 'appSecret',
+    webhookPath: '/webhook/messenger',
+    credentialFields: messengerCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'vk',
+    name: { zh: 'VK', en: 'VK' },
+    description: {
+      zh: 'VK Callback API，支持社区私聊与群聊文本回复。',
+      en: 'VK Callback API for community private and group text replies.',
+    },
+    identifierField: 'groupId',
+    verificationField: 'secret',
+    secretField: 'secret',
+    webhookPath: '/webhook/vk',
+    credentialFields: vkCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'zulip',
+    name: { zh: 'Zulip', en: 'Zulip' },
+    description: {
+      zh: 'Zulip 传出 Webhook 机器人，按频道主题回复，并支持私聊。',
+      en: 'Zulip outgoing webhook bots replying into stream topics and direct messages.',
+    },
+    identifierField: 'botEmail',
+    verificationField: 'token',
+    secretField: 'token',
+    webhookPath: '/webhook/zulip',
+    credentialFields: zulipCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'rocketchat',
+    name: { zh: 'Rocket.Chat', en: 'Rocket.Chat' },
+    description: {
+      zh: 'Rocket.Chat 传出 Webhook 集成，通过 REST API 回复频道与私聊消息。',
+      en: 'Rocket.Chat outgoing webhook integrations replying through the REST API.',
+    },
+    identifierField: 'userId',
+    verificationField: 'token',
+    secretField: 'token',
+    webhookPath: '/webhook/rocketchat',
+    credentialFields: rocketChatCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'dodo',
+    name: { zh: 'DoDo', en: 'DoDo' },
+    description: {
+      zh: 'DoDo 语音频道社区 WebSocket，支持频道与私聊文本、图片；需要 Cloudflare Durable Object。',
+      en: 'DoDo community WebSocket for channel and direct text and images; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'clientId',
+    secretField: 'token',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: dodoCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'matrix',
+    name: { zh: 'Matrix', en: 'Matrix' },
+    description: {
+      zh: 'Matrix Client-Server API 长轮询同步，支持未加密房间的文本与媒体；需要 Cloudflare Durable Object。',
+      en: 'Matrix Client-Server API sync loop for unencrypted rooms with text and media; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'userId',
+    secretField: 'accessToken',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: matrixCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'revolt',
+    name: { zh: 'Revolt', en: 'Revolt' },
+    description: {
+      zh: 'Revolt Bonfire WebSocket，支持服务器频道与私聊文本；需要 Cloudflare Durable Object。',
+      en: 'Revolt Bonfire WebSocket for server channels and direct text; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'botId',
+    secretField: 'botToken',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: revoltCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'mastodon',
+    name: { zh: 'Mastodon', en: 'Mastodon' },
+    description: {
+      zh: 'Mastodon 用户流 WebSocket，回复 @ 提及与私信；需要 Cloudflare Durable Object。',
+      en: 'Mastodon user streaming WebSocket replying to mentions and direct messages; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'accountId',
+    secretField: 'accessToken',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: mastodonCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'instagram',
+    name: { zh: 'Instagram Messaging', en: 'Instagram Messaging' },
+    description: {
+      zh: 'Instagram 专业账号消息 Webhook，支持一对一文本回复。',
+      en: 'Instagram professional account messaging Webhooks for one-to-one text replies.',
+    },
+    identifierField: 'igUserId',
+    verificationField: 'verifyToken',
+    secretField: 'appSecret',
+    webhookPath: '/webhook/instagram',
+    credentialFields: instagramCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'viber',
+    name: { zh: 'Viber', en: 'Viber' },
+    description: {
+      zh: 'Viber 机器人 Webhook，支持一对一文本回复。',
+      en: 'Viber bot Webhooks for one-to-one text replies.',
+    },
+    identifierField: 'authToken',
+    verificationField: 'authToken',
+    secretField: 'authToken',
+    webhookPath: '/webhook/viber',
+    credentialFields: viberCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'misskey',
+    name: { zh: 'Misskey', en: 'Misskey' },
+    description: {
+      zh: 'Misskey 流式 API WebSocket，回复 @ 提及与私信；需要 Cloudflare Durable Object。',
+      en: 'Misskey streaming API WebSocket replying to mentions and direct messages; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'userId',
+    secretField: 'token',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: misskeyCredentialFields,
+    proactive: true,
+  },
 ];
 
 const chatbotDefinition: PluginDefinition = {
@@ -814,8 +1398,8 @@ const chatbotDefinition: PluginDefinition = {
   protocols: builtinChatProtocols.map((protocol) => protocol.id),
   name: { zh: '群聊助手', en: 'Group Chatbot' },
   description: {
-    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
-    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
+    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、Messenger、Instagram、Viber、VK、Zulip、Rocket.Chat、DoDo、Matrix、Revolt、Mastodon、Misskey、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
+    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Messenger, Instagram, Viber, VK, Zulip, Rocket.Chat, DoDo, Matrix, Revolt, Mastodon, Misskey, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [

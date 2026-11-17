@@ -60,8 +60,14 @@ https://<worker-domain>/webhook/line     LINE
 https://<worker-domain>/webhook/whatsapp WhatsApp Cloud API
 https://<worker-domain>/webhook/mattermost Mattermost
 https://<worker-domain>/webhook/wecom   企业微信
+https://<worker-domain>/webhook/messenger Facebook Messenger
+https://<worker-domain>/webhook/vk       VK
+https://<worker-domain>/webhook/zulip    Zulip
+https://<worker-domain>/webhook/rocketchat Rocket.Chat
+https://<worker-domain>/webhook/instagram Instagram Messaging
+https://<worker-domain>/webhook/viber    Viber
 
-Discord、Satori、KOOK 使用 Cloudflare Durable Object WebSocket，不需要回调地址；部署到 EdgeOne 或阿里云 ESA 时不可用。企业微信还需把出口 IP 加入应用的可信 IP。
+Discord、Satori、KOOK、DoDo、Matrix、Revolt、Mastodon、Misskey 使用 Cloudflare Durable Object 长连接或长轮询，不需要回调地址；部署到 EdgeOne 或阿里云 ESA 时不可用。企业微信还需把出口 IP 加入应用的可信 IP。
 ```
 
 在管理台创建平台账号和会话策略。账号凭据应填写在管理台受保护的账号配置中；会话策略填写群聊/私聊外部 ID 并选择供应商和模型。回调需要保留平台要求的签名请求头与原始请求体。各平台的权限、事件订阅和限制见[聊天平台接入](/guide/chat-platforms)。

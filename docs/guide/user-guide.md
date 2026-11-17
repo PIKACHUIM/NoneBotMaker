@@ -46,7 +46,7 @@
 
 ### 5. 检查运行和实际费用
 
-根据 `API_METHOD` 配置 QQ 接入：`websocket` 使用 Gateway，**不要**将 `/webhook/qq` 当作当前事件入口；`webhook` 才需要 QQ 回调 URL、签名头和原始 JSON body。OneBot、Telegram、Slack、LINE、WhatsApp、飞书、钉钉和微信固定使用各自的 Webhook 回调。在所选会话中 @ 机器人（微信公众号直接发消息），然后进入“会话管理”检查连接、审批、聊天记录、成本详情及错误。`/openid` 可核对用户与会话标识；不要在公开群发送密钥或隐私数据。
+根据 `API_METHOD` 配置 QQ 接入：`websocket` 使用 Gateway，**不要**将 `/webhook/qq` 当作当前事件入口；`webhook` 才需要 QQ 回调 URL、签名头和原始 JSON body。OneBot、Telegram、Slack、LINE、WhatsApp、Messenger、VK、Zulip、Rocket.Chat、飞书、钉钉和微信固定使用各自的 Webhook 回调；Discord、Satori、KOOK、DoDo、Matrix、Revolt、Mastodon 使用 Durable Object 长连接或长轮询，不需要回调地址。在所选会话中 @ 机器人（微信公众号直接发消息），然后进入“会话管理”检查连接、审批、聊天记录、成本详情及错误。`/openid` 可核对用户与会话标识；不要在公开群发送密钥或隐私数据。
 
 ## 会话管理与运行命令
 

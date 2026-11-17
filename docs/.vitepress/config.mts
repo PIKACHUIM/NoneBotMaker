@@ -54,7 +54,7 @@ const enSidebar = [
 
 export default defineConfig({
   title: 'NoneBotMaker',
-  description: '面向 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost 与微信公众号的 Serverless 管理与聊天服务',
+  description: '面向 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、Messenger、Instagram、Viber、VK、Zulip、Rocket.Chat、DoDo、Matrix、Revolt、Mastodon、Misskey、飞书、钉钉、Mattermost 与微信公众号的 Serverless 管理与聊天服务',
   cleanUrls: true,
   lastUpdated: true,
   locales: {

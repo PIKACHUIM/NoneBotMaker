@@ -4,7 +4,7 @@
 
 ## 目标与用户
 
-NoneBotMaker 为 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost 和微信公众号机器人提供 Serverless 管理与聊天执行服务。管理员通过 Web 管理台维护插件、AI 供应商、机器人账号和群聊/私聊策略；用户在各平台允许的会话内与机器人交互。代码以 TypeScript 实现，在不同运行平台复用 Hono 应用逻辑。
+NoneBotMaker 为 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、Messenger、VK、Zulip、Rocket.Chat、DoDo、Matrix、Revolt、Mastodon、飞书、钉钉、Mattermost 与微信公众号机器人提供 Serverless 管理与聊天执行服务。管理员通过 Web 管理台维护插件、AI 供应商、机器人账号和群聊/私聊策略；用户在各平台允许的会话内与机器人交互。代码以 TypeScript 实现，在不同运行平台复用 Hono 应用逻辑。
 
 ## 功能需求与当前状态
 
@@ -12,7 +12,7 @@ NoneBotMaker 为 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Sa
 | --- | --- | --- |
 | FR-01 | 管理员登录后管理应用配置 | 密码验证与签名 session；管理 API 要求有效 session。`src/server/routes/index.ts`、`src/server/auth.ts` 与对应测试。 |
 | FR-02 | 配置字段归属唯一且按层级复用 | 插件定义技术默认；账号按平台协议持有对应凭据；群管理绑定外部会话 ID，**身份与对话策略必选且始终可见**，语音/费用/记忆可选。群不能追加身份未授权工具；继承值只读展示，不能写回群记录。`src/shared/plugin-catalog.ts`、`src/server/routes/management.ts`。 |
-| FR-03 | 接收并验证多平台 Webhook 事件 | QQ 在 `/webhook/qq` 按 AppID 定位账号并验证 Ed25519 签名；OneBot 在 `/webhook/onebot` 按 self_id 定位账号并可选校验 HMAC-SHA1 签名；Telegram 在 `/webhook/telegram` 用 secret_token 定位账号；Slack 在 `/webhook/slack` 校验 X-Slack-Signature；LINE 在 `/webhook/line` 校验 Channel Secret 签名；WhatsApp 在 `/webhook/whatsapp` 校验 X-Hub-Signature-256；Mattermost 在 `/webhook/mattermost` 校验传出 Webhook Token；Discord 通过 Cloudflare Durable Object 的 Gateway WebSocket 接收 `MESSAGE_CREATE`；Satori 通过 `/v1/events` 接收 `message-created`；KOOK 通过 Gateway 接收频道/私聊事件；企业微信在 `/webhook/wecom` 校验 SHA1 签名并 AES 解密；飞书在 `/webhook/feishu` 校验签名/Token 并解密事件；钉钉在 `/webhook/dingtalk` 校验 timestamp/sign；微信公众号在 `/webhook/wechat` 校验 SHA1 签名。归一化消息进入同一聊天处理链。`src/server/protocols/`。 |
+| FR-03 | 接收并验证多平台 Webhook 事件 | QQ 在 `/webhook/qq` 按 AppID 定位账号并验证 Ed25519 签名；OneBot 在 `/webhook/onebot` 按 self_id 定位账号并可选校验 HMAC-SHA1 签名；Telegram 在 `/webhook/telegram` 用 secret_token 定位账号；Slack 在 `/webhook/slack` 校验 X-Slack-Signature；LINE 在 `/webhook/line` 校验 Channel Secret 签名；WhatsApp 在 `/webhook/whatsapp` 校验 X-Hub-Signature-256；Mattermost 在 `/webhook/mattermost` 校验传出 Webhook Token；Discord 通过 Cloudflare Durable Object 的 Gateway WebSocket 接收 `MESSAGE_CREATE`；Satori 通过 `/v1/events` 接收 `message-created`；KOOK 通过 Gateway 接收频道/私聊事件；DoDo 通过 Gateway 接收消息事件；Revolt 通过 Bonfire WebSocket 接收 Message；Mastodon 通过用户流接收 update；Matrix 在 Durable Object 中执行 `/sync` 长轮询；Messenger 在 `/webhook/messenger`、Instagram 在 `/webhook/instagram` 校验 X-Hub-Signature-256；Viber 在 `/webhook/viber` 校验 HMAC；Misskey 通过流式 API 接收 note；VK 在 `/webhook/vk` 校验回调 secret；Zulip 在 `/webhook/zulip`、Rocket.Chat 在 `/webhook/rocketchat` 校验传出 Webhook Token；企业微信在 `/webhook/wecom` 校验 SHA1 签名并 AES 解密；飞书在 `/webhook/feishu` 校验签名/Token 并解密事件；钉钉在 `/webhook/dingtalk` 校验 timestamp/sign；微信公众号在 `/webhook/wechat` 校验 SHA1 签名。归一化消息进入同一聊天处理链。`src/server/protocols/`。 |
 | FR-04 | 使用兼容 AI API 生成回复并支持工具调用 | 聊天运行时支持多轮工具循环、流式/非流式响应、费用统计和出站消息。`src/server/plugins/chatbot/handler.ts`、`provider.ts`。 |
 | FR-05 | 控制工具、MCP、Skills/Rules 与记忆能力 | 内置/自定义 HTTPS 工具在目录配置、身份授权，群只能禁用或设置审批；MCP 保留管理员 allowlist，危险调用默认 owner 审批；群记忆独立按账号、会话类型和真实 OpenID 存数据库，仅确认内容进入上下文。`src/server/plugins/chatbot/`、`src/server/storage/conversation-memory-repository.ts`。 |
 | FR-06 | 支持媒体、语音、唤醒与会话命令 | 具体能力受平台权限、插件配置、provider/model 能力及平台存储支持约束。`handler.ts`、`media.ts`、`src/platform/cloudflare/qq-do.ts`。 |
@@ -63,6 +63,17 @@ NoneBotMaker 为 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Sa
 - Satori 协议：`src/server/protocols/satori/`
 - KOOK 协议：`src/server/protocols/kook/`
 - 企业微信协议：`src/server/protocols/wecom/`
+- Messenger 协议：`src/server/protocols/messenger/`
+- VK 协议：`src/server/protocols/vk/`
+- Zulip 协议：`src/server/protocols/zulip/`
+- Rocket.Chat 协议：`src/server/protocols/rocketchat/`
+- DoDo 协议：`src/server/protocols/dodo/`
+- Matrix 协议：`src/server/protocols/matrix/`
+- Revolt 协议：`src/server/protocols/revolt/`
+- Mastodon 协议：`src/server/protocols/mastodon/`
+- Instagram 协议：`src/server/protocols/instagram/`
+- Viber 协议：`src/server/protocols/viber/`
+- Misskey 协议：`src/server/protocols/misskey/`
 - WebSocket 网关：`src/platform/cloudflare/chat-gateway-do.ts`
 - 飞书协议：`src/server/protocols/feishu/`
 - 钉钉协议：`src/server/protocols/dingtalk/`

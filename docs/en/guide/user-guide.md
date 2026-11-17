@@ -46,7 +46,7 @@ One group-management record may bind multiple OpenIDs, but conversation history 
 
 ### 5. Verify behavior and billed usage
 
-Check `API_METHOD`: `websocket` uses QQ Gateway and **does not** receive events at `/webhook/qq`; `webhook` requires its QQ callback URL, signature headers and original JSON body. OneBot, Telegram, Slack, LINE, WhatsApp, Feishu, DingTalk, and WeChat always use their own Webhook callbacks. Mention the bot in a bound conversation (or send a direct WeChat message), then inspect connections, approvals, chat records, costs and errors in Conversation Management. Use `/openid` to confirm user and conversation identifiers. Do not post keys or private information in public chats.
+Check `API_METHOD`: `websocket` uses QQ Gateway and **does not** receive events at `/webhook/qq`; `webhook` requires its QQ callback URL, signature headers and original JSON body. OneBot, Telegram, Slack, LINE, WhatsApp, Messenger, VK, Zulip, Rocket.Chat, Feishu, DingTalk, and WeChat always use their own Webhook callbacks; Discord, Satori, KOOK, DoDo, Matrix, Revolt, and Mastodon use Durable Object connections or long polling and need no callback URL. Mention the bot in a bound conversation (or send a direct WeChat message), then inspect connections, approvals, chat records, costs and errors in Conversation Management. Use `/openid` to confirm user and conversation identifiers. Do not post keys or private information in public chats.
 
 ## Conversation Management and commands
 

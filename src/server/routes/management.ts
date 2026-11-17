@@ -557,6 +557,46 @@ async function normalizeAccountCredentials(
       throw new ApiError(400, 'invalid_encodingAESKey');
     }
   }
+  if (protocol.id === 'messenger' && !(typeof normalized.pageId === 'string' && /^\d{5,32}$/.test(normalized.pageId))) {
+    throw new ApiError(400, 'invalid_pageId');
+  }
+  if (protocol.id === 'vk' && !(typeof normalized.groupId === 'string' && /^\d{1,20}$/.test(normalized.groupId))) {
+    throw new ApiError(400, 'invalid_groupId');
+  }
+  if (protocol.id === 'zulip') {
+    if (!isHttpUrl(String(normalized.siteUrl ?? ''))) throw new ApiError(400, 'invalid_siteUrl');
+    if (!/^[^@\s]+@[^@\s]+$/.test(String(normalized.botEmail ?? ''))) throw new ApiError(400, 'invalid_botEmail');
+  }
+  if (protocol.id === 'rocketchat') {
+    if (!isHttpUrl(String(normalized.serverUrl ?? ''))) throw new ApiError(400, 'invalid_serverUrl');
+    if (!String(normalized.userId ?? '').trim()) throw new ApiError(400, 'invalid_userId');
+  }
+  if (protocol.id === 'matrix') {
+    if (!isHttpUrl(String(normalized.homeserverUrl ?? ''))) throw new ApiError(400, 'invalid_homeserverUrl');
+    if (!/^@[^:\s]+:[^\s]+$/.test(String(normalized.userId ?? ''))) throw new ApiError(400, 'invalid_userId');
+  }
+  if (protocol.id === 'revolt') {
+    if (!String(normalized.botId ?? '').trim()) throw new ApiError(400, 'invalid_botId');
+    if (normalized.apiUrl && !isHttpUrl(String(normalized.apiUrl))) throw new ApiError(400, 'invalid_apiUrl');
+    if (normalized.wsUrl && !isWsUrl(String(normalized.wsUrl))) throw new ApiError(400, 'invalid_wsUrl');
+  }
+  if (protocol.id === 'mastodon') {
+    if (!isHttpUrl(String(normalized.instanceUrl ?? ''))) throw new ApiError(400, 'invalid_instanceUrl');
+    if (!/^\d{1,32}$/.test(String(normalized.accountId ?? ''))) throw new ApiError(400, 'invalid_accountId');
+  }
+  if (protocol.id === 'dodo' && !String(normalized.clientId ?? '').trim()) {
+    throw new ApiError(400, 'invalid_clientId');
+  }
+  if (protocol.id === 'instagram' && !(typeof normalized.igUserId === 'string' && /^\d{5,32}$/.test(normalized.igUserId))) {
+    throw new ApiError(400, 'invalid_igUserId');
+  }
+  if (protocol.id === 'viber' && !String(normalized.authToken ?? '').trim()) {
+    throw new ApiError(400, 'invalid_authToken');
+  }
+  if (protocol.id === 'misskey') {
+    if (!isHttpUrl(String(normalized.host ?? ''))) throw new ApiError(400, 'invalid_host');
+    if (!String(normalized.userId ?? '').trim()) throw new ApiError(400, 'invalid_userId');
+  }
   const missing = missingRequiredField(protocol.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);
   record.credentials = normalized;
@@ -564,6 +604,24 @@ async function normalizeAccountCredentials(
     ...(record.config as JsonObject),
     ...normalizeFieldValues(definition.accountFields, record.config as JsonObject),
   };
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function isWsUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['ws:', 'wss:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
 }
 
 async function readableConfig(config: JsonObject | undefined, bindings: RuntimeBindings): Promise<JsonObject> {
