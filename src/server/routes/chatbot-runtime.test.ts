@@ -54,7 +54,16 @@ describe('chatbot conversation management API', () => {
     expect((await f.api.request('/chatbot/conversations/account-1/group-1/stats?externalId=group-openid', {}, f.bindings)).status).toBe(401);
     const response = await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=group-openid');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ data: { enabled: true, scanned: 4, truncated: false, messagesIn: 1, repliesOut: 1, errors: 0, costUsd: 0.12, charges: 1 } });
+    const payload = await response.json() as { data: { series: Array<Record<string, number | string>> } };
+    expect(payload).toMatchObject({ data: { enabled: true, scanned: 4, truncated: false, messagesIn: 1, repliesOut: 1, errors: 0, costUsd: 0.12, charges: 1, days: 14 } });
+    expect(payload.data.series).toHaveLength(14);
+    const today = new Date(at).toISOString().slice(0, 10);
+    expect(payload.data.series.find((point) => point.date === today)).toMatchObject({
+      messagesIn: 1, repliesOut: 1, requests: 1, inputTokens: 14, outputTokens: 0, tokens: 14, costUsd: 0.12, errors: 0,
+    });
+    const weekly = await (await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=group-openid&days=7')).json() as { data: { days: number; series: unknown[] } };
+    expect(weekly.data.days).toBe(7);
+    expect(weekly.data.series).toHaveLength(7);
     expect((await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=outside')).status).toBe(404);
     f.bindings.LOG_RECORD = 'false';
     expect(await (await authorized(f, '/chatbot/conversations/account-1/group-1/stats?externalId=group-openid')).json())

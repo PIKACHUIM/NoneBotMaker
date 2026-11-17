@@ -286,9 +286,21 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');
     const externalId = requiredValue(context.req.query('externalId'), 'externalId');
     if (!matchesConversationId(group.externalId, externalId)) throw new ApiError(404, 'not_found');
+    const requestedDays = Number(context.req.query('days'));
+    const days = Number.isFinite(requestedDays) && requestedDays > 0 ? Math.min(30, Math.max(7, Math.trunc(requestedDays))) : 14;
+    const emptyPoint = (date: string) => ({ date, messagesIn: 0, repliesOut: 0, requests: 0, inputTokens: 0, outputTokens: 0, tokens: 0, costUsd: 0, errors: 0 });
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const points = new Map<string, ReturnType<typeof emptyPoint>>();
+    for (let index = days - 1; index >= 0; index -= 1) {
+      const date = new Date(today);
+      date.setUTCDate(today.getUTCDate() - index);
+      const key = date.toISOString().slice(0, 10);
+      points.set(key, emptyPoint(key));
+    }
     const summary = { enabled: readBoolean(context.env.LOG_RECORD), scanned: 0, truncated: false, messagesIn: 0,
-      repliesOut: 0, errors: 0, costUsd: 0, charges: 0 };
-    if (!summary.enabled) return context.json({ data: summary });
+      repliesOut: 0, errors: 0, costUsd: 0, charges: 0, days, series: [...points.values()] };
+    if (!summary.enabled) return context.json({ data: { ...summary, series: [] } });
     const logs = createConversationLogRepository(context.env);
     let scanned = 0;
     for (let offset = 0; offset < 1000; offset += 100) {
@@ -296,18 +308,41 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
       scanned += batch.items.length;
       for (const item of batch.items) {
         if (item.groupExternalId !== externalId) continue;
-        if (item.direction === 'in' && item.status !== 'denied') summary.messagesIn += 1;
-        if (item.direction === 'out' && item.status === 'sent' && item.content) summary.repliesOut += 1;
-        if (item.status === 'error' || item.status === 'failed') summary.errors += 1;
+        const point = points.get(new Date(item.createdAt).toISOString().slice(0, 10));
+        if (item.direction === 'in' && item.status !== 'denied') {
+          summary.messagesIn += 1;
+          if (point) point.messagesIn += 1;
+        }
+        if (item.direction === 'out' && item.status === 'sent' && item.content) {
+          summary.repliesOut += 1;
+          if (point) point.repliesOut += 1;
+        }
+        if (item.status === 'error' || item.status === 'failed') {
+          summary.errors += 1;
+          if (point) point.errors += 1;
+        }
         if (item.direction === 'out' && typeof item.details?.cost === 'number' && Number.isFinite(item.details.cost) && item.details.cost >= 0) {
           summary.costUsd += item.details.cost;
           summary.charges += 1;
+          if (point) point.costUsd += item.details.cost;
+        }
+        const usage = item.details?.usage && typeof item.details.usage === 'object' && !Array.isArray(item.details.usage)
+          ? item.details.usage as Record<string, unknown> : {};
+        const hasUsage = item.details?.usage !== undefined && typeof item.details.usage === 'object' && !Array.isArray(item.details.usage);
+        const inputTokens = typeof usage.promptTokens === 'number' && Number.isFinite(usage.promptTokens) && usage.promptTokens >= 0 ? usage.promptTokens : 0;
+        const outputTokens = typeof usage.completionTokens === 'number' && Number.isFinite(usage.completionTokens) && usage.completionTokens >= 0 ? usage.completionTokens : 0;
+        if (point && (hasUsage || item.status === 'model_completed')) {
+          point.requests += 1;
+          point.inputTokens += inputTokens;
+          point.outputTokens += outputTokens;
+          point.tokens += inputTokens + outputTokens;
         }
       }
       if (offset + batch.items.length >= 1000) summary.truncated = batch.total > scanned;
       if (batch.items.length < 100) break;
     }
     summary.scanned = scanned;
+    summary.series = [...points.values()];
     return context.json({ data: summary });
   });
 

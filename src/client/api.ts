@@ -19,7 +19,18 @@ import type {
 
 export interface ChatbotConversationSummary { id: string; accountId: string; accountName: string; externalId: string; conversationType: 'group' | 'private'; name: string; enabled: boolean; mode: string }
 export interface ChatbotConversationStatus { groupId: string; accountId: string; externalId: string; conversationType: 'group' | 'private'; enabled: boolean; connected: boolean; gatewayMode?: 'webhook' | 'websocket'; mode: string; silent: boolean; model: string; providerId: string; contextMessages: number; initialPromptPending: boolean; initialPrompt?: string; disabledTools: string[]; pendingAgentWait: boolean; pendingApprovals: Array<{ id: string; tool: string; status: string; expiresAt: number; requestedBy: string; arguments?: Record<string, unknown> }>; policyIds?: Record<string, string>; activity?: ChatbotRuntimeActivity | null; active?: boolean }
-export interface ChatbotConversationStats { enabled: boolean; scanned: number; truncated: boolean; messagesIn: number; repliesOut: number; errors: number; costUsd: number; charges: number }
+export interface ChatbotConversationStatsPoint {
+  date: string;
+  messagesIn: number;
+  repliesOut: number;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  tokens: number;
+  costUsd: number;
+  errors: number;
+}
+export interface ChatbotConversationStats { enabled: boolean; scanned: number; truncated: boolean; messagesIn: number; repliesOut: number; errors: number; costUsd: number; charges: number; days: number; series: ChatbotConversationStatsPoint[] }
 export interface ChatbotWake { id: string; dueAt: number; reason: string }
 export interface ChatbotMemeSummary { name: string; contentType: string; size: number; digest: string; createdBy: string; createdAt: string }
 export interface ChatbotSlangCandidate { id: string; term: string; context: string; definition: string; meaning?: string; usage?: string; example?: string; risk?: string; sources: string[]; status: 'pending' | 'confirmed' | 'rejected'; hits: number; distinctUsers: number; createdAt: number; updatedAt: number }
@@ -198,8 +209,8 @@ export const api = {
   async getChatbotConversationActivity(accountId: string, groupId: string, externalId: string) {
     return request<{ activity: ChatbotRuntimeActivity | null; active: boolean }>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}`, new URLSearchParams({ externalId, activityOnly: '1' })));
   },
-  async getChatbotConversationStats(accountId: string, groupId: string, externalId: string) {
-    return request<ChatbotConversationStats>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/stats`, new URLSearchParams({ externalId })));
+  async getChatbotConversationStats(accountId: string, groupId: string, externalId: string, days = 14) {
+    return request<ChatbotConversationStats>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/stats`, new URLSearchParams({ externalId, days: String(days) })));
   },
   async controlChatbotConversation<T = unknown>(accountId: string, groupId: string, control: Record<string, unknown>) {
     return request<T>(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/control`, { method: 'POST', ...jsonBody(control) });

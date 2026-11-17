@@ -498,7 +498,30 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .account-memory-section p { color: var(--text-soft); font-size: 12px; }
 .conversation-workspace { min-width: 0; padding-top: 16px; }
 .conversation-statistics, .conversation-memories { padding: 24px 0; }
-.memory-target-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.memory-target-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.stats-trend-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding-top: 18px; margin: 20px 0 10px; border-top: 1px solid var(--line); }
+.stats-trend-heading strong { display: block; color: var(--heading); font-size: 14px; font-weight: 500; }
+.stats-trend-heading span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.stats-trend-heading small { color: var(--muted); font: 9px var(--mono); }
+.stats-trend-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.trend-chart { min-width: 0; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
+.trend-chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.trend-chart-head strong { display: block; color: var(--heading); font-size: 12px; font-weight: 500; }
+.trend-chart-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+.trend-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; color: var(--muted); font-size: 9px; }
+.trend-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.trend-legend i { width: 6px; height: 6px; border-radius: 1px; }
+.trend-chart-body { position: relative; }
+.trend-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.trend-grid-line { stroke: var(--line-soft); stroke-width: 1; }
+.trend-axis-text { fill: var(--muted); font: 8px var(--mono); }
+.trend-tooltip { position: absolute; top: 0; z-index: 2; min-width: 132px; padding: 7px 9px; border: 1px solid var(--line-strong); background: var(--overlay); color: var(--text); box-shadow: 0 8px 24px rgba(0, 0, 0, .25); pointer-events: none; transform: translate(-50%, -100%); }
+.trend-tooltip strong { display: block; padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--muted); font: 8px var(--mono); }
+.trend-tooltip div { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; line-height: 1.7; }
+.trend-tooltip span { display: inline-flex; align-items: center; gap: 4px; color: var(--text-soft); }
+.trend-tooltip i { width: 6px; height: 6px; border-radius: 1px; }
+.trend-tooltip b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .stats-trend-grid { grid-template-columns: 1fr; } }
 .memory-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 12px; color: var(--text-soft); font-size: 14px; }
 .policy-overrides.ant-collapse { margin: -3px 0 14px; border: 1px solid var(--line); background: var(--surface-raised); }
 .policy-overrides .ant-collapse-header { align-items: center !important; padding: 8px 11px !important; color: var(--text-soft) !important; font-size: 10px; }

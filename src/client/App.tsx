@@ -111,7 +111,7 @@ import { IMAGE_MODEL_PRICE_CHECKED_AT, MEDIA_MODEL_PRICE_CHECKED_AT, MODEL_PRICE
 import { LanguageProvider, useI18n } from './i18n';
 import { ThemeProvider, useTheme, type ThemeMode } from './theme';
 import { ApiError, api } from './api';
-import type { CapabilitySourceItem, ChatbotConversationStatus, ChatbotConversationStats, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake, ConversationMemoryItem, ConversationMemoryInput } from './api';
+import type { CapabilitySourceItem, ChatbotConversationStatus, ChatbotConversationStats, ChatbotConversationStatsPoint, ChatbotConversationSummary, ChatbotMemeSummary, ChatbotSlangCandidate, ChatbotVoiceSummary, ChatbotWake, ConversationMemoryItem, ConversationMemoryInput } from './api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Sider, Content } = Layout;
@@ -695,9 +695,118 @@ function AdminConsole({ page, view = 'status', onLogout }: { page: AdminPage; vi
   );
 }
 
+function chartNiceMax(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  const exponent = Math.floor(Math.log10(value));
+  const base = 10 ** exponent;
+  const fraction = value / base;
+  const step = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  return step * base;
+}
+
+function chartCompact(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(1);
+}
+
+function chartDateLabel(date: string, language: 'zh' | 'en'): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString(language === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', timeZone: 'UTC' });
+}
+
+type TrendSeriesKey = 'requests' | 'repliesOut' | 'inputTokens' | 'outputTokens' | 'costUsd';
+interface TrendSeries { key: TrendSeriesKey; label: string; color: string }
+
+function TrendChart({ title, subtitle, data, series, variant, valueFormat, axisFormat, language }: {
+  title: string; subtitle: string; data: ChatbotConversationStatsPoint[]; series: TrendSeries[];
+  variant: 'grouped' | 'stacked' | 'line';
+  valueFormat: (value: number) => string; axisFormat: (value: number) => string; language: 'zh' | 'en';
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const width = 360;
+  const height = 172;
+  const margin = { top: 14, right: 10, bottom: 26, left: 44 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const slot = data.length ? innerWidth / data.length : innerWidth;
+  const stacked = variant === 'stacked';
+  const peak = Math.max(0, ...data.map((point) => stacked
+    ? series.reduce((sum, entry) => sum + point[entry.key], 0)
+    : Math.max(0, ...series.map((entry) => point[entry.key]))));
+  const max = chartNiceMax(peak);
+  const y = (value: number) => margin.top + innerHeight - value / max * innerHeight;
+  const labelStep = Math.max(1, Math.ceil(data.length / 6));
+  const labelIndices = new Set<number>();
+  for (let index = 0; index < data.length; index += labelStep) labelIndices.add(index);
+  const lastIndex = data.length - 1;
+  const previousIndex = Math.max(...labelIndices);
+  if (lastIndex > previousIndex && lastIndex - previousIndex >= 2) labelIndices.add(lastIndex);
+  const active = hover === null ? null : data[hover];
+  return <div className="trend-chart" onMouseLeave={() => setHover(null)}>
+    <div className="trend-chart-head">
+      <div><strong>{title}</strong><span>{subtitle}</span></div>
+      <div className="trend-legend">{series.map((entry) => <span key={entry.key}><i style={{ background: entry.color }} />{entry.label}</span>)}</div>
+    </div>
+    <div className="trend-chart-body">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title}>
+        {[0, 0.5, 1].map((ratio) => {
+          const value = max * ratio;
+          const lineY = y(value);
+          return <g key={ratio}>
+            <line x1={margin.left} x2={width - margin.right} y1={lineY} y2={lineY} className="trend-grid-line" />
+            <text x={margin.left - 6} y={lineY + 3} textAnchor="end" className="trend-axis-text">{axisFormat(value)}</text>
+          </g>;
+        })}
+        {variant === 'line' ? series.map((entry) => {
+          const points = data.map((point, index) => `${index ? 'L' : 'M'}${margin.left + slot * (index + 0.5)} ${y(point[entry.key])}`).join(' ');
+          const area = `${points} L${margin.left + slot * (data.length - 0.5)} ${margin.top + innerHeight} L${margin.left + slot * 0.5} ${margin.top + innerHeight} Z`;
+          return <g key={entry.key}>
+            {data.length > 1 && <path d={area} fill={entry.color} opacity="0.08" />}
+            <path d={points} fill="none" stroke={entry.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {data.map((point, index) => <circle key={point.date} cx={margin.left + slot * (index + 0.5)} cy={y(point[entry.key])} r={index === hover ? 3.5 : 2.2} fill={entry.color} />)}
+          </g>;
+        }) : data.map((point, index) => {
+          const center = margin.left + slot * (index + 0.5);
+          if (stacked) {
+            const barWidth = Math.min(22, slot * 0.56);
+            let cumulative = 0;
+            return <g key={point.date}>{series.map((entry) => {
+              const value = point[entry.key];
+              if (value <= 0) return null;
+              const barHeight = value / max * innerHeight;
+              const barY = margin.top + innerHeight - (cumulative + value) / max * innerHeight;
+              cumulative += value;
+              return <rect key={entry.key} x={center - barWidth / 2} y={barY} width={barWidth} height={Math.max(1, barHeight)} rx="1.5" fill={entry.color} opacity={hover === null || hover === index ? 1 : 0.55} />;
+            })}</g>;
+          }
+          const barWidth = Math.min(11, slot * 0.26);
+          return <g key={point.date}>{series.map((entry, seriesIndex) => {
+            const value = point[entry.key];
+            if (value <= 0) return null;
+            const barHeight = value / max * innerHeight;
+            const offset = series.length === 1 ? 0 : (seriesIndex - (series.length - 1) / 2) * (barWidth + 2);
+            return <rect key={entry.key} x={center + offset - barWidth / 2} y={margin.top + innerHeight - barHeight} width={barWidth} height={Math.max(1, barHeight)} rx="1.5" fill={entry.color} opacity={hover === null || hover === index ? 1 : 0.55} />;
+          })}</g>;
+        })}
+        {data.map((point, index) => {
+          return labelIndices.has(index) ? <text key={point.date} x={margin.left + slot * (index + 0.5)} y={height - 8} textAnchor="middle" className="trend-axis-text">{chartDateLabel(point.date, language)}</text> : null;
+        })}
+        {data.map((point, index) => <rect key={`hit-${point.date}`} x={margin.left + slot * index} y={margin.top} width={slot} height={innerHeight} fill="transparent" onMouseEnter={() => setHover(index)} />)}
+      </svg>
+      {active && <div className="trend-tooltip" style={{ left: `${Math.min(88, Math.max(12, ((hover! + 0.5) / Math.max(1, data.length)) * 100))}%` }}>
+        <strong>{chartDateLabel(active.date, language)} · UTC</strong>
+        {series.map((entry) => <div key={entry.key}><span><i style={{ background: entry.color }} />{entry.label}</span><b>{valueFormat(active[entry.key])}</b></div>)}
+      </div>}
+    </div>
+  </div>;
+}
+
 function ConversationStatistics({ groups, accounts }: { groups: GroupRecord[]; accounts: BotAccountRecord[] }) {
   const { tr, language } = useI18n();
   const [selectedKey, setSelectedKey] = useState('');
+  const [rangeDays, setRangeDays] = useState(14);
   const [stats, setStats] = useState<{ key: string; value: ChatbotConversationStats } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -713,16 +822,16 @@ function ConversationStatistics({ groups, accounts }: { groups: GroupRecord[]; a
     if (!group || !externalId) { setStats(null); return; }
     let active = true;
     setLoading(true); setStats(null); setError('');
-    api.getChatbotConversationStats(group.accountId, group.id, externalId)
+    api.getChatbotConversationStats(group.accountId, group.id, externalId, rangeDays)
       .then((result) => { if (active) setStats({ key: selectedKey, value: result }); })
       .catch((reason) => { if (active) setError(formatError(reason)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [group?.id, group?.accountId, externalId, selectedKey, refreshKey]);
+  }, [group?.id, group?.accountId, externalId, selectedKey, refreshKey, rangeDays]);
   const currentStats = stats?.key === selectedKey ? stats.value : null;
   const number = (value: number) => new Intl.NumberFormat(language === 'en' ? 'en-US' : 'zh-CN').format(value);
   return <section className="conversation-statistics">
-    <div className="memory-target-row"><Select className="full-width" value={selectedKey || undefined} onChange={setSelectedKey} placeholder={tr('选择会话')} options={targets.map(({ group: item, externalId: id, key }) => ({ value: key, label: `${accounts.find((account) => account.id === item.accountId)?.name ?? item.accountId} · ${item.name || id} · ${id}` }))} /><Button icon={<ReloadOutlined />} loading={loading} disabled={!target} onClick={() => setRefreshKey((value) => value + 1)}>{tr('刷新')}</Button></div>
+    <div className="memory-target-row"><Select className="full-width" value={selectedKey || undefined} onChange={setSelectedKey} placeholder={tr('选择会话')} options={targets.map(({ group: item, externalId: id, key }) => ({ value: key, label: `${accounts.find((account) => account.id === item.accountId)?.name ?? item.accountId} · ${item.name || id} · ${id}` }))} /><Segmented size="small" value={rangeDays} onChange={(value) => setRangeDays(Number(value))} options={[{ value: 7, label: tr('7 天') }, { value: 14, label: tr('14 天') }, { value: 30, label: tr('30 天') }]} /><Button icon={<ReloadOutlined />} loading={loading} disabled={!target} onClick={() => setRefreshKey((value) => value + 1)}>{tr('刷新')}</Button></div>
     {!target && <Alert type="info" showIcon message={tr('没有可管理会话，请先绑定群聊或私聊。')} />}
     {loading && <div role="status"><Spin size="small" /> {tr('正在读取会话统计…')}</div>}
     {error && <Alert type="error" showIcon message={tr('会话统计读取失败')} description={error} />}
@@ -733,8 +842,23 @@ function ConversationStatistics({ groups, accounts }: { groups: GroupRecord[]; a
         <div><span>{tr('收到消息')}</span><strong>{number(currentStats.messagesIn)}</strong></div>
         <div><span>{tr('发出回复')}</span><strong>{number(currentStats.repliesOut)}</strong></div>
         <div><span>{tr('错误记录')}</span><strong>{number(currentStats.errors)}</strong></div>
-        <div><span>{tr('日志内费用（USD）')}</span><strong>${currentStats.costUsd.toFixed(8)}</strong></div>
+        <div><span>{tr('日志内费用（USD）')}</span><strong>${currentStats.costUsd < 0.01 ? currentStats.costUsd.toFixed(6) : currentStats.costUsd.toFixed(4)}</strong></div>
         <div><span>{tr('计费记录数')}</span><strong>{number(currentStats.charges)}</strong></div>
+      </div>
+      <div className="stats-trend-heading">
+        <div><strong>{tr('时间趋势')}</strong><span>{tr('按 UTC 日期聚合，仅统计当前会话 OpenID')}</span></div>
+        <small>{tr('最近')} {currentStats.days} {tr('天')}</small>
+      </div>
+      <div className="stats-trend-grid">
+        <TrendChart title={tr('请求 / 回复')} subtitle={tr('模型请求与已发送回复')} data={currentStats.series ?? []}
+          series={[{ key: 'requests', label: tr('请求'), color: 'var(--accent)' }, { key: 'repliesOut', label: tr('回复'), color: 'var(--muted-strong)' }]}
+          variant="grouped" valueFormat={number} axisFormat={chartCompact} language={language} />
+        <TrendChart title={tr('Token')} subtitle={tr('输入与输出 token')} data={currentStats.series ?? []}
+          series={[{ key: 'inputTokens', label: tr('输入'), color: 'var(--accent)' }, { key: 'outputTokens', label: tr('输出'), color: 'var(--warn)' }]}
+          variant="stacked" valueFormat={number} axisFormat={chartCompact} language={language} />
+        <TrendChart title={tr('成本')} subtitle="USD" data={currentStats.series ?? []}
+          series={[{ key: 'costUsd', label: tr('成本'), color: 'var(--warn)' }]}
+          variant="line" valueFormat={(value) => `$${value.toFixed(4)}`} axisFormat={(value) => value >= 0.01 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`} language={language} />
       </div>
     </>}
   </section>;
@@ -1248,7 +1372,9 @@ function AccountsPage({ data, onRefresh, onError }: { data: BotAccountRecord[]; 
         <Form.Item name="protocol" label={tr('平台协议')} rules={[{ required: true, message: tr('请选择平台协议') }]}><Select options={protocolOptions.map((protocol) => ({ label: localized(protocol.name), value: protocol.id }))} onChange={(protocol: string) => {
           form.setFieldsValue({ credentials: editableFieldValues(chatProtocolCredentialFields(protocol, CHATBOT_PLUGIN_TYPE), protocol === editing?.protocol ? editing.credentials : {}) });
         }} /></Form.Item>
-        {protocolDefinition && <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>}
+        {protocolDefinition && (protocolDefinition.transport === 'websocket'
+          ? <p className="form-note">{tr('此协议使用 Cloudflare Durable Object WebSocket 网关，不需要回调地址；账号启用后会自动连接。')}</p>
+          : <p className="form-note">{tr('回调地址')}：<code>{`${window.location.origin}${protocolDefinition.webhookPath}`}</code></p>)}
         {credentialFields.length ? <div className="schema-fields">
           <div className="form-section-heading"><span>{tr('账号凭据')}</span><small>{protocolDefinition?.id ?? definition?.type} / {credentialFields.length} FIELDS</small></div>
           {credentialFields.map((field) => <PluginField key={`${selectedProtocol}:${field.key}`} field={field} path={['credentials', field.key]} editing={Boolean(editing)} />)}
