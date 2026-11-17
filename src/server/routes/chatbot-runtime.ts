@@ -27,6 +27,7 @@ interface ConversationControlRequest {
   arguments?: string;
   decision?: 'approve' | 'reject';
   externalId?: string;
+  activityOnly?: boolean;
   memeName?: string;
   slangId?: string;
   slangTerm?: string;
@@ -119,8 +120,9 @@ async function localControl(bindings: RuntimeBindings, group: GroupRecord, input
   switch (input.action) {
     case 'status': {
       const mode = typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat');
-      const context = await stores.conversationStore.getRecent(scope, 1000);
       const activity = readRuntimeActivity(state);
+      if (input.activityOnly) return { activity, active: runtimeActivityIsActive(activity, Date.now()) };
+      const context = await stores.conversationStore.getRecent(scope, 1000);
       return { groupId: group.id, accountId: group.accountId, externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled, connected: false, mode, silent: state.silent === true, model: group.model, providerId: group.providerId, contextMessages: context.length, initialPromptPending: typeof state.initialPrompt === 'string', ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}), disabledTools: [...configIdSet(state.disabledTools)], pendingApprovals: safeApprovalSummary(state), pendingAgentWait: Boolean(state.pendingAgentWait), activity, active: runtimeActivityIsActive(activity, Date.now()) };
     }
     case 'reset':
@@ -272,7 +274,8 @@ export function registerChatbotRuntimeRoutes(api: Hono<{ Bindings: RuntimeBindin
     if (!group || group.accountId !== accountId) throw new ApiError(404, 'not_found');
     const externalId = requiredValue(context.req.query('externalId') ?? primaryConversationId(group.externalId), 'externalId');
     if (!matchesConversationId(group.externalId, externalId)) throw new ApiError(404, 'not_found');
-    return context.json({ data: await control(context.env, accountId, group, { action: 'status', externalId }) });
+    const activityOnly = context.req.query('activityOnly') === '1';
+    return context.json({ data: await control(context.env, accountId, group, { action: 'status', externalId, ...(activityOnly ? { activityOnly: true } : {}) }) });
   });
 
   api.get('/chatbot/conversations/:accountId/:groupId/stats', async (context) => {

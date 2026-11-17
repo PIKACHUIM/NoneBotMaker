@@ -195,6 +195,9 @@ export const api = {
     if (externalId) params.set('externalId', externalId);
     return request<ChatbotConversationStatus>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}`, params));
   },
+  async getChatbotConversationActivity(accountId: string, groupId: string, externalId: string) {
+    return request<{ activity: ChatbotRuntimeActivity | null; active: boolean }>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}`, new URLSearchParams({ externalId, activityOnly: '1' })));
+  },
   async getChatbotConversationStats(accountId: string, groupId: string, externalId: string) {
     return request<ChatbotConversationStats>(collectionPath(`/api/chatbot/conversations/${encodeURIComponent(accountId)}/${encodeURIComponent(groupId)}/stats`, new URLSearchParams({ externalId })));
   },

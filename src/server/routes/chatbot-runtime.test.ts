@@ -110,6 +110,9 @@ describe('chatbot conversation management API', () => {
     }));
     const response = await authorized(f, '/chatbot/conversations/account-1/group-1');
     expect(await response.json()).toMatchObject({ data: { active: true, activity: { phase: 'tool', reasoning: 'need current news', tools: [{ name: 'WebSearch', status: 'running' }] } } });
+    const light = await authorized(f, '/chatbot/conversations/account-1/group-1?externalId=group-openid&activityOnly=1');
+    expect(await light.json()).toMatchObject({ data: { active: true, activity: { phase: 'tool' } } });
+    expect((await (await authorized(f, '/chatbot/conversations/account-1/group-1?externalId=group-openid&activityOnly=1')).json()).data).not.toHaveProperty('contextMessages');
   });
 
   it('allows only authenticated control-plane sessions to reject a pending MCP operation as the configured conversation owner', async () => {

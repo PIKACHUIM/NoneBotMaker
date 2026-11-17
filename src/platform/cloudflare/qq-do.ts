@@ -289,6 +289,8 @@ export class QQGatewayDurableObject {
     }) : [];
     if (action === 'status') {
       const activity = readRuntimeActivity(state);
+      const active = runtimeActivityIsActive(activity, this.now());
+      if (body.activityOnly === true) return Response.json({ data: { activity, active } });
       return Response.json({ data: {
         accountId, groupId, externalId: group.externalId, conversationType: group.conversationType ?? 'group', enabled: group.enabled,
         connected: this.socket?.readyState === WebSocket.OPEN, gatewayMode: this.env.API_METHOD === 'websocket' ? 'websocket' : 'webhook', mode: typeof state.mode === 'string' ? state.mode : configString(group.config, 'bridge_mode', 'chat'),
@@ -296,7 +298,7 @@ export class QQGatewayDurableObject {
         contextMessages: (await store.getRecent(scope, 1000)).length, initialPromptPending: typeof state.initialPrompt === 'string',
         ...(typeof state.initialPrompt === 'string' ? { initialPrompt: state.initialPrompt } : {}),
         disabledTools: [...configIdSet(state.disabledTools)], pendingAgentWait: Boolean(state.pendingAgentWait),
-        pendingApprovals: approvals, activity, active: runtimeActivityIsActive(activity, this.now()),
+        pendingApprovals: approvals, activity, active,
         policyIds: { dialog: group.dialogPolicyId ?? '', voice: group.voicePolicyId ?? '', identity: group.identityPolicyId ?? '' },
       } });
     }

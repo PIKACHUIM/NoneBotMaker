@@ -1341,9 +1341,8 @@ function ChatbotRuntimePage({ groups, accounts, onError, onNavigate, onRefresh, 
   const refreshLiveStatus = useCallback(async () => {
     if (!selectedGroup || !selectedConversation) return;
     try {
-      const current = await api.getChatbotConversation(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId);
-      setStatus(current);
-      setApprovals(current.pendingApprovals);
+      const current = await api.getChatbotConversationActivity(selectedGroup.accountId, selectedGroup.id, selectedConversation.externalId);
+      setStatus((previous) => previous ? { ...previous, activity: current.activity, active: current.active } : previous);
     } catch { /* Keep the last snapshot when a background poll fails. */ }
   }, [selectedGroup, selectedConversation]);
   useEffect(() => {
