@@ -12,6 +12,8 @@ import { sendWhatsAppMedia, sendWhatsAppProactiveText, sendWhatsAppText } from '
 import { sendMattermostMedia, sendMattermostProactiveText, sendMattermostText } from './mattermost/api';
 import { sendDiscordMedia, sendDiscordProactiveText, sendDiscordText } from './discord/api';
 import { sendSatoriMedia, sendSatoriProactiveText, sendSatoriText } from './satori/api';
+import { sendKookMedia, sendKookProactiveText, sendKookText } from './kook/api';
+import { sendWeComMedia, sendWeComProactiveText, sendWeComText } from './wecom/api';
 
 export function unsupportedProtocol(protocol: string): Error {
   return new Error(`Unsupported chat protocol: ${protocol}`);
@@ -50,6 +52,10 @@ export async function sendChatText(
       return sendDiscordText(account, targetId, messageId, content, options);
     case 'satori':
       return sendSatoriText(account, targetId, messageId, content, options);
+    case 'kook':
+      return sendKookText(account, targetId, messageId, content, options);
+    case 'wecom':
+      return sendWeComText(account, targetId, messageId, content, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -87,6 +93,10 @@ export async function sendChatMedia(
       return sendDiscordMedia(account, targetId, messageId, media, options);
     case 'satori':
       return sendSatoriMedia(account, targetId, messageId, media, options);
+    case 'kook':
+      return sendKookMedia(account, targetId, messageId, media, options);
+    case 'wecom':
+      return sendWeComMedia(account, targetId, messageId, media, options);
     default:
       throw unsupportedProtocol(account.protocol);
   }
@@ -125,6 +135,10 @@ export async function sendProactiveChatText(
       return sendDiscordProactiveText(account, targetId, content);
     case 'satori':
       return sendSatoriProactiveText(account, targetId, content);
+    case 'kook':
+      return sendKookProactiveText(account, targetId, content);
+    case 'wecom':
+      return sendWeComProactiveText(account, targetId, content);
     default:
       throw unsupportedProtocol(account.protocol);
   }

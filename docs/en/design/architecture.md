@@ -7,9 +7,9 @@ Admin browser ──static assets──> Platform entry / ASSETS
       │                              │
       └──management API + session──> Hono API Router
                                      ├──plugin/account/policy management
-QQ/OneBot/Telegram/Slack/LINE/WhatsApp/Feishu/DingTalk/Mattermost/WeChat ──Webhook─> ├──auth/setup/log/conversation routes
+QQ/OneBot/Telegram/Slack/LINE/WhatsApp/WeCom/Feishu/DingTalk/Mattermost/WeChat ──Webhook─> ├──auth/setup/log/conversation routes
                                       └──per-platform signature checks and normalization
-Discord/Satori ──WebSocket─> ChatGatewayDurableObject ──> the same chat pipeline
+Discord/Satori/KOOK ──WebSocket─> ChatGatewayDurableObject ──> the same chat pipeline
                                                    │
                                             Chatbot Runtime
                                      ├──policy and permission resolution
@@ -30,7 +30,7 @@ This diagram shows the main path, not feature parity across platforms. `src/serv
 1. **Platform entry points:** `src/platform/cloudflare/worker.ts`, `src/platform/edgeone/entry.ts`, `src/platform/esa/entry.ts`, and `src/server/local.ts` establish platform context. The Cloudflare Worker also handles static assets, Gateway Durable Object maintenance, and scheduled log cleanup.
 2. **Shared application:** `src/server/app.ts` mounts management routes under `/api` and the `/webhook/qq` callback. Middleware validates `API_METHOD`; non-Cloudflare platforms reject WebSocket mode.
 3. **Management API:** `src/server/routes/index.ts` centralizes authentication and route registration. Separate routes manage plugins, accounts, conversation policies, providers, prices, logs, and runtime state. Session, same-origin, and scope checks run on the server.
-4. **Platform integrations:** `src/server/protocols/` is split by protocol. QQ validates Ed25519 signatures and resolves accounts by AppID; OneBot verifies optional HMAC-SHA1 report signatures and resolves by self_id; Telegram resolves by secret_token; Slack verifies X-Slack-Signature and resolves by App ID; LINE verifies Channel Secret signatures and resolves by channel; WhatsApp verifies X-Hub-Signature-256 and resolves by Phone Number ID; Mattermost resolves by outgoing webhook token; Discord receives MESSAGE_CREATE through Gateway v10; Satori receives message-created through /v1/events; Feishu verifies signatures, decrypts events, and resolves by App ID; DingTalk matches accounts with timestamp/sign; WeChat Official Accounts use Token/SHA1 verification. Normalized messages enter one shared chat pipeline.
+4. **Platform integrations:** `src/server/protocols/` is split by protocol. QQ validates Ed25519 signatures and resolves accounts by AppID; OneBot verifies optional HMAC-SHA1 report signatures and resolves by self_id; Telegram resolves by secret_token; Slack verifies X-Slack-Signature and resolves by App ID; LINE verifies Channel Secret signatures and resolves by channel; WhatsApp verifies X-Hub-Signature-256 and resolves by Phone Number ID; Mattermost resolves by outgoing webhook token; Discord receives MESSAGE_CREATE through Gateway v10; Satori receives message-created through /v1/events; KOOK receives channel and direct events through its gateway; WeCom verifies SHA1 signatures and decrypts AES payloads; Feishu verifies signatures, decrypts events, and resolves by App ID; DingTalk matches accounts with timestamp/sign; WeChat Official Accounts use Token/SHA1 verification. Normalized messages enter one shared chat pipeline.
 5. **Chat pipeline:** `src/server/plugins/chatbot/runtime.ts` composes stores and handlers. `handler.ts` resolves conversation policies and permissions, calls providers, executes permitted tools, and sends replies through `protocols/sender.ts` according to the account protocol.
 6. **Data access:** Repository/store interfaces isolate configuration, context, cost, logs, and media assets from platform storage APIs.
 

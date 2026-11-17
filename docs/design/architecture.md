@@ -7,9 +7,9 @@
      │                       │
      └──管理 API + session──> Hono API Router
                               ├──账号/插件/策略管理
-QQ/OneBot/Telegram/Slack/LINE/WhatsApp/飞书/钉钉/Mattermost/微信 ──Webhook──> ├──认证/初始化/日志/会话运行路由
+QQ/OneBot/Telegram/Slack/LINE/WhatsApp/企业微信/飞书/钉钉/Mattermost/微信 ──Webhook──> ├──认证/初始化/日志/会话运行路由
                               └──各平台签名校验与消息归一化
-Discord/Satori ──WebSocket──> ChatGatewayDurableObject ──> 同一聊天处理链
+Discord/Satori/KOOK ──WebSocket──> ChatGatewayDurableObject ──> 同一聊天处理链
                                          │
                                   Chatbot Runtime
                               ├──策略与权限解析
@@ -30,7 +30,7 @@ Discord/Satori ──WebSocket──> ChatGatewayDurableObject ──> 同一聊
 1. **平台入口**：`src/platform/cloudflare/worker.ts`、`src/platform/edgeone/entry.ts`、`src/platform/esa/entry.ts` 及 `src/server/local.ts` 建立平台环境。Cloudflare Worker 另外处理静态资源、Gateway Durable Object 维护和 scheduled 日志清理。
 2. **共享应用**：`src/server/app.ts` 挂载 `/api` 管理路由与 `/webhook/qq`、`/webhook/feishu`、`/webhook/dingtalk`、`/webhook/wechat` 回调。应用 middleware 识别 `API_METHOD`，非 Cloudflare 平台拒绝 WebSocket 模式。
 3. **管理 API**：`src/server/routes/index.ts` 统一认证和路由注册；插件、账号、群聊策略、供应商、价格、日志和会话状态由各 route 管理。管理 API 在服务端执行 session、同源与作用域校验。
-4. **平台接入**：`src/server/protocols/` 按协议拆分。QQ 校验 Ed25519 签名并按 AppID 定位账号；OneBot 校验可选的 HMAC-SHA1 上报签名并按 self_id 定位账号；Telegram 用 secret_token 定位账号；Slack 校验 X-Slack-Signature 并按 App ID 定位账号；LINE 用 Channel Secret 签名定位账号；WhatsApp 校验 X-Hub-Signature-256 并按 Phone Number ID 定位账号；Mattermost 用传出 Webhook Token 定位账号；Discord 通过 Gateway v10 接收 MESSAGE_CREATE；Satori 通过 /v1/events 接收 message-created；飞书校验签名、解密事件并按 App ID 定位账号；钉钉用 timestamp/sign 匹配账号；微信公众号用 Token/SHA1 校验。归一化后的消息进入同一聊天处理链。
+4. **平台接入**：`src/server/protocols/` 按协议拆分。QQ 校验 Ed25519 签名并按 AppID 定位账号；OneBot 校验可选的 HMAC-SHA1 上报签名并按 self_id 定位账号；Telegram 用 secret_token 定位账号；Slack 校验 X-Slack-Signature 并按 App ID 定位账号；LINE 用 Channel Secret 签名定位账号；WhatsApp 校验 X-Hub-Signature-256 并按 Phone Number ID 定位账号；Mattermost 用传出 Webhook Token 定位账号；Discord 通过 Gateway v10 接收 MESSAGE_CREATE；Satori 通过 /v1/events 接收 message-created；KOOK 通过 Gateway 接收频道/私聊事件；企业微信校验 SHA1 签名并 AES 解密回调；飞书校验签名、解密事件并按 App ID 定位账号；钉钉用 timestamp/sign 匹配账号；微信公众号用 Token/SHA1 校验。归一化后的消息进入同一聊天处理链。
 5. **聊天执行链**：`src/server/plugins/chatbot/runtime.ts` 组装持久化 stores 和 handler；`handler.ts` 解析会话策略与权限，调用 provider，执行允许的工具，然后通过 `protocols/sender.ts` 按账号协议发送回复。
 6. **数据访问**：业务逻辑通过 repository/store 接口读取配置、上下文、成本、日志和媒体素材；平台 adapter 隔离具体存储 API。
 

@@ -43,6 +43,10 @@ describe('app runtime routing', () => {
     expect(whatsappVerify.status).toBe(503);
     const mattermost = await createApp().request('/webhook/mattermost', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(mattermost.status).toBe(401);
+    const wecom = await createApp().request('/webhook/wecom', { method: 'POST', headers: { 'content-type': 'text/xml' }, body: '<xml></xml>' });
+    expect(wecom.status).toBe(401);
+    const wecomVerify = await createApp().request('/webhook/wecom');
+    expect(wecomVerify.status).toBe(403);
   });
 
   it('rejects websocket mode outside Cloudflare before routing', async () => {

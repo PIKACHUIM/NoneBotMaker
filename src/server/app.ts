@@ -11,6 +11,7 @@ import { createSlackWebhookRouter } from './protocols/slack/webhook';
 import { createLineWebhookRouter } from './protocols/line/webhook';
 import { createWhatsAppWebhookRouter } from './protocols/whatsapp/webhook';
 import { createMattermostWebhookRouter } from './protocols/mattermost/webhook';
+import { createWeComWebhookRouter } from './protocols/wecom/webhook';
 import type { ChatAccountContext, ChatPlatformMessage } from './protocols/types';
 import { sendChatMedia, sendChatText } from './protocols/sender';
 import { createPersistentChatbotStores, createStoredChatbotHandler } from './plugins/chatbot/runtime';
@@ -52,6 +53,7 @@ export function createApp() {
   app.route('/', createLineWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createWhatsAppWebhookRouter({ handleMessage: handleInboundMessage }));
   app.route('/', createMattermostWebhookRouter({ handleMessage: handleInboundMessage }));
+  app.route('/', createWeComWebhookRouter({ handleMessage: handleInboundMessage }));
   return app;
 }
 

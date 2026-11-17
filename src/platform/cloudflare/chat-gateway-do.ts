@@ -7,6 +7,8 @@ import { createRepository } from '../../server/storage/repository';
 import { normalizeDiscordMessage, type DiscordGatewayPacket } from '../../server/protocols/discord/message';
 import { normalizeSatoriEvent, type SatoriEvent, type SatoriSignal } from '../../server/protocols/satori/message';
 import { satoriEventsUrl } from '../../server/protocols/satori/api';
+import { getKookGatewayUrl } from '../../server/protocols/kook/api';
+import { normalizeKookEvent, type KookEvent } from '../../server/protocols/kook/message';
 
 const DISCORD_GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 // GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
@@ -18,7 +20,7 @@ const DEDUPE_RETENTION_MS = 10 * 60_000;
 const MAX_RECENT_EVENTS = 400;
 const SATORI_HEARTBEAT_MS = 10_000;
 
-const GATEWAY_PROTOCOLS = new Set(['discord', 'satori']);
+const GATEWAY_PROTOCOLS = new Set(['discord', 'satori', 'kook']);
 
 interface DurableStorageData {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -80,6 +82,7 @@ export class ChatGatewayDurableObject {
   private accountId?: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private heartbeatInterval = 41_250;
+  private gatewayProtocol?: 'discord' | 'satori' | 'kook';
   private awaitingHeartbeatAck = false;
   private reconnectAttempt = 0;
   private lastSequence = 0;
@@ -150,6 +153,8 @@ export class ChatGatewayDurableObject {
       await this.state.storage.delete('discordSession');
       await this.state.storage.delete('sequence');
       await this.state.storage.delete('satoriSn');
+      await this.state.storage.delete('kookSession');
+      await this.state.storage.delete('kookSn');
       await this.state.storage.put('accountVersion', version);
     }
 
@@ -160,10 +165,12 @@ export class ChatGatewayDurableObject {
       return;
     }
     if (account.protocol === 'discord') await this.connectDiscord(account);
-    else await this.connectSatori(account);
+    else if (account.protocol === 'satori') await this.connectSatori(account);
+    else await this.connectKook(account);
   }
 
   private async connectDiscord(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'discord';
     const session = await this.state.storage.get<DiscordSession>('discordSession');
     this.lastSequence = await this.state.storage.get<number>('sequence') ?? 0;
     const base = session?.resumeUrl || DISCORD_GATEWAY_URL;
@@ -293,6 +300,7 @@ export class ChatGatewayDurableObject {
   }
 
   private async connectSatori(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'satori';
     this.lastSequence = await this.state.storage.get<number>('satoriSn') ?? 0;
     const url = satoriEventsUrl(account);
     const socket = new WebSocket(url);
@@ -341,6 +349,73 @@ export class ChatGatewayDurableObject {
     if (message) await this.handleMessage(account, message);
   }
 
+
+  private async connectKook(account: ChatAccountContext): Promise<void> {
+    this.gatewayProtocol = 'kook';
+    const session = await this.state.storage.get<{ sessionId?: unknown }>('kookSession');
+    this.lastSequence = await this.state.storage.get<number>('kookSn') ?? 0;
+    const url = await getKookGatewayUrl(account);
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      if (typeof session?.sessionId === 'string' && session.sessionId && this.lastSequence > 0) {
+        this.sendPacket({ s: 4, sn: this.lastSequence, session_id: session.sessionId });
+      }
+    });
+    socket.addEventListener('message', (event) => {
+      this.messageQueue = this.messageQueue
+        .then(() => this.handleKookFrame(account, event.data))
+        .catch(async (error) => {
+          console.error('KOOK gateway frame failed.', errorMessage(error));
+          await this.closeSocket();
+          await this.scheduleReconnect();
+        });
+      this.state.waitUntil(this.messageQueue);
+    });
+    socket.addEventListener('close', () => {
+      if (this.socket !== socket) return;
+      this.clearHeartbeat();
+      this.socket = undefined;
+      this.state.waitUntil(this.scheduleReconnect());
+    });
+    socket.addEventListener('error', () => socket.close());
+    this.startHeartbeat(30_000);
+    await this.scheduleMaintenance();
+  }
+
+  private async handleKookFrame(account: ChatAccountContext, data: string | ArrayBuffer | Blob): Promise<void> {
+    const text = typeof data === 'string' ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data);
+    const frame = JSON.parse(text) as { s?: unknown; d?: unknown; sn?: unknown };
+    const signal = typeof frame.s === 'number' ? frame.s : -1;
+
+    if (signal === 1) {
+      const hello = frame.d as { code?: unknown; session_id?: unknown } | null;
+      if (hello?.code !== 0) throw new Error('KOOK gateway handshake failed.');
+      if (typeof hello.session_id === 'string' && hello.session_id) {
+        await this.state.storage.put('kookSession', { sessionId: hello.session_id });
+      }
+      this.reconnectAttempt = 0;
+      this.startHeartbeat(30_000);
+      await this.scheduleMaintenance();
+      return;
+    }
+    if (signal === 5) {
+      await this.closeSocket();
+      await this.scheduleReconnect();
+      return;
+    }
+    if (signal === 3 || signal === 6) return;
+    if (signal !== 0) return;
+
+    const sn = typeof frame.sn === 'number' && Number.isFinite(frame.sn) ? frame.sn : this.lastSequence;
+    if (sn !== this.lastSequence) {
+      this.lastSequence = sn;
+      await this.state.storage.put('kookSn', sn);
+    }
+    const message = normalizeKookEvent((frame.d ?? {}) as KookEvent, account, account.appId, Date.now());
+    if (message) await this.handleMessage(account, message);
+  }
+
   private async handleMessage(account: ChatAccountContext, message: ChatPlatformMessage): Promise<void> {
     if (await this.wasProcessed(message.eventId ?? message.id)) return;
     const handler = createStoredChatbotHandler(this.env, {
@@ -381,7 +456,11 @@ export class ChatGatewayDurableObject {
 
   private sendHeartbeat(): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-    if (this.heartbeatInterval <= SATORI_HEARTBEAT_MS) {
+    if (this.gatewayProtocol === 'kook') {
+      this.sendPacket({ s: 2, sn: this.lastSequence });
+      return;
+    }
+    if (this.gatewayProtocol === 'satori') {
       this.sendPacket({ op: 1 });
       return;
     }

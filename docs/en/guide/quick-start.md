@@ -59,8 +59,9 @@ https://<worker-domain>/webhook/slack    Slack
 https://<worker-domain>/webhook/line     LINE
 https://<worker-domain>/webhook/whatsapp WhatsApp Cloud API
 https://<worker-domain>/webhook/mattermost Mattermost
+https://<worker-domain>/webhook/wecom   WeCom
 
-Discord and Satori use Cloudflare Durable Object WebSockets and need no callback URL; they are unavailable on EdgeOne and Alibaba Cloud ESA.
+Discord, Satori, and KOOK use Cloudflare Durable Object WebSockets and need no callback URL; they are unavailable on EdgeOne and Alibaba Cloud ESA. WeCom also requires its trusted IP list to include the service egress IP.
 ```
 
 In the admin console, create a platform account and a conversation policy. Store credentials in the protected account settings. Enter the group/private external ID in the policy and select a provider and model. Preserve the signature headers and original request body each platform requires. See [Chat platform setup](/en/guide/chat-platforms) for permissions, event subscriptions, and limitations.

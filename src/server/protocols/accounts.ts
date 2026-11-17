@@ -64,6 +64,11 @@ export function toChatAccountContext(account: BotAccountRecord, plugin: JsonObje
     }
   }
   if (protocol.id === 'discord' && !/^\d{15,25}$/.test(stringValue(normalized.botId))) return null;
+  if (protocol.id === 'wecom' && (
+    !/^[A-Za-z0-9_-]{5,64}$/.test(stringValue(normalized.corpId)) ||
+    !/^\d{1,12}$/.test(stringValue(normalized.agentId)) ||
+    !/^[A-Za-z0-9+/]{43}$/.test(stringValue(normalized.encodingAESKey))
+  )) return null;
   const appId = stringValue(normalized[protocol.identifierField]).trim();
   const secretField = protocol.secretField ?? 'appSecret';
   const appSecret = stringValue(normalized[secretField]) || undefined;

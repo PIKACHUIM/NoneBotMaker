@@ -137,6 +137,34 @@ Notes:
 - Text only; media tools report an unsupported error.
 - Groups require an @mention; reconnects resume with the last `sn`.
 
+## KOOK
+
+1. Create an app in the [KOOK developer center](https://developer.kookapp.cn/), choose WebSocket as the bot connection mode, and note the Bot Token and Bot ID.
+2. Generate an invite link, add the bot to the server, and grant read/send message permissions.
+3. In the admin console, add an account, choose KOOK, and enter the Bot ID and Bot Token.
+4. Channel conversations use the channel ID; direct messages use the user ID.
+
+Notes:
+
+- Uses the gateway WebSocket with a 30-second heartbeat and `sn` resume; requires a Cloudflare Durable Object.
+- Channels require an @mention; direct messages are always answered.
+- Text is sent as KMarkdown; images and files are uploaded to `/asset/create` first and sent as Markdown links.
+
+## WeCom
+
+1. Create a self-built app in the WeCom admin console and note the CorpID (My Enterprise), AgentID, and app Secret.
+2. Under **Receive Messages → Set API Receiving**, set the URL to `https://<domain>/webhook/wecom`, enter a Token and a 43-character EncodingAESKey, and choose **safe mode**.
+3. Add the service egress IP to the app's trusted IP list, otherwise `access_token` cannot be obtained.
+4. In the admin console, add an account, choose WeCom, and enter the CorpID, AgentID, Secret, Token, and EncodingAESKey.
+5. Conversation external IDs use the member UserID.
+
+Notes:
+
+- Callbacks use SHA1 signatures and AES-256-CBC decryption, with the CorpID checked against the account.
+- Only one-to-one app messages are supported; app callbacks do not receive group chats.
+- Replies use the app message API for text, images, voice, video, and files; media is uploaded first and sent by media_id.
+- Serverless egress IPs are not fixed and may not satisfy the trusted IP allowlist. Verify with a test enterprise before going live.
+
 ## Feishu / Lark
 
 1. Create an enterprise self-built app on [Feishu Open Platform](https://open.feishu.cn/) and note the App ID and App Secret.
@@ -204,7 +232,27 @@ The table maps the chat protocol adapters documented by NoneBot2. It does not co
 | DoDo | ❌ | Long-lived bot connection protocol, not implemented |
 | Kritor | ❌ | Separate WebSocket/TCP standard, not implemented |
 | Milky | ❌ | Separate WebSocket standard, not implemented |
-| DingTalk / WeChat Official Account / Slack / LINE / WhatsApp / Mattermost | ✅ | Additional native Webhook protocols in this project, see above |
+| DingTalk / WeCom / WeChat Official Account / Slack / LINE / WhatsApp / Mattermost | ✅ | Additional native Webhook protocols in this project, see above |
+| KOOK | ✅ | Gateway WebSocket plus REST, using a Cloudflare Durable Object |
+
+## Common chat apps
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| QQ / QQ Guild | ✅ | Official bot Webhooks or the Cloudflare Gateway |
+| WeCom | ✅ | Self-built app direct messages; app callbacks do not receive groups |
+| Personal WeChat | ❌ | No official bot API; third-party protocols are unstable and risk account bans |
+| DingTalk / Feishu | ✅ | See above |
+| Telegram / Discord / Slack / WhatsApp / LINE / KOOK / Mattermost | ✅ | See the per-platform limits above |
+| DoDo | ⏳ | Uses a dedicated WebSocket and event envelope; protocol details still being completed |
+| Matrix | ⏳ | Needs `/sync` long polling or an application service |
+| Microsoft Teams | ⏳ | Bot Framework JWT validation, planned |
+| Google Chat | ⏳ | Google JWT validation, planned |
+| VK | ⏳ | Callback API, planned |
+| Mastodon / Misskey | ⏳ | Streaming API / Webhook, planned |
+| Zulip / Rocket.Chat | ⏳ | Outgoing Webhooks, planned |
+| Signal / Instagram / Messenger | ❌ | No general bot API or requires extra review |
+| Douyin / Xiaohongshu | ❌ | No public general bot API |
 
 ## Troubleshooting
 

@@ -543,6 +543,20 @@ async function normalizeAccountCredentials(
       throw new ApiError(400, 'invalid_endpoint');
     }
   }
+  if (protocol.id === 'kook' && !(typeof normalized.botId === 'string' && normalized.botId.trim().length >= 3)) {
+    throw new ApiError(400, 'invalid_botId');
+  }
+  if (protocol.id === 'wecom') {
+    if (!(typeof normalized.corpId === 'string' && /^[A-Za-z0-9_-]{5,64}$/.test(normalized.corpId))) {
+      throw new ApiError(400, 'invalid_corpId');
+    }
+    if (!(typeof normalized.agentId === 'string' && /^\d{1,12}$/.test(normalized.agentId))) {
+      throw new ApiError(400, 'invalid_agentId');
+    }
+    if (!(typeof normalized.encodingAESKey === 'string' && /^[A-Za-z0-9+/]{43}$/.test(normalized.encodingAESKey))) {
+      throw new ApiError(400, 'invalid_encodingAESKey');
+    }
+  }
   const missing = missingRequiredField(protocol.credentialFields, normalized);
   if (missing) throw new ApiError(400, `missing_${missing.key}`);
   record.credentials = normalized;

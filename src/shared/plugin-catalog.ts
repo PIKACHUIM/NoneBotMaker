@@ -538,6 +538,87 @@ const satoriCredentialFields: PluginFieldDefinition[] = [
   },
 ];
 
+const kookCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'botId',
+    type: 'text',
+    required: true,
+    label: { zh: '机器人 ID', en: 'Bot ID' },
+    description: {
+      zh: 'KOOK 开发者中心机器人页面的 Bot ID，用于账号标识与 @ 检测。',
+      en: 'The Bot ID shown on the KOOK developer portal, used as the account identifier and for mention checks.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'Bot Token', en: 'Bot Token' },
+    description: {
+      zh: 'KOOK 机器人 Token，用于 Gateway 与 REST API；保存时留空保留已有值。',
+      en: 'The KOOK bot token for the gateway and REST API. Leave empty to keep the stored value.',
+    },
+  },
+];
+
+const wecomCredentialFields: PluginFieldDefinition[] = [
+  {
+    key: 'corpId',
+    type: 'text',
+    required: true,
+    label: { zh: 'CorpID', en: 'CorpID' },
+    description: {
+      zh: '企业微信「我的企业 → 企业信息」中的 CorpID，用于账号标识与回调解密校验。',
+      en: 'The CorpID from WeCom enterprise settings, used as the account identifier and to validate decrypted callbacks.',
+    },
+    placeholder: { zh: '例如：ww1234567890abcdef', en: 'For example: ww1234567890abcdef' },
+  },
+  {
+    key: 'agentId',
+    type: 'text',
+    required: true,
+    label: { zh: 'AgentID', en: 'AgentID' },
+    description: {
+      zh: '自建应用的 AgentID（数字），用于发送应用消息。',
+      en: 'The numeric AgentID of the self-built app, used when sending app messages.',
+    },
+  },
+  {
+    key: 'secret',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '应用 Secret', en: 'App Secret' },
+    description: {
+      zh: '自建应用的 Secret，用于获取 access_token；保存时留空保留已有值。',
+      en: 'The app secret used for access tokens. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'token',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: '回调 Token', en: 'Callback Token' },
+    description: {
+      zh: '「接收消息服务器配置」中的 Token，用于校验回调签名；保存时留空保留已有值。',
+      en: 'The Token from the receive-message server configuration, used to verify callback signatures. Leave empty to keep the stored value.',
+    },
+  },
+  {
+    key: 'encodingAESKey',
+    type: 'text',
+    required: true,
+    secret: true,
+    label: { zh: 'EncodingAESKey', en: 'EncodingAESKey' },
+    description: {
+      zh: '「接收消息服务器配置」中的 43 位 EncodingAESKey，用于解密回调与校验 CorpID；保存时留空保留已有值。',
+      en: 'The 43-character EncodingAESKey from the receive-message configuration, used to decrypt callbacks and check the CorpID. Leave empty to keep the stored value.',
+    },
+  },
+];
+
 const builtinChatProtocols: ChatProtocolDefinition[] = [
   {
     id: 'qq',
@@ -699,6 +780,33 @@ const builtinChatProtocols: ChatProtocolDefinition[] = [
     credentialFields: satoriCredentialFields,
     proactive: true,
   },
+  {
+    id: 'kook',
+    name: { zh: 'KOOK', en: 'KOOK' },
+    description: {
+      zh: 'KOOK（开黑啦）Gateway WebSocket，支持频道与私聊文本、图片与文件；需要 Cloudflare Durable Object。',
+      en: 'KOOK gateway WebSocket for channel and direct text, image, and file messages; requires a Cloudflare Durable Object.',
+    },
+    identifierField: 'botId',
+    secretField: 'token',
+    transport: 'websocket',
+    webhookPath: '',
+    credentialFields: kookCredentialFields,
+    proactive: true,
+  },
+  {
+    id: 'wecom',
+    name: { zh: '企业微信', en: 'WeCom' },
+    description: {
+      zh: '企业微信自建应用回调（加密模式），通过应用消息接口回复文本、图片、语音、视频与文件；仅一对一。',
+      en: 'WeCom self-built app callbacks in encrypted mode, replying with app messages for text, image, voice, video and files; direct messages only.',
+    },
+    identifierField: 'corpId',
+    secretField: 'secret',
+    webhookPath: '/webhook/wecom',
+    credentialFields: wecomCredentialFields,
+    proactive: true,
+  },
 ];
 
 const chatbotDefinition: PluginDefinition = {
@@ -706,8 +814,8 @@ const chatbotDefinition: PluginDefinition = {
   protocols: builtinChatProtocols.map((protocol) => protocol.id),
   name: { zh: '群聊助手', en: 'Group Chatbot' },
   description: {
-    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
-    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
+    zh: '接收 QQ、OneBot、Telegram、Slack、LINE、WhatsApp、Discord、Satori、KOOK、企业微信、飞书、钉钉、Mattermost 和微信公众号消息，按各会话的策略调用模型与工具并回复。',
+    en: 'Receives QQ, OneBot, Telegram, Slack, LINE, WhatsApp, Discord, Satori, KOOK, WeCom, Feishu, DingTalk, Mattermost and WeChat Official Account messages, applying each conversation’s model and tool policies.',
   },
   configFields: [
     text('web_search_engine', ['搜索方式', 'Search engine'], [

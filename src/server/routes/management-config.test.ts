@@ -137,7 +137,7 @@ describe('configuration scopes and defaults', () => {
   it('declares two credentials, no unimplemented plugin settings, and localized group/log fields', () => {
     const definition = pluginDefinition('elysia-best/plugin-chatbot')!;
     expect(definition.credentialFields.map((field) => field.key)).toEqual(['appId', 'appSecret']);
-    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori']);
+    expect(definition.protocols).toEqual(['qq', 'feishu', 'dingtalk', 'wechat', 'onebot', 'telegram', 'slack', 'line', 'whatsapp', 'mattermost', 'discord', 'satori', 'kook', 'wecom']);
     expect(definition.protocolDefinitions?.map((protocol) => [protocol.id, protocol.credentialFields.map((field) => field.key)])).toEqual([
       ['qq', ['appId', 'appSecret']],
       ['feishu', ['appId', 'appSecret', 'verificationToken', 'encryptKey']],
@@ -151,6 +151,8 @@ describe('configuration scopes and defaults', () => {
       ['mattermost', ['baseUrl', 'token', 'accessToken']],
       ['discord', ['botId', 'botToken']],
       ['satori', ['endpoint', 'platform', 'selfId', 'token']],
+      ['kook', ['botId', 'token']],
+      ['wecom', ['corpId', 'agentId', 'secret', 'token', 'encodingAESKey']],
     ]);
     expect(definition.configFields.map((field) => field.key)).toEqual(['web_search_engine', 'web_search_results', 'brave_api_key']);
     expect(definition.accountFields).toEqual([]);
@@ -797,6 +799,34 @@ describe('chat protocol credentials', () => {
     });
     expect(invalidSatori.status).toBe(400);
     expect(await json(invalidSatori)).toEqual({ error: 'invalid_endpoint' });
+  });
+
+  it('validates KOOK and WeCom credentials', async () => {
+    const setup = configuredApp();
+    const kook = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'kook', name: 'KOOK',
+      credentials: { botId: '10001', token: 'kook-token' },
+    });
+    expect(kook.status).toBe(201);
+    expect((await json(kook)).data).toMatchObject({ protocol: 'kook', credentials: { botId: '10001', token: '********' } });
+
+    const wecom = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'wecom', name: 'WeCom',
+      credentials: {
+        corpId: 'ww1234567890abcdef', agentId: '1000002', secret: 'app-secret',
+        token: 'callback-token', encodingAESKey: 'a'.repeat(43),
+      },
+    });
+    expect(wecom.status).toBe(201);
+    const invalidKey = await writeRequest(setup, '/accounts', {
+      pluginId: 'plugin-1', protocol: 'wecom', name: 'WeCom bad',
+      credentials: {
+        corpId: 'wwbad00000000001', agentId: '1000002', secret: 'app-secret',
+        token: 'callback-token', encodingAESKey: 'too-short',
+      },
+    });
+    expect(invalidKey.status).toBe(400);
+    expect(await json(invalidKey)).toEqual({ error: 'invalid_encodingAESKey' });
   });
 
   it('creates the generic runtime automatically when an account omits the plugin', async () => {

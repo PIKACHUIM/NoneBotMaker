@@ -137,6 +137,34 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 - 只发送文本；媒体工具会返回不支持。
 - 群聊中仅在 @ 机器人时触发；断线后会携带 `sn` 恢复会话。
 
+## KOOK
+
+1. 在 [KOOK 开发者中心](https://developer.kookapp.cn/) 创建应用，机器人连接模式选择 WebSocket，记录 Bot Token 与机器人 ID。
+2. 在「邀请链接」生成邀请并把机器人添加到服务器，授予读取与发送消息权限。
+3. 管理台新增账号 → 协议选 KOOK → 填写机器人 ID 与 Bot Token。
+4. 频道会话外部 ID 使用频道 ID，私聊使用用户 ID。
+
+说明：
+
+- 使用 Gateway WebSocket，30 秒心跳并支持 `sn` 续传；需要 Cloudflare Durable Object。
+- 频道内需 @ 机器人；私聊直接回复。
+- 文本按 KMarkdown 发送；图片和文件先上传到 `/asset/create`，再以 Markdown 链接发送。
+
+## 企业微信
+
+1. 企业微信管理后台创建自建应用，记录 CorpID（我的企业）、AgentID 与应用 Secret。
+2. 在应用「接收消息 → 设置 API 接收」填写 URL `https://<domain>/webhook/wecom`、Token 和 43 位 EncodingAESKey，消息加解密选择**安全模式**。
+3. 把服务出口 IP 加入应用的「企业可信 IP」，否则无法获取 `access_token`。
+4. 管理台新增账号 → 协议选企业微信 → 填写 CorpID、AgentID、Secret、Token 和 EncodingAESKey。
+5. 会话外部 ID 使用成员 UserID。
+
+说明：
+
+- 回调使用 SHA1 签名与 AES-256-CBC 解密，并按 CorpID 校验归属。
+- 仅支持应用与成员的一对一消息；企业微信应用回调不接收群聊消息。
+- 回复通过应用消息接口发送，支持文本、图片、语音、视频与文件；素材先上传再按 media_id 发送。
+- Serverless 出口 IP 不固定，可能无法满足可信 IP 白名单；上线前请用测试企业验证。
+
 ## 飞书 / Lark
 
 1. 在[飞书开放平台](https://open.feishu.cn/)创建企业自建应用，记录「凭证与基础信息」中的 App ID 和 App Secret。
@@ -204,7 +232,27 @@ Satori 通过 Koishi 等 SDK 把 QQ、Discord、Telegram 等平台统一成一�
 | DoDo | ❌ | Bot 长连接协议，未实现 |
 | Kritor | ❌ | 独立 WebSocket/TCP 标准，未实现 |
 | Milky | ❌ | 独立 WebSocket 标准，未实现 |
-| 钉钉 / 微信公众号 / Slack / LINE / WhatsApp / Mattermost | ✅ | 本项目额外支持的原生 Webhook 协议，见上文 |
+| 钉钉 / 企业微信 / 微信公众号 / Slack / LINE / WhatsApp / Mattermost | ✅ | 本项目额外支持的原生 Webhook 协议，见上文 |
+| KOOK | ✅ | Gateway WebSocket + REST，需要 Cloudflare Durable Object |
+
+## 常见聊天软件支持情况
+
+| 平台 | 状态 | 说明 |
+| --- | --- | --- |
+| QQ / QQ 频道 | ✅ | 官方机器人 Webhook 或 Cloudflare Gateway |
+| 企业微信 | ✅ | 自建应用一对一消息；应用回调不接收群聊 |
+| 微信个人号 | ❌ | 官方未提供机器人 API，第三方协议不稳定且有封号风险 |
+| 钉钉 / 飞书 | ✅ | 见上文 |
+| Telegram / Discord / Slack / WhatsApp / LINE / KOOK / Mattermost | ✅ | 见上文各自限制 |
+| DoDo | ⏳ | 使用专用 WebSocket 与事件封装，待补齐协议细节后接入 |
+| Matrix | ⏳ | 需要 `/sync` 长轮询或 Application Service |
+| Microsoft Teams | ⏳ | Bot Framework JWT 校验，计划中 |
+| Google Chat | ⏳ | 需要 Google JWT 校验，计划中 |
+| VK | ⏳ | Callback API，计划中 |
+| Mastodon / Misskey | ⏳ | 流式 API / Webhook，计划中 |
+| Zulip / Rocket.Chat | ⏳ | 传出 Webhook，计划中 |
+| Signal / Instagram / Messenger | ❌ | 无通用机器人 API 或需要额外审核，暂不支持 |
+| 抖音 / 小红书 | ❌ | 无公开通用机器人 API |
 
 ## 排查
 
