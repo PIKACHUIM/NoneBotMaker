@@ -146,6 +146,31 @@ describe('createChatbotHandler', () => {
     expect(state.runtimeActivity).toMatchObject({ phase: 'completed', reasoning: 'planned answer', reply: 'hello back', tools: [] });
   });
 
+  it('transcribes an attachment with the configured understanding model before the chat request', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://media.example/cat') return new Response('cat-bytes', { headers: { 'content-type': 'image/png' } });
+      if (url.includes('vision.example')) return Response.json({
+        candidates: [{ content: { parts: [{ text: '图片里是一只橘猫。' }] } }],
+        usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 8 },
+      });
+      return Response.json({ choices: [{ message: { content: '看到了，是橘猫' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const visionProvider = { ...provider, id: 'vision-provider', baseUrl: 'https://vision.example/v1', models: ['gemini-3.8-flash'] };
+    const { deps } = dependencies({
+      fetch,
+      findGroup: vi.fn(async () => ({ ...group, config: {
+        media_understanding_provider_id: 'vision-provider', media_understanding_model: 'gemini-3.8-flash',
+        media_understanding_mode: 'always', media_understanding_protocol: 'gemini',
+      } })),
+      findProvider: vi.fn(async (id) => id === 'vision-provider' ? visionProvider : provider),
+    });
+    await createChatbotHandler(deps)(account, message({ attachments: [{ type: 'image', url: 'https://media.example/cat', contentType: 'image/png' }] }));
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('vision.example/v1beta/models/gemini-3.8-flash:generateContent'))).toBe(true);
+    const chat = fetch.mock.calls.find(([url]) => String(url).includes('provider.example'))!;
+    expect(JSON.stringify(JSON.parse(String(chat[1]?.body)).messages)).toContain('图片里是一只橘猫。');
+  });
+
   it('sends a user-facing notice when the upstream model API fails', async () => {
     const { deps, sentReplies } = dependencies({ fetch: vi.fn(async () => new Response('bad gateway', { status: 502 })) });
     await expect(createChatbotHandler(deps)(account, message())).resolves.toBeUndefined();
@@ -531,19 +556,19 @@ describe('createChatbotHandler', () => {
     expect(deps.recordGroupCost).toHaveBeenCalledWith(expect.any(Object), 0.48, 1_000);
   });
 
-  it('hides the video tool when the provider only advertises image capability', async () => {
+  it('exposes the video tool even when the provider only advertises image input capability', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ choices: [{ message: { content: 'normal reply' } }] }));
     const toolRecord = { id: 'builtin-chat-generate-video', name: 'Video', description: '', enabled: true,
       config: { kind: 'builtin', name: 'chat_generate_video', providerId: 'image-provider', model: 'H3-768P',
         protocol: 'openai', resolution: '768P', duration: 6, fallbackCostPerSecond: 0.06 }, createdAt: '', updatedAt: '' };
-    const { deps } = dependencies({ fetch,
+    const { deps } = dependencies({ fetch, sendMedia: vi.fn(async () => undefined),
       findGroup: vi.fn(async () => ({ ...group, config: { media_video_enabled: true }, toolIds: [toolRecord.id] })),
       findTool: vi.fn(async (id) => id === toolRecord.id ? toolRecord : null),
       findProvider: vi.fn(async (id) => id === 'image-provider' ? { ...provider, id, models: ['H3-768P'], mediaCapabilities: ['image' as const] } : provider),
     });
     await createChatbotHandler(deps)(account, message());
     const request = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { tools?: Array<{ function: { name: string } }> };
-    expect(request.tools?.map((item) => item.function.name)).not.toContain('chat_generate_video');
+    expect(request.tools?.map((item) => item.function.name)).toContain('chat_generate_video');
   });
 
   it('never exposes a disabled built-in tool even when its identity grants the function', async () => {
@@ -1069,7 +1094,7 @@ describe('createChatbotHandler', () => {
     });
     const sendMedia = vi.fn(async () => undefined);
     const setState = vi.fn(async () => undefined);
-    const { deps, writtenLogs, sentReplies } = dependencies({ fetch: applicationFetch, sendMedia, setState, logRecord: 'true', findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['speech' as const], priceMultiplier: 2 })),
+    const { deps, writtenLogs, sentReplies } = dependencies({ fetch: applicationFetch, sendMedia, setState, logRecord: 'true', findProvider: vi.fn(async () => ({ ...provider, mediaCapabilities: ['image' as const], priceMultiplier: 2 })),
       findPrice: vi.fn(async (model, unit) => ({ id: unit!, name: model, model, unit: unit!, currency: 'USD' as const, enabled: true, inputCostPerMillion: unit === 'characters' ? 10 : 1, outputCostPerMillion: 2, createdAt: '', updatedAt: '' })) });
     await createChatbotHandler(deps)({ ...account, pluginConfig: { voice_model: 'tts-1' } }, message({ text: '请用语音回复' }));
     expect(applicationFetch.mock.calls.some(([url]) => String(url).endsWith('/audio/speech'))).toBe(true);
